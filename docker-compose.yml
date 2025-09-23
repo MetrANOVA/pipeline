@@ -8,4 +8,6 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env
+    volumes:
+      - ./certificates:/app/certificates:ro
     restart: always
