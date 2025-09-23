@@ -1,0 +1,7 @@
+.DS_Store
+.*.swn
+.*.swo
+.*.swp
+.vscode/
+.env
+certificates/
