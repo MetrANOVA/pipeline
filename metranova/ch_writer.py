@@ -36,7 +36,7 @@ class BaseOutput:
 class JSONOutput(BaseOutput):
     def _process_message(self, msg):
         """Process individual Kafka message"""
-        logger.info(f"Received message from topic {msg.topic()}, partition {msg.partition()}, offset {msg.offset()}")
+        logger.debug(f"Received message from topic {msg.topic()}, partition {msg.partition()}, offset {msg.offset()}")
         
         # Decode message
         try:
@@ -66,7 +66,7 @@ class JSONOutput(BaseOutput):
         """Output message to console as formatted JSON"""
         if value:
             formatted_value = json.dumps(value, indent=2, sort_keys=True)
-            logger.info(f"Processing message with data:\n{formatted_value}")
+            logger.debug(f"Processing message with data:\n{formatted_value}")
 
 class BaseClickHouseOutput(JSONOutput):
     def __init__(self):
@@ -135,7 +135,7 @@ class BaseClickHouseOutput(JSONOutput):
     def _create_table_if_not_exists(self):
         """Create the target table if it doesn't exist"""
         if self.create_table_cmd is None:
-            logger.debug("No create_table_cmd defined, skipping table creation")
+            logger.info("No create_table_cmd defined, skipping table creation")
             return
         
         try:
