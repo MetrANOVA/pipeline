@@ -16,7 +16,15 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application code
-COPY ch_writer.py .
+COPY bin/ ./bin/
+COPY metranova/ ./metranova/
+
+# Create __init__.py file to make metranova a proper Python package
+RUN touch ./metranova/__init__.py
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 
 # Create a non-root user for security
 RUN useradd --create-home --shell /bin/bash app \
@@ -24,4 +32,4 @@ RUN useradd --create-home --shell /bin/bash app \
 USER app
 
 # Run the ClickHouse writer
-CMD ["python", "ch_writer.py"]
+CMD ["python", "bin/run.py"]

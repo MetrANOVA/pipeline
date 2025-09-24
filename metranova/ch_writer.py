@@ -11,7 +11,7 @@ import threading
 from typing import Dict, Any, Optional, List
 from confluent_kafka import Consumer, KafkaError
 import clickhouse_connect
-import ssl
+import sys
 
 # Configure logging
 log_level = logging.INFO
@@ -28,6 +28,10 @@ class BaseOutput:
     def _process_message(self, msg):
         """Process individual Kafka message"""
         raise NotImplementedError("Subclasses should implement this method")
+
+    def prepare(self):
+        """Prepare output method (e.g., create tables)"""
+        pass
     
 class JSONOutput(BaseOutput):
     def _process_message(self, msg):
@@ -47,8 +51,7 @@ class JSONOutput(BaseOutput):
                 'topic': msg.topic(),
                 'partition': msg.partition(),
                 'offset': msg.offset(),
-                'key': key,
-                'timestamp': msg.timestamp()[1] / 1000 if msg.timestamp()[1] > 0 else time.time()  # Convert to seconds
+                'key': key
             }
             
             self._output_message(value, msg_metadata)     
@@ -65,8 +68,15 @@ class JSONOutput(BaseOutput):
             formatted_value = json.dumps(value, indent=2, sort_keys=True)
             logger.info(f"Processing message with data:\n{formatted_value}")
 
-class ClickHouseOutput(JSONOutput):
+class BaseClickHouseOutput(JSONOutput):
     def __init__(self):
+        # setup logger
+        self.logger = logger
+
+        #Override values in child class
+        self.create_table_cmd = None
+        self.column_names = []
+
         # ClickHouse configuration from environment
         self.host = os.getenv('CLICKHOUSE_HOST', 'localhost')
         self.port = int(os.getenv('CLICKHOUSE_PORT', '8123'))
@@ -74,7 +84,7 @@ class ClickHouseOutput(JSONOutput):
         self.username = os.getenv('CLICKHOUSE_USERNAME', 'default')
         self.password = os.getenv('CLICKHOUSE_PASSWORD', '')
         self.table = os.getenv('CLICKHOUSE_TABLE', 'kafka_messages')
-        
+
         # Batching configuration
         self.batch_size = int(os.getenv('CLICKHOUSE_BATCH_SIZE', '1000'))
         self.batch_timeout = float(os.getenv('CLICKHOUSE_BATCH_TIMEOUT', '30.0'))  # seconds
@@ -84,9 +94,19 @@ class ClickHouseOutput(JSONOutput):
         self.batch: List[Dict[str, Any]] = []
         self.batch_lock = threading.Lock()
         self.last_flush_time = time.time()
-        
+    
+    def prepare(self):
+        """Prepare ClickHouse output (e.g., create table)"""
         self._connect_clickhouse()
         self._start_flush_timer()
+    
+    def _build_message(self, value: dict, msg_metadata: dict) -> dict:
+        """Build message dictionary for ClickHouse insertion"""
+        raise NotImplementedError("Subclasses should implement this method")
+    
+    def _message_to_columns(self, message: dict) -> list:
+        """Convert message dictionary to list of column values"""
+        raise NotImplementedError("Subclasses should implement this method")
     
     def _connect_clickhouse(self):
         """Initialize ClickHouse connection"""
@@ -114,21 +134,12 @@ class ClickHouseOutput(JSONOutput):
     
     def _create_table_if_not_exists(self):
         """Create the target table if it doesn't exist"""
-        create_table_sql = f"""
-        CREATE TABLE IF NOT EXISTS {self.table} (
-            timestamp DateTime64(3) DEFAULT now64(),
-            topic String,
-            partition UInt32,
-            offset UInt64,
-            key Nullable(String),
-            value String,
-            message_timestamp DateTime64(3) DEFAULT now64()
-        ) ENGINE = MergeTree()
-        ORDER BY (timestamp, topic, partition)
-        """
+        if self.create_table_cmd is None:
+            logger.debug("No create_table_cmd defined, skipping table creation")
+            return
         
         try:
-            self.client.command(create_table_sql)
+            self.client.command(self.create_table_cmd)
             logger.info(f"Table {self.table} is ready")
         except Exception as e:
             logger.error(f"Failed to create table {self.table}: {e}")
@@ -156,15 +167,11 @@ class ClickHouseOutput(JSONOutput):
             return
         
         # Prepare message data for ClickHouse
-        message_data = {
-            'topic': msg_metadata.get('topic', '') if msg_metadata else '',
-            'partition': msg_metadata.get('partition', 0) if msg_metadata else 0,
-            'offset': msg_metadata.get('offset', 0) if msg_metadata else 0,
-            'key': msg_metadata.get('key') if msg_metadata else None,
-            'value': json.dumps(value, sort_keys=True),
-            'message_timestamp': msg_metadata.get('timestamp') if msg_metadata else time.time()
-        }
+        message_data = self._build_message(value, msg_metadata)
+        if message_data is None:
+            return
         
+        #append to batch
         with self.batch_lock:
             self.batch.append(message_data)
             
@@ -181,20 +188,13 @@ class ClickHouseOutput(JSONOutput):
             # Prepare data for insertion
             data_to_insert = []
             for msg in self.batch:
-                data_to_insert.append([
-                    msg['topic'],
-                    msg['partition'], 
-                    msg['offset'],
-                    msg['key'],
-                    msg['value'],
-                    msg['message_timestamp']
-                ])
+                data_to_insert.append(self._message_to_columns(msg))
             
             # Insert batch into ClickHouse
             self.client.insert(
                 table=self.table,
                 data=data_to_insert,
-                column_names=['topic', 'partition', 'offset', 'key', 'value', 'message_timestamp']
+                column_names=self.column_names
             )
             
             logger.info(f"Successfully inserted {len(self.batch)} messages into ClickHouse")
@@ -205,8 +205,11 @@ class ClickHouseOutput(JSONOutput):
             
         except Exception as e:
             logger.error(f"Failed to insert batch into ClickHouse: {e}")
-            # Keep messages in batch for retry (in production, you might want to implement a DLQ)
-    
+            logger.debug(f"table= {self.table}")
+            logger.debug(f"column_names= {self.column_names}")
+            logger.debug(f"data_to_insert= {data_to_insert}")
+            sys.exit(1)
+
     def close(self):
         """Close ClickHouse connection and flush remaining messages"""
         with self.batch_lock:
@@ -225,6 +228,8 @@ class KafkaSSLConsumer:
         self.consumer: Optional[Consumer] = None
         self.output = output
         self._setup_consumer()
+
+        self.output.prepare()
 
     def _setup_consumer(self):
         """Initialize Kafka consumer with SSL configuration"""
@@ -325,39 +330,3 @@ class KafkaSSLConsumer:
         if self.consumer:
             logger.info("Closing Kafka consumer...")
             self.consumer.close()
-
-
-def main():
-    """Main entry point"""
-    logger.info("Starting ClickHouse Writer Service")
-    
-    output = None
-    kafka_consumer = None
-    
-    try:
-        #determine output method
-        output_method = os.getenv('OUTPUT_METHOD', 'json').lower()
-        if output_method == 'clickhouse':
-            output = ClickHouseOutput()
-        else:
-            output = JSONOutput()
-
-        # Initialize Kafka consumer
-        kafka_consumer = KafkaSSLConsumer(output=output)
-
-        # Start consuming messages
-        kafka_consumer.consume_messages()
-        
-    except Exception as e:
-        logger.error(f"Application error: {e}")
-        raise
-    finally:
-        # Clean shutdown
-        if hasattr(output, 'close'):
-            output.close()
-        if kafka_consumer:
-            kafka_consumer._close_consumer()
-
-
-if __name__ == "__main__":
-    main()
