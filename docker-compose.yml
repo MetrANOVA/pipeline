@@ -11,3 +11,6 @@ services:
     volumes:
       - ./certificates:/app/certificates:ro
     restart: always
+    deploy:
+      mode: replicated
+      replicas: 10

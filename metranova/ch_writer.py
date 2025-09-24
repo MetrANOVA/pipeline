@@ -238,7 +238,9 @@ class KafkaSSLConsumer:
             bootstrap_servers = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
             topic = os.getenv('KAFKA_TOPIC', 'metranova_flow')
             group_id = os.getenv('KAFKA_CONSUMER_GROUP', 'ch-writer-group')
-            
+            #generate a client id based on random uuid
+            client_id = f"ch-writer-{os.urandom(4).hex()}"
+
             # SSL configuration
             ssl_ca_location = os.getenv('KAFKA_SSL_CA_LOCATION', '/app/certificates/ca-cert')
             ssl_certificate_location = os.getenv('KAFKA_SSL_CERTIFICATE_LOCATION', '/app/certificates/client-cert')
@@ -249,6 +251,7 @@ class KafkaSSLConsumer:
             consumer_config = {
                 'bootstrap.servers': bootstrap_servers,
                 'group.id': group_id,
+                'client.id': client_id,
                 'auto.offset.reset': os.getenv('KAFKA_AUTO_OFFSET_RESET', 'latest'),
                 'enable.auto.commit': os.getenv('KAFKA_ENABLE_AUTO_COMMIT', 'true').lower() == 'true',
                 'auto.commit.interval.ms': int(os.getenv('KAFKA_AUTO_COMMIT_INTERVAL_MS', '5000')),
@@ -284,6 +287,7 @@ class KafkaSSLConsumer:
             logger.info(f"Kafka consumer initialized for topic: {topic}")
             logger.info(f"Bootstrap servers: {bootstrap_servers}")
             logger.info(f"Group ID: {group_id}")
+            logger.info(f"Client ID: {client_id}")
             
         except Exception as e:
             logger.error(f"Failed to setup Kafka consumer: {e}")
