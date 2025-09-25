@@ -256,7 +256,7 @@ class KafkaSSLConsumer:
                 'group.id': group_id,
                 'client.id': client_id,
                 'auto.offset.reset': os.getenv('KAFKA_AUTO_OFFSET_RESET', 'latest'),
-                'auto.commit.enable': os.getenv('KAFKA_ENABLE_AUTO_COMMIT', 'true').lower() == 'true',
+                'enable.auto.commit': os.getenv('KAFKA_ENABLE_AUTO_COMMIT', 'true').lower() == 'true',
                 'auto.commit.interval.ms': int(os.getenv('KAFKA_AUTO_COMMIT_INTERVAL_MS', '5000')),
                 'session.timeout.ms': int(os.getenv('KAFKA_SESSION_TIMEOUT_MS', '30000')),
                 'heartbeat.interval.ms': int(os.getenv('KAFKA_HEARTBEAT_INTERVAL_MS', '10000')),
