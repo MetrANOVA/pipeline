@@ -88,7 +88,8 @@ class BaseClickHouseOutput(JSONOutput):
         # Batching configuration
         self.batch_size = int(os.getenv('CLICKHOUSE_BATCH_SIZE', '1000'))
         self.batch_timeout = float(os.getenv('CLICKHOUSE_BATCH_TIMEOUT', '30.0'))  # seconds
-        
+        self.flush_interval = float(os.getenv('CLICKHOUSE_FLUSH_INTERVAL', '0.1'))  # seconds
+       
         # Initialize ClickHouse connection
         self.client = None
         self.batch: List[Dict[str, Any]] = []
@@ -149,7 +150,9 @@ class BaseClickHouseOutput(JSONOutput):
         """Start background timer to flush batches periodically"""
         def flush_timer():
             while True:
-                time.sleep(1)  # Check every second
+                # Check every flush_interval seconds. 
+                # Note that max clickhouse throughput is self.flush_interval * self.batch_size
+                time.sleep(self.flush_interval)  
                 current_time = time.time()
                 
                 with self.batch_lock:
@@ -253,12 +256,13 @@ class KafkaSSLConsumer:
                 'group.id': group_id,
                 'client.id': client_id,
                 'auto.offset.reset': os.getenv('KAFKA_AUTO_OFFSET_RESET', 'latest'),
-                'enable.auto.commit': os.getenv('KAFKA_ENABLE_AUTO_COMMIT', 'true').lower() == 'true',
+                'auto.commit.enable': os.getenv('KAFKA_ENABLE_AUTO_COMMIT', 'true').lower() == 'true',
                 'auto.commit.interval.ms': int(os.getenv('KAFKA_AUTO_COMMIT_INTERVAL_MS', '5000')),
                 'session.timeout.ms': int(os.getenv('KAFKA_SESSION_TIMEOUT_MS', '30000')),
                 'heartbeat.interval.ms': int(os.getenv('KAFKA_HEARTBEAT_INTERVAL_MS', '10000')),
                 'max.poll.interval.ms': int(os.getenv('KAFKA_MAX_POLL_INTERVAL_MS', '300000')),
-                'fetch.min.bytes': int(os.getenv('KAFKA_FETCH_MIN_BYTES', '1'))
+                'fetch.min.bytes': int(os.getenv('KAFKA_FETCH_MIN_BYTES', '1')),
+                'fetch.max.bytes': int(os.getenv('KAFKA_FETCH_MAX_BYTES', '52428800')),  # 50MB - default
             }
             
             # Add SSL configuration if certificates are provided
