@@ -200,7 +200,7 @@ class BaseClickHouseOutput(JSONOutput):
                 column_names=self.column_names
             )
             
-            logger.info(f"Successfully inserted {len(self.batch)} messages into ClickHouse")
+            logger.debug(f"Successfully inserted {len(self.batch)} messages into ClickHouse")
             
             # Clear batch and update flush time
             self.batch.clear()
