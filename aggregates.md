@@ -149,3 +149,70 @@ GROUP BY
     src_scireg_ref,
     traffic_class
 ```
+
+## 5m_ip_version 
+
+### Create Table
+```
+CREATE TABLE IF NOT EXISTS flow_edge_5m_ip_version (
+            `start_ts` DateTime,
+            `ip_version`  UInt8,
+            `flow_count` UInt32,
+            `num_bits` Float64,
+            `num_pkts` Float64
+        )
+        ENGINE = SummingMergeTree((flow_count, num_bits, num_pkts))
+        PARTITION BY toYYYYMMDD(`start_ts`)
+        ORDER BY (`ip_version`,`start_ts`)
+        SETTINGS index_granularity = 8192
+```
+
+### Materialized View
+```
+CREATE MATERIALIZED VIEW flow_edge_5m_ip_version_mv TO flow_edge_5m_ip_version AS
+SELECT 
+    toStartOfInterval(start_ts, INTERVAL 5 MINUTE) AS start_ts, ip_version, 
+    count(*) AS flow_count, 
+    SUM(num_bits) AS num_bits, 
+    SUM(num_pkts) AS num_pkts 
+FROM flow_edge_v2 
+WHERE ip_version IS NOT NULL
+GROUP BY start_ts, ip_version
+```
+
+## 5m_ifaces
+
+### Create Table
+```
+CREATE TABLE IF NOT EXISTS flow_edge_5m_if (
+            `start_ts` DateTime,
+            `ifin_ref` String,
+            `ifout_ref` String,
+            `device_name` LowCardinality(Nullable(String)),
+            `device_ip` Nullable(IPv6),
+            `flow_count` UInt32,
+            `num_bits` Float64,
+            `num_pkts` Float64
+        )
+        ENGINE = SummingMergeTree((flow_count, num_bits, num_pkts))
+        PARTITION BY toYYYYMMDD(`start_ts`)
+        ORDER BY (`ifin_ref`,`ifout_ref`, `start_ts`)
+        SETTINGS index_granularity = 8192
+```
+
+### Materialized View
+```
+CREATE MATERIALIZED VIEW flow_edge_5m_if_mv TO flow_edge_5m_if AS
+SELECT 
+    toStartOfInterval(start_ts, INTERVAL 5 MINUTE) AS start_ts, 
+    ifin_ref,
+    ifout_ref
+    device_name,
+    device_ip,
+    count(*) AS flow_count, 
+    SUM(num_bits) AS num_bits, 
+    SUM(num_pkts) AS num_pkts 
+FROM flow_edge_v2 
+WHERE ifin_ref IS NOT NULL AND ifout_ref is NOT NULL
+GROUP BY start_ts, ifin_ref, ifout_ref, device_name, device_ip
+```
