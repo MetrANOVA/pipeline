@@ -111,7 +111,7 @@ class MetaLoader:
         """Build the metadata query for a specific table"""
         query = f"""
         SELECT argMax(id, insert_ts) as latest_id, 
-               argMax(meta_ref, insert_ts) as latest_meta_ref
+               argMax(ref, insert_ts) as latest_ref
         FROM {table} 
         GROUP BY id
         ORDER BY id
@@ -159,17 +159,17 @@ class MetaLoader:
             
             loaded_count = 0
             for row in rows:
-                latest_id, latest_meta_ref = row
+                latest_id, latest_ref = row
                 
                 # Skip rows with null values
-                if latest_id is None or latest_meta_ref is None:
-                    logger.debug(f"Skipping row with null values: id={latest_id}, meta_ref={latest_meta_ref}")
+                if latest_id is None or latest_ref is None:
+                    logger.debug(f"Skipping row with null values: id={latest_id}, ref={latest_ref}")
                     continue
                 
                 # Set the key-value pair in Redis
-                # Key format: table:id, Value: meta_ref
+                # Key format: table:id, Value: ref
                 redis_key = f"{table}:{latest_id}"
-                pipe.set(redis_key, latest_meta_ref)
+                pipe.set(redis_key, latest_ref)
                 loaded_count += 1
                 
                 # Execute batch every 1000 records
