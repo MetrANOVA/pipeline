@@ -11,6 +11,7 @@ import threading
 from typing import Dict, Any, Optional, List
 from confluent_kafka import Consumer, KafkaError
 import clickhouse_connect
+import redis
 import sys
 
 # Configure logging
@@ -85,6 +86,12 @@ class BaseClickHouseOutput(JSONOutput):
         self.password = os.getenv('CLICKHOUSE_PASSWORD', '')
         self.table = os.getenv('CLICKHOUSE_TABLE', 'kafka_messages')
 
+        # Redis configuration (same as meta_loader.py)
+        self.redis_host = os.getenv('REDIS_HOST', 'localhost')
+        self.redis_port = int(os.getenv('REDIS_PORT', '6379'))
+        self.redis_db = int(os.getenv('REDIS_DB', '0'))
+        self.redis_password = os.getenv('REDIS_PASSWORD')
+
         # Batching configuration
         self.batch_size = int(os.getenv('CLICKHOUSE_BATCH_SIZE', '1000'))
         self.batch_timeout = float(os.getenv('CLICKHOUSE_BATCH_TIMEOUT', '30.0'))  # seconds
@@ -95,10 +102,14 @@ class BaseClickHouseOutput(JSONOutput):
         self.batch: List[Dict[str, Any]] = []
         self.batch_lock = threading.Lock()
         self.last_flush_time = time.time()
+        
+        # Initialize Redis connection
+        self.redis_client = None
     
     def prepare(self):
         """Prepare ClickHouse output (e.g., create table)"""
         self._connect_clickhouse()
+        self._connect_redis()
         self._start_flush_timer()
     
     def _build_message(self, value: dict, msg_metadata: dict) -> dict:
@@ -132,6 +143,36 @@ class BaseClickHouseOutput(JSONOutput):
         except Exception as e:
             logger.error(f"Failed to connect to ClickHouse: {e}")
             raise
+    
+    def _connect_redis(self):
+        """Initialize Redis connection"""
+        #TODO: Explore client-side caching options in redis-py: https://redis.io/blog/faster-redis-client-library-support-for-client-side-caching/
+        try:
+            redis_config = {
+                'host': self.redis_host,
+                'port': self.redis_port,
+                'db': self.redis_db,
+                'decode_responses': True,  # Automatically decode responses to strings
+                'socket_timeout': 30,
+                'socket_connect_timeout': 10,
+                'retry_on_timeout': True,
+                'health_check_interval': 30,  # Health check every 30 seconds
+            }
+            
+            if self.redis_password:
+                redis_config['password'] = self.redis_password
+            
+            # Create Redis connection with client-side caching enabled
+            self.redis_client = redis.Redis(**redis_config)
+            
+            # Test connection
+            self.redis_client.ping()
+            logger.info(f"Connected to Redis at {self.redis_host}:{self.redis_port}, db: {self.redis_db}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to connect to Redis: {e}")
+            logger.warning("Redis lookups will be disabled")
+            self.redis_client = None
     
     def _create_table_if_not_exists(self):
         """Create the target table if it doesn't exist"""
@@ -214,7 +255,7 @@ class BaseClickHouseOutput(JSONOutput):
             sys.exit(1)
 
     def close(self):
-        """Close ClickHouse connection and flush remaining messages"""
+        """Close ClickHouse and Redis connections and flush remaining messages"""
         with self.batch_lock:
             if self.batch:
                 logger.info("Flushing remaining messages before closing...")
@@ -223,17 +264,46 @@ class BaseClickHouseOutput(JSONOutput):
         if self.client:
             self.client.close()
             logger.info("ClickHouse connection closed")
+            
+        if self.redis_client:
+            self.redis_client.connection_pool.disconnect()
+            logger.info("Redis connection closed")
 
-    def redis_lookup(self, key: str) -> str:
-        if key is None:
+    def redis_lookup(self, table, key: str) -> Optional[str]:
+        """Perform Redis GET lookup for the given key"""
+        if key is None or table is None:
             return None
-        # Placeholder for actual Redis lookup logic
-        return None
+        key = f"{table}:{key}"
 
-    def redis_lookup_list(self, keys: List[str]) -> List[str]:
+        if self.redis_client is None:
+            logger.debug("Redis client not available, skipping lookup")
+            return None
+            
+        try:
+            # Perform Redis GET operation
+            value = self.redis_client.get(key)
+            if value is not None:
+                logger.debug(f"Redis lookup successful: {key} -> {value}")
+                return str(value)  # Ensure string return type
+            else:
+                logger.debug(f"Redis lookup found no value for key: {key}")
+                return None
+                
+        except redis.RedisError as e:
+            logger.warning(f"Redis lookup failed for key '{key}': {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Unexpected error during Redis lookup for key '{key}': {e}")
+            return None
+
+    def redis_lookup_list(self, table, keys: List[str]) -> List[str]:
+        """Perform Redis lookups for a list of keys, returning only found values"""
+        if not keys:
+            return []
+            
         vals = []
         for key in keys:
-            v = self.redis_lookup(key)
+            v = self.redis_lookup(table, key)
             if v is not None:
                 vals.append(v)
 
