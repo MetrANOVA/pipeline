@@ -14,3 +14,7 @@ services:
     deploy:
       mode: replicated
       replicas: 10
+  redis:
+    image: redis:8.2.1
+    ports:
+      - "6379:6379"

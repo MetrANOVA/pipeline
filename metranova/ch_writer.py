@@ -224,6 +224,21 @@ class BaseClickHouseOutput(JSONOutput):
             self.client.close()
             logger.info("ClickHouse connection closed")
 
+    def redis_lookup(self, key: str) -> str:
+        if key is None:
+            return None
+        # Placeholder for actual Redis lookup logic
+        return None
+
+    def redis_lookup_list(self, keys: List[str]) -> List[str]:
+        vals = []
+        for key in keys:
+            v = self.redis_lookup(key)
+            if v is not None:
+                vals.append(v)
+
+        return vals
+
 class KafkaSSLConsumer:
     """Kafka consumer with SSL authentication using confluent-kafka"""
     
