@@ -53,9 +53,50 @@ CREATE TABLE IF NOT EXISTS flow_edge_5m_asns (
         )
         ENGINE = SummingMergeTree((flow_count, num_bits, num_pkts))
         PARTITION BY toYYYYMMDD(`start_ts`)
-        ORDER BY (`src_asn`,`dst_asn`,`start_ts`)
+        ORDER BY (
+            src_asn,
+            dst_asn,
+            src_as_name, 
+            dst_as_name,
+            policy_originator,
+            policy_level,
+            policy_scopes,
+            app_name,
+            device_name,
+            bgp_next_hop,  
+            bgp_peer_as_dst,
+            bgp_peer_as_dst_name,
+            bgp_as_path_name,
+            bgp_comms,
+            bgp_lcomms,
+            bgp_ecomms,
+            bgp_local_pref,
+            bgp_med,
+            dst_pub_asn,
+            dst_continent,
+            dst_country_name,
+            dst_esdb_ipsvc_ref,
+            dst_region_name,
+            dst_region_iso_code,
+            dst_pref_org,
+            dst_scireg_ref,
+            ifin_ref,
+            ifout_ref, 
+            ip_version,
+            protocol, 
+            src_pub_asn,
+            src_continent,
+            src_country_name,
+            src_esdb_ipsvc_ref,
+            src_region_name,
+            src_region_iso_code,
+            src_pref_org,
+            src_scireg_ref,
+            traffic_class,
+            start_ts
+        )
         TTL start_ts + INTERVAL 5 YEAR
-        SETTINGS index_granularity = 8192
+        SETTINGS index_granularity = 8192, allow_nullable_key = 1
 ```
 
 ### Materialized View
@@ -196,8 +237,8 @@ CREATE TABLE IF NOT EXISTS flow_edge_5m_if (
         )
         ENGINE = SummingMergeTree((flow_count, num_bits, num_pkts))
         PARTITION BY toYYYYMMDD(`start_ts`)
-        ORDER BY (`ifin_ref`,`ifout_ref`, `start_ts`)
-        SETTINGS index_granularity = 8192
+        ORDER BY (`ifin_ref`,`ifout_ref`, `device_name`, `device_ip`, `start_ts`)
+        SETTINGS index_granularity = 8192, allow_nullable_key = 1
 ```
 
 ### Materialized View
