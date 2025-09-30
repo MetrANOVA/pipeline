@@ -2,11 +2,14 @@
 
 This document records the commands used toi create materialized view aggregates.
 
+Note that any dimensions used must also be in the PRIMARY KEY or ORDER BY to working correctly for SummingMergeTree. For this reason, its nice to split the PRIMARY KEY and sorting keys so its easier to make changes over time without having to touch the primary key. See the document here for details: https://clickhouse.com/docs/engines/table-engines/mergetree-family/mergetree#choosing-a-primary-key-that-differs-from-the-sorting-key 
+
+
 ## 5m_edge_asns
 
 ### Create Table
 ```
-CREATE TABLE IF NOT EXISTS flow_edge_5m_asns (
+CREATE TABLE IF NOT EXISTS flow_edge_5m_asns_v2 (
             `start_ts` DateTime,
             `src_as_name` LowCardinality(Nullable(String)),
             `dst_as_name` LowCardinality(Nullable(String)),
@@ -53,14 +56,22 @@ CREATE TABLE IF NOT EXISTS flow_edge_5m_asns (
         )
         ENGINE = SummingMergeTree((flow_count, num_bits, num_pkts))
         PARTITION BY toYYYYMMDD(`start_ts`)
+        PRIMARY KEY (
+            src_asn,
+            dst_asn,
+            start_ts
+        )
         ORDER BY (
             src_asn,
             dst_asn,
+            start_ts,
             src_as_name, 
             dst_as_name,
-            policy_originator,
+            ifin_ref,
+            ifout_ref, 
             policy_level,
             policy_scopes,
+            policy_originator,
             app_name,
             device_name,
             bgp_next_hop,  
@@ -80,8 +91,6 @@ CREATE TABLE IF NOT EXISTS flow_edge_5m_asns (
             dst_region_iso_code,
             dst_pref_org,
             dst_scireg_ref,
-            ifin_ref,
-            ifout_ref, 
             ip_version,
             protocol, 
             src_pub_asn,
@@ -92,8 +101,7 @@ CREATE TABLE IF NOT EXISTS flow_edge_5m_asns (
             src_region_iso_code,
             src_pref_org,
             src_scireg_ref,
-            traffic_class,
-            start_ts
+            traffic_class
         )
         TTL start_ts + INTERVAL 5 YEAR
         SETTINGS index_granularity = 8192, allow_nullable_key = 1
@@ -101,11 +109,9 @@ CREATE TABLE IF NOT EXISTS flow_edge_5m_asns (
 
 ### Materialized View
 ```
-CREATE MATERIALIZED VIEW flow_edge_5m_asns_mv TO flow_edge_5m_asns AS
+CREATE MATERIALIZED VIEW flow_edge_5m_asns_v2_mv TO flow_edge_5m_asns_v2 AS
 SELECT 
     toStartOfInterval(start_ts, INTERVAL 5 MINUTE) AS start_ts, 
-    src_as_name, 
-    dst_as_name, 
     policy_originator,
     policy_level,
     policy_scopes,
@@ -119,7 +125,8 @@ SELECT
     bgp_ecomms,
     bgp_local_pref,
     bgp_med,
-    device_name, 
+    device_name,
+    dst_as_name,
     dst_asn,
     dst_pub_asn,
     dst_continent,
@@ -133,6 +140,7 @@ SELECT
     ifout_ref, 
     ip_version, 
     protocol,
+    src_as_name,
     src_asn,
     src_pub_asn,
     src_continent,
@@ -143,52 +151,10 @@ SELECT
     src_pref_org,
     src_scireg_ref,
     traffic_class,
-    count(*) AS flow_count, 
-    SUM(num_bits) AS num_bits, 
-    SUM(num_pkts) AS  num_pkts
+    1 AS flow_count, 
+    num_bits, 
+    num_pkts
 FROM flow_edge_v2 
-GROUP BY 
-    start_ts, 
-    src_as_name, 
-    dst_as_name, 
-    policy_originator,
-    policy_level,
-    policy_scopes,
-    app_name,
-    device_name,
-    bgp_next_hop,  
-    bgp_peer_as_dst,
-    bgp_peer_as_dst_name,
-    bgp_as_path_name,
-    bgp_comms,
-    bgp_lcomms,
-    bgp_ecomms,
-    bgp_local_pref,
-    bgp_med,
-    dst_asn,
-    dst_pub_asn,
-    dst_as_name,
-    dst_continent,
-    dst_country_name,
-    dst_esdb_ipsvc_ref,
-    dst_region_name,
-    dst_region_iso_code,
-    dst_pref_org,
-    dst_scireg_ref,
-    ifin_ref,
-    ifout_ref, 
-    ip_version,
-    protocol, 
-    src_asn,
-    src_pub_asn,
-    src_continent,
-    src_country_name,
-    src_esdb_ipsvc_ref,
-    src_region_name,
-    src_region_iso_code,
-    src_pref_org,
-    src_scireg_ref,
-    traffic_class
 ```
 
 ## 5m_ip_version 
@@ -213,12 +179,11 @@ CREATE TABLE IF NOT EXISTS flow_edge_5m_ip_version (
 CREATE MATERIALIZED VIEW flow_edge_5m_ip_version_mv TO flow_edge_5m_ip_version AS
 SELECT 
     toStartOfInterval(start_ts, INTERVAL 5 MINUTE) AS start_ts, ip_version, 
-    count(*) AS flow_count, 
-    SUM(num_bits) AS num_bits, 
-    SUM(num_pkts) AS num_pkts 
-FROM flow_edge_v2 
+    1 AS flow_count, 
+    num_bits, 
+    num_pkts
+FROM flow_edge_v2
 WHERE ip_version IS NOT NULL
-GROUP BY start_ts, ip_version
 ```
 
 ## 5m_ifaces
@@ -250,10 +215,9 @@ SELECT
     ifout_ref
     device_name,
     device_ip,
-    count(*) AS flow_count, 
-    SUM(num_bits) AS num_bits, 
-    SUM(num_pkts) AS num_pkts 
+    1 AS flow_count, 
+    num_bits, 
+    num_pkts 
 FROM flow_edge_v2 
 WHERE ifin_ref IS NOT NULL AND ifout_ref is NOT NULL
-GROUP BY start_ts, ifin_ref, ifout_ref, device_name, device_ip
 ```
