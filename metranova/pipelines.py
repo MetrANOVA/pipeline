@@ -82,8 +82,13 @@ class BaseClickHouseProcessor:
         raise NotImplementedError("Subclasses should implement this method")
     
     def message_to_columns(self, message: dict) -> list:
-        """Convert message dictionary to list of column values"""
-        raise NotImplementedError("Subclasses should implement this method")
+        cols = []
+        for col in self.column_names:
+            if col not in message.keys():
+                raise ValueError(f"Missing column '{col}' in message")
+            self.logger.debug(f"Column '{col}': {message.get(col)}")
+            cols.append(message.get(col))
+        return cols
     
 class ClickHousePipeline(JSONPipeline):
     def __init__(self):

@@ -1,13 +1,13 @@
 version: '3.8'
 
 services:
-  pipeline:
+  flow_pipeline:
     image: metranova/pipeline:latest
     build:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - .env
+      - .env-flow
     volumes:
       - ./certificates:/app/certificates:ro
     restart: always
@@ -15,6 +15,20 @@ services:
       mode: replicated
       replicas: 10
   
+  interface_pipeline:
+    image: metranova/pipeline:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env-interface
+    volumes:
+      - ./certificates:/app/certificates:ro
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 10
+
   meta_loader:
     image: metranova/pipeline:latest
     build:

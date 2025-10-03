@@ -3,5 +3,5 @@
 .*.swo
 .*.swp
 .vscode/
-.env
+.env*
 certificates/

@@ -10,7 +10,7 @@ class FlowProcessor(BaseClickHouseProcessor):
         CREATE TABLE IF NOT EXISTS {self.table} (
             `start_ts` DateTime64(3, 'UTC'),
             `end_ts` DateTime64(3, 'UTC'),
-            `insert_ts` DateTime64(3, 'UTC') DEFAULT now(),
+            `insert_ts` DateTime64(3, 'UTC') DEFAULT now64(),
             `policy_originator` LowCardinality(Nullable(String)),
             `policy_level` LowCardinality(Nullable(String)),
             `policy_scopes` Array(LowCardinality(String)),
@@ -365,12 +365,3 @@ class FlowProcessor(BaseClickHouseProcessor):
             "num_pkts": value.get("values", {}).get("num_packets", None),
             "pkts_per_sec": value.get("values", {}).get("packets_per_second", None)
         }
-    
-    def message_to_columns(self, message: dict) -> list:
-        cols = []
-        for col in self.column_names:
-            if col not in message.keys():
-                raise ValueError(f"Missing column '{col}' in message")
-            self.logger.debug(f"Column '{col}': {message.get(col)}")
-            cols.append(message.get(col))
-        return cols
