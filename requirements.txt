@@ -6,3 +6,6 @@ confluent-kafka==2.11.1
 
 # Redis client library
 redis[hiredis]==6.4.0
+
+# orjson library
+orjson==3.11.3

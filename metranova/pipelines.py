@@ -2,10 +2,8 @@
 Pipeline classes for processing messages from consumers
 """
 
-#TODO: Use orjson for faster JSON processing: https://pypi.org/project/orjson/
-
 import os
-import json
+import orjson
 import logging
 import time
 import threading
@@ -38,7 +36,7 @@ class JSONPipeline(BasePipeline):
         # Decode message
         try:
             key = msg.key().decode('utf-8') if msg.key() else None
-            value = json.loads(msg.value().decode('utf-8')) if msg.value() else None
+            value = orjson.loads(msg.value()) if msg.value() else None
             
             logger.debug(f"Message key: {key}")
             logger.debug(f"Message value: {value}")
@@ -54,15 +52,13 @@ class JSONPipeline(BasePipeline):
             self.output_message(value, msg_metadata)     
 
             # For now, just log the message      
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to decode JSON message: {e}")
         except Exception as e:
             logger.error(f"Error processing message content: {e}")
     
     def output_message(self, value: Optional[Dict[str, Any]], msg_metadata: Optional[Dict] = None):
         """Output message to console as formatted JSON"""
         if value:
-            formatted_value = json.dumps(value, indent=2, sort_keys=True)
+            formatted_value = orjson.dumps(value, option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS).decode('utf-8')
             logger.debug(f"Processing message with data:\n{formatted_value}")
 
 class BaseClickHouseProcessor:

@@ -1,5 +1,5 @@
 from metranova.pipelines import BaseClickHouseProcessor
-import json
+import orjson
 import os
 
 class RawKafkaProcessor(BaseClickHouseProcessor):
@@ -26,7 +26,7 @@ class RawKafkaProcessor(BaseClickHouseProcessor):
             'partition': msg_metadata.get('partition', 0) if msg_metadata else 0,
             'offset': msg_metadata.get('offset', 0) if msg_metadata else 0,
             'key': msg_metadata.get('key') if msg_metadata else None,
-            'value': json.dumps(value, sort_keys=True)
+            'value': orjson.dumps(value, option=orjson.OPT_SORT_KEYS).decode('utf-8')
         }
 
     def message_to_columns(self, message: dict) -> list:
