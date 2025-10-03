@@ -1,8 +1,7 @@
 import os
 import logging
-from metranova.ch_writer import KafkaSSLConsumer,JSONOutput
-from metranova.flow_edge_output import FlowEdgeOutput
-from metranova.raw_msg_output import RawMsgOutput
+from metranova.pipelines import ClickHousePipeline, JSONPipeline
+from metranova.consumers import KafkaConsumer
 
 # Configure logging
 log_level = logging.INFO
@@ -24,16 +23,14 @@ def main():
     
     try:
         #determine output method
-        output_method = os.getenv('OUTPUT_METHOD', 'json').lower()
-        if output_method == 'raw_msg':
-            output = RawMsgOutput()
-        elif output_method == 'flow_edge':
-            output = FlowEdgeOutput()
+        output_method = os.getenv('PIPELINE_TYPE', 'json').lower()
+        if output_method == 'clickhouse':
+            output = ClickHousePipeline()
         else:
-            output = JSONOutput()
+            output = JSONPipeline()
 
         # Initialize Kafka consumer
-        kafka_consumer = KafkaSSLConsumer(output=output)
+        kafka_consumer = KafkaConsumer(pipeline=output)
 
         # Start consuming messages
         kafka_consumer.consume_messages()
@@ -46,7 +43,7 @@ def main():
         if hasattr(output, 'close'):
             output.close()
         if kafka_consumer:
-            kafka_consumer._close_consumer()
+            kafka_consumer.close()
 
 
 if __name__ == "__main__":

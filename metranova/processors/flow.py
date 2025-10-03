@@ -1,10 +1,11 @@
-from metranova.ch_writer import BaseClickHouseOutput
+from metranova.pipelines import BaseClickHouseProcessor
+import os
 
+class FlowProcessor(BaseClickHouseProcessor):
 
-class FlowEdgeOutput(BaseClickHouseOutput):
-
-    def __init__(self):
-        super().__init__()
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        self.table = os.getenv('CLICKHOUSE_FLOW_TABLE', 'flow_edge')
         self.create_table_cmd = f"""
         CREATE TABLE IF NOT EXISTS {self.table} (
             `start_ts` DateTime64(3, 'UTC'),
@@ -215,7 +216,7 @@ class FlowEdgeOutput(BaseClickHouseOutput):
             "pkts_per_sec",
         ]
 
-    def _build_message(self, value: dict, msg_metadata: dict) -> dict:
+    def build_message(self, value: dict, msg_metadata: dict) -> dict:
         #check required fields
         required_fields = [
             ['start'], 
@@ -305,7 +306,7 @@ class FlowEdgeOutput(BaseClickHouseOutput):
             "dst_asn":  value.get("meta", {}).get("dst_asn", None),
             "dst_continent": value.get("meta", {}).get("dst_continent", None),
             "dst_country_name": value.get("meta", {}).get("dst_country_name", None),
-            "dst_esdb_ipsvc_ref": self.redis_lookup_list("meta_esdb_ipsvc", value.get("meta", {}).get("esdb", {}).get("dst", {}).get("service", {}).get("prefix_group_name", [])),
+            "dst_esdb_ipsvc_ref": self.pipeline.redis_lookup_list("meta_esdb_ipsvc", value.get("meta", {}).get("esdb", {}).get("dst", {}).get("service", {}).get("prefix_group_name", [])),
             "dst_ip": value.get("meta", {}).get("dst_ip"),
             "dst_loc_lat": value.get("meta", {}).get("dst_location", {}).get("lat", None),
             "dst_loc_lon": value.get("meta", {}).get("dst_location", {}).get("lon", None),
@@ -319,8 +320,8 @@ class FlowEdgeOutput(BaseClickHouseOutput):
             "dst_region_name": value.get("meta", {}).get("dst_region_name", None),
             "dst_scireg_ref": None,
             "flow_type": value.get("meta", {}).get("flow_type", None),
-            "ifin_ref": self.redis_lookup("meta_if", value.get("meta", {}).get("iface_in", {}).get("id", None)),
-            "ifout_ref": self.redis_lookup("meta_if", value.get("meta", {}).get("iface_out", {}).get("id", None)),
+            "ifin_ref": self.pipeline.redis_lookup("meta_if", value.get("meta", {}).get("iface_in", {}).get("id", None)),
+            "ifout_ref": self.pipeline.redis_lookup("meta_if", value.get("meta", {}).get("iface_out", {}).get("id", None)),
             "ip_tos": value.get("meta", {}).get("ip_tos", None),
             "ip_version":  value.get("meta", {}).get("ip_version", None),
             "ipv6_flow_label": value.get("meta", {}).get("ipv6", {}).get("flow_label", None),
@@ -338,7 +339,7 @@ class FlowEdgeOutput(BaseClickHouseOutput):
             "src_asn": value.get("meta", {}).get("src_asn", None),
             "src_continent": value.get("meta", {}).get("src_continent", None),
             "src_country_name": value.get("meta", {}).get("src_country_name", None),
-            "src_esdb_ipsvc_ref": self.redis_lookup_list("meta_esdb_ipsvc", value.get("meta", {}).get("esdb", {}).get("src", {}).get("service", {}).get("prefix_group_name", [])),
+            "src_esdb_ipsvc_ref": self.pipeline.redis_lookup_list("meta_esdb_ipsvc", value.get("meta", {}).get("esdb", {}).get("src", {}).get("service", {}).get("prefix_group_name", [])),
             "src_ip": value.get("meta", {}).get("src_ip", None),
             "src_loc_lat": value.get("meta", {}).get("src_location", {}).get("latitude", None),
             "src_loc_lon": value.get("meta", {}).get("src_location", {}).get("longitude", None),
@@ -365,7 +366,7 @@ class FlowEdgeOutput(BaseClickHouseOutput):
             "pkts_per_sec": value.get("values", {}).get("packets_per_second", None)
         }
     
-    def _message_to_columns(self, message: dict) -> list:
+    def message_to_columns(self, message: dict) -> list:
         cols = []
         for col in self.column_names:
             if col not in message.keys():

@@ -1,8 +1,8 @@
 version: '3.8'
 
 services:
-  ch_writer:
-    image: metranova/clickhouse-writer:latest
+  pipeline:
+    image: metranova/pipeline:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -16,7 +16,7 @@ services:
       replicas: 10
   
   meta_loader:
-    image: metranova/clickhouse-writer:latest
+    image: metranova/pipeline:latest
     build:
       context: .
       dockerfile: Dockerfile
