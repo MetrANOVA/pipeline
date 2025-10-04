@@ -8,7 +8,7 @@ import logging
 import time
 import threading
 import importlib
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Iterator
 import clickhouse_connect
 import redis
 
@@ -94,7 +94,7 @@ class BaseClickHouseProcessor:
         """Determine if this processor should handle the given message"""
         return True  # Default to match all messages with required fields, override in subclass if needed
 
-    def build_message(self, value: dict, msg_metadata: dict) -> List[Dict[str, Any]]:
+    def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
         """Build message dictionary for ClickHouse insertion"""
         raise NotImplementedError("Subclasses should implement this method")
     
@@ -357,7 +357,7 @@ class ClickHouseBatchWriter:
         #append to batch
         with self.batch_lock:
             #Note: message_data is a list of dicts so += adds all elements
-            self.batch += message_data 
+            self.batch.extend(message_data)
             
             # Check if we need to flush
             if len(self.batch) >= self.batch_size:

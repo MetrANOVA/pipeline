@@ -1,5 +1,5 @@
 from metranova.pipelines import BaseClickHouseProcessor
-from typing import List, Dict, Any
+from typing import Iterator, Dict, Any
 import os
 
 class InterfaceBaseProcessor(BaseClickHouseProcessor):
@@ -69,7 +69,7 @@ class InterfaceBaseProcessor(BaseClickHouseProcessor):
 
         return True
 
-    def build_message(self, value: dict, msg_metadata: dict) -> List[Dict[str, Any]]:
+    def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
         # check required fields
         if not self.has_required_fields(value):
             return None

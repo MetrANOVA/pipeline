@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator
 from metranova.pipelines import BaseClickHouseProcessor
 import os
 
@@ -228,7 +228,7 @@ class FlowProcessor(BaseClickHouseProcessor):
             ['meta', 'src_port']
         ]
 
-    def build_message(self, value: dict, msg_metadata: dict) -> List[Dict[str, Any]]:
+    def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
         # check required fields
         if not self.has_required_fields(value):
             return None

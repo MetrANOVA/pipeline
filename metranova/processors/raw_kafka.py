@@ -1,5 +1,5 @@
 from metranova.pipelines import BaseClickHouseProcessor
-from typing import List, Dict, Any
+from typing import Iterator, Dict, Any
 import orjson
 import os
 
@@ -21,7 +21,7 @@ class RawKafkaProcessor(BaseClickHouseProcessor):
         """
         self.column_names = ['topic', 'partition', 'offset', 'key', 'value']
 
-    def build_message(self, value: dict, msg_metadata: dict) -> List[Dict[str, Any]]:
+    def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
         return [{
             'topic': msg_metadata.get('topic', '') if msg_metadata else '',
             'partition': msg_metadata.get('partition', 0) if msg_metadata else 0,
