@@ -1,4 +1,5 @@
 from metranova.pipelines import BaseClickHouseProcessor
+from typing import List, Dict, Any
 import os
 
 class InterfaceBaseProcessor(BaseClickHouseProcessor):
@@ -52,7 +53,7 @@ class InterfaceBaseProcessor(BaseClickHouseProcessor):
             "out_discards"
         ]
 
-    def build_message(self, value: dict, msg_metadata: dict) -> dict:
+    def build_message(self, value: dict, msg_metadata: dict) -> List[Dict[str, Any]]:
         #check required fields
         required_fields = [
             ['start'], 
@@ -89,7 +90,7 @@ class InterfaceBaseProcessor(BaseClickHouseProcessor):
             return None
 
         # Build message dictionary
-        return {
+        return [{
             "start_ts": value.get("start"),
             "policy_originator": value.get("policy", {}).get("originator", None),
             "policy_level": value.get("policy", {}).get("level", None),
@@ -106,4 +107,4 @@ class InterfaceBaseProcessor(BaseClickHouseProcessor):
             "out_pkts": value.get("values", {}).get("out_pkts", {}).get("val", None),
             "out_errors": value.get("values", {}).get("out_errors", {}).get("val", None),
             "out_discards": value.get("values", {}).get("out_discards", {}).get("val", None)
-        }
+        }]

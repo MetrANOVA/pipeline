@@ -77,7 +77,7 @@ class BaseClickHouseProcessor:
         """Determine if this processor should handle the given message"""
         return True  # Default to match all messages, override in subclass if needed
 
-    def build_message(self, value: dict, msg_metadata: dict) -> dict:
+    def build_message(self, value: dict, msg_metadata: dict) -> List[Dict[str, Any]]:
         """Build message dictionary for ClickHouse insertion"""
         raise NotImplementedError("Subclasses should implement this method")
     
@@ -339,7 +339,8 @@ class ClickHouseBatchWriter:
         
         #append to batch
         with self.batch_lock:
-            self.batch.append(message_data)
+            #Note: message_data is a list of dicts so += adds all elements
+            self.batch += message_data 
             
             # Check if we need to flush
             if len(self.batch) >= self.batch_size:

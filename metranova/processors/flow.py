@@ -1,3 +1,4 @@
+from typing import Any, Dict, List
 from metranova.pipelines import BaseClickHouseProcessor
 import os
 
@@ -216,7 +217,7 @@ class FlowProcessor(BaseClickHouseProcessor):
             "pkts_per_sec",
         ]
 
-    def build_message(self, value: dict, msg_metadata: dict) -> dict:
+    def build_message(self, value: dict, msg_metadata: dict) -> List[Dict[str, Any]]:
         #check required fields
         required_fields = [
             ['start'], 
@@ -265,7 +266,7 @@ class FlowProcessor(BaseClickHouseProcessor):
                 break
             mpls_exp.append(exp)
 
-        return {
+        return [{
             "start_ts": value.get("start"),
             "end_ts": value.get("end"),
             "policy_originator": value.get("policy", {}).get("originator", None),
@@ -364,4 +365,4 @@ class FlowProcessor(BaseClickHouseProcessor):
             "num_bits": value.get("values", {}).get("num_bits", None),
             "num_pkts": value.get("values", {}).get("num_packets", None),
             "pkts_per_sec": value.get("values", {}).get("packets_per_second", None)
-        }
+        }]
