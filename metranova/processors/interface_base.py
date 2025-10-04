@@ -53,24 +53,27 @@ class InterfaceBaseProcessor(BaseClickHouseProcessor):
             "out_discards"
         ]
 
-    def build_message(self, value: dict, msg_metadata: dict) -> List[Dict[str, Any]]:
-        #check required fields
-        required_fields = [
+        self.required_fields = [
             ['start'], 
             ['meta', 'id'], 
             ['meta', 'device'], 
-            # name should be too but found some without
+            # name should be too but found some without, so handedle in build_message
         ]
-        for fields in required_fields:
-            v = None
-            for field in fields:
-                if v is None:
-                    v = value.get(field, None)
-                else:
-                    v = v.get(field, None)
-                if v is None:
-                    self.logger.error(f"Missing required field '{field}' in message value")
-                    return None
+
+    def match_message(self, value):
+        #make sure we have at least one of values fields we care about
+        values_fields = ['in_bits', 'in_pkts', 'in_errors', 'in_discards', 'out_bits', 'out_pkts', 'out_errors', 'out_discards']
+        if not any(value.get('values', {}).get(f, {}).get("val", None) is not None for f in values_fields):
+            self.logger.debug(f"Missing all values fields in message value")
+            return False
+
+        return True
+
+    def build_message(self, value: dict, msg_metadata: dict) -> List[Dict[str, Any]]:
+        # check required fields
+        if not self.has_required_fields(value):
+            return None
+
         # handle special case for name. If missing parse from meta.id which is a string of form <device>::<name>
         if value.get('meta', {}).get('name', None) is None:
             meta_id = value.get('meta', {}).get('id', '')
@@ -81,12 +84,6 @@ class InterfaceBaseProcessor(BaseClickHouseProcessor):
         # double check name is now present
         if value.get('meta', {}).get('name', None) is None:
             self.logger.error(f"Missing required field 'name' in message value and has no parsable meta.id")
-            return None
-
-        #make sure we have at least one of values fields we care about
-        values_fields = ['in_bits', 'in_pkts', 'in_errors', 'in_discards', 'out_bits', 'out_pkts', 'out_errors', 'out_discards']
-        if not any(value.get('values', {}).get(f, {}).get("val", None) is not None for f in values_fields):
-            self.logger.debug(f"Missing all values fields in message value")
             return None
 
         # Build message dictionary

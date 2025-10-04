@@ -217,9 +217,7 @@ class FlowProcessor(BaseClickHouseProcessor):
             "pkts_per_sec",
         ]
 
-    def build_message(self, value: dict, msg_metadata: dict) -> List[Dict[str, Any]]:
-        #check required fields
-        required_fields = [
+        self.required_fields = [
             ['start'], 
             ['end'], 
             ['meta', 'dst_asn'], 
@@ -229,16 +227,11 @@ class FlowProcessor(BaseClickHouseProcessor):
             ['meta', 'src_ip'], 
             ['meta', 'src_port']
         ]
-        for fields in required_fields:
-            v = None
-            for field in fields:
-                if v is None:
-                    v = value.get(field, None)
-                else:
-                    v = v.get(field, None)
-                if v is None:
-                    self.logger.error(f"Missing required field '{field}' in message value")
-                    return None
+
+    def build_message(self, value: dict, msg_metadata: dict) -> List[Dict[str, Any]]:
+        # check required fields
+        if not self.has_required_fields(value):
+            return None
 
         #build padding array
         bgp_padding = []
