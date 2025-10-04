@@ -6,8 +6,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    environment:
+      - PIPELINE_TYPE=clickhouse
+      - CLICKHOUSE_PROCESSORS=metranova.processors.flow.FlowProcessor
+      - KAFKA_TOPIC=metranova_flow
     env_file:
-      - .env-flow
+      - .env
     volumes:
       - ./certificates:/app/certificates:ro
     restart: always
@@ -20,8 +24,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    environment:
+      - PIPELINE_TYPE=clickhouse
+      - CLICKHOUSE_PROCESSORS=metranova.processors.interface_base.InterfaceBaseProcessor
+      - KAFKA_TOPIC=metranova_interface
     env_file:
-      - .env-interface
+      - .env
     volumes:
       - ./certificates:/app/certificates:ro
     restart: always
