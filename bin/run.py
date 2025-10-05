@@ -1,6 +1,7 @@
 import os
 import logging
-from metranova.pipelines import ClickHousePipeline, JSONPipeline
+from metranova.pipelines.krc import KRCPipeline
+from metranova.pipelines.json import JSONPipeline
 from metranova.consumers import KafkaConsumer
 
 # Configure logging
@@ -25,7 +26,7 @@ def main():
         #determine output method
         output_method = os.getenv('PIPELINE_TYPE', 'json').lower()
         if output_method == 'clickhouse':
-            output = ClickHousePipeline()
+            output = KRCPipeline()
         else:
             output = JSONPipeline()
 

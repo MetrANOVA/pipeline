@@ -1,5 +1,5 @@
 from typing import Any, Dict, Iterator
-from metranova.pipelines import BaseClickHouseProcessor
+from metranova.processors.clickhouse.base import BaseClickHouseProcessor
 import os
 
 class FlowProcessor(BaseClickHouseProcessor):

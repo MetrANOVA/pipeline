@@ -3,8 +3,9 @@ Base consumer classes for different message sources
 """
 
 import logging
+import orjson
 import os
-from metranova.pipelines import BasePipeline
+from metranova.pipelines.base import BasePipeline
 from confluent_kafka import Consumer, KafkaError
 
 # Configure logging
@@ -110,10 +111,10 @@ class KafkaConsumer(BaseConsumer):
             while True:
                 # Poll for messages
                 msg = self.consumer.poll(timeout=1.0)
-                
                 if msg is None:
                     continue
                 
+                # check for errors
                 if msg.error():
                     if msg.error().code() == KafkaError._PARTITION_EOF:
                         logger.debug(f"End of partition reached {msg.topic()}/{msg.partition()}")
@@ -122,9 +123,19 @@ class KafkaConsumer(BaseConsumer):
                         logger.error(f"Kafka error: {msg.error()}")
                         break
                 
+                # format the response as JSON
+                msg_data = orjson.loads(msg.value()) if msg.value() else None
+                msg_metadata = {
+                    'topic': msg.topic(),
+                    'partition': msg.partition(),
+                    'offset': msg.offset(),
+                    'timestamp': msg.timestamp()[1] if msg.timestamp() else None,
+                    'key': msg.key().decode('utf-8') if msg.key() else None
+                }
+
                 # Process the message
                 try:
-                    self.pipeline.process_message(msg)
+                    self.pipeline.process_message(msg_data, consumer_metadata=msg_metadata)
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
                     # Continue processing other messages

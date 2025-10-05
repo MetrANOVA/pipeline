@@ -1,4 +1,4 @@
-from metranova.pipelines import BaseClickHouseProcessor
+from metranova.processors.clickhouse.base import BaseClickHouseProcessor
 from typing import Iterator, Dict, Any
 import orjson
 import os

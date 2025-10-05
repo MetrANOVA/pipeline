@@ -8,7 +8,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=metranova.processors.flow.FlowProcessor
+      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.flow.FlowProcessor
       - KAFKA_TOPIC=metranova_flow
     env_file:
       - .env
@@ -26,7 +26,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=metranova.processors.interface_base.InterfaceBaseProcessor,metranova.processors.interface_sap_queue.InterfaceSAPQueueProcessor,metranova.processors.interface_port_queue.InterfacePortQueueProcessor
+      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface_base.InterfaceBaseProcessor,metranova.processors.clickhouse.interface_sap_queue.InterfaceSAPQueueProcessor,metranova.processors.clickhouse.interface_port_queue.InterfacePortQueueProcessor
       - KAFKA_TOPIC=metranova_interface
     env_file:
       - .env
