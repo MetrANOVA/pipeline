@@ -3,6 +3,9 @@ Pipeline classes for processing messages from consumers
 """
 
 import os
+from metranova.cachers.redis import RedisCacher
+from metranova.connectors.clickhouse import ClickHouseConnector
+from metranova.connectors.redis import RedisConnector
 import orjson
 import logging
 import time
@@ -117,33 +120,18 @@ class ClickHousePipeline(JSONPipeline):
         if not self.processors:
             raise ValueError("At least one processor must be provided")
 
-        # ClickHouse configuration from environment
-        self.host = os.getenv('CLICKHOUSE_HOST', 'localhost')
-        self.port = int(os.getenv('CLICKHOUSE_PORT', '8123'))
-        self.database = os.getenv('CLICKHOUSE_DATABASE', 'default')
-        self.username = os.getenv('CLICKHOUSE_USERNAME', 'default')
-        self.password = os.getenv('CLICKHOUSE_PASSWORD', '')
-
-        # Redis configuration (same as meta_loader.py)
-        self.redis_host = os.getenv('REDIS_HOST', 'localhost')
-        self.redis_port = int(os.getenv('REDIS_PORT', '6379'))
-        self.redis_db = int(os.getenv('REDIS_DB', '0'))
-        self.redis_password = os.getenv('REDIS_PASSWORD')
-
         # Initialize ClickHouse connection
-        self.client = None
+        self.datastore = ClickHouseConnector()
         self.writers = []
 
         # Initialize Redis connection
-        self.redis_client = None
-    
-        # Prepare ClickHouse and Redis connections, create tables, and start batch writers
-        self._connect_clickhouse()
-        self._connect_redis()
+        self.cacher = RedisCacher()
+
+        # For each processor, build clickhouse tables
         for processor in self.processors:
             if processor.create_table_cmd is not None:
                 self._create_table(processor.create_table_cmd, processor.table)
-            writer = ClickHouseBatchWriter(self.client, processor)
+            writer = ClickHouseBatchWriter(self.datastore.client, processor)
             writer.start_flush_timer()
             self.writers.append(writer)
 
@@ -185,56 +173,6 @@ class ClickHousePipeline(JSONPipeline):
             return
         for writer in self.writers:
             writer.output_message(value, msg_metadata)
-
-    def _connect_clickhouse(self):
-        """Initialize ClickHouse connection"""
-        try:
-            self.client = clickhouse_connect.get_client(
-                host=self.host,
-                port=self.port,
-                database=self.database,
-                username=self.username,
-                password=self.password,
-                secure=os.getenv('CLICKHOUSE_SECURE', 'false').lower() == 'true',
-                verify=False
-            )
-            
-            # Test connection
-            self.client.ping()
-            logger.info(f"Connected to ClickHouse at {self.host}:{self.port}, database: {self.database}")
-        except Exception as e:
-            logger.error(f"Failed to connect to ClickHouse: {e}")
-            raise
-    
-    def _connect_redis(self):
-        """Initialize Redis connection"""
-        #TODO: Explore client-side caching options in redis-py: https://redis.io/blog/faster-redis-client-library-support-for-client-side-caching/
-        try:
-            redis_config = {
-                'host': self.redis_host,
-                'port': self.redis_port,
-                'db': self.redis_db,
-                'decode_responses': True,  # Automatically decode responses to strings
-                'socket_timeout': 30,
-                'socket_connect_timeout': 10,
-                'retry_on_timeout': True,
-                'health_check_interval': 30,  # Health check every 30 seconds
-            }
-            
-            if self.redis_password:
-                redis_config['password'] = self.redis_password
-            
-            # Create Redis connection with client-side caching enabled
-            self.redis_client = redis.Redis(**redis_config)
-            
-            # Test connection
-            self.redis_client.ping()
-            logger.info(f"Connected to Redis at {self.redis_host}:{self.redis_port}, db: {self.redis_db}")
-            
-        except Exception as e:
-            logger.warning(f"Failed to connect to Redis: {e}")
-            logger.warning("Redis lookups will be disabled")
-            self.redis_client = None
     
     def _create_table(self, create_table_cmd: str, table: str = None):
         """Create the target table if it doesn't exist"""
@@ -243,7 +181,7 @@ class ClickHousePipeline(JSONPipeline):
             return
         
         try:
-            self.client.command(create_table_cmd)
+            self.datastore.client.command(create_table_cmd)
             logger.info(f"Table {table} is ready")
         except Exception as e:
             logger.error(f"Failed to create table {table}: {e}")
@@ -254,53 +192,13 @@ class ClickHousePipeline(JSONPipeline):
         for writer in self.writers:
             writer.close()
 
-        if self.client:
-            self.client.close()
-            logger.info("ClickHouse connection closed")
-            
-        if self.redis_client:
-            self.redis_client.connection_pool.disconnect()
-            logger.info("Redis connection closed")
+        if self.datastore:
+            self.datastore.close()
+            logger.info("Datastore connection closed")
 
-    def redis_lookup(self, table, key: str) -> Optional[str]:
-        """Perform Redis GET lookup for the given key"""
-        if key is None or table is None:
-            return None
-        key = f"{table}:{key}"
-
-        if self.redis_client is None:
-            logger.debug("Redis client not available, skipping lookup")
-            return None
-            
-        try:
-            # Perform Redis GET operation
-            value = self.redis_client.get(key)
-            if value is not None:
-                logger.debug(f"Redis lookup successful: {key} -> {value}")
-                return str(value)  # Ensure string return type
-            else:
-                logger.debug(f"Redis lookup found no value for key: {key}")
-                return None
-                
-        except redis.RedisError as e:
-            logger.warning(f"Redis lookup failed for key '{key}': {e}")
-            return None
-        except Exception as e:
-            logger.warning(f"Unexpected error during Redis lookup for key '{key}': {e}")
-            return None
-
-    def redis_lookup_list(self, table, keys: List[str]) -> List[str]:
-        """Perform Redis lookups for a list of keys, returning only found values"""
-        if not keys:
-            return []
-            
-        vals = []
-        for key in keys:
-            v = self.redis_lookup(table, key)
-            if v is not None:
-                vals.append(v)
-
-        return vals
+        if self.cacher:
+            self.cacher.close()
+            logger.info("Cache connection closed")
 
 class ClickHouseBatchWriter:
     def __init__(self, ch_client, processor):
