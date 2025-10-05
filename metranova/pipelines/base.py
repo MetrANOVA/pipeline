@@ -1,7 +1,9 @@
 import importlib
 import logging
+import threading
 from typing import Dict, Optional, List
 from metranova.cachers.base import BaseCacher
+from metranova.consumers.base import BaseConsumer
 from metranova.writers.base import BaseWriter
 from metranova.processors.base import BaseProcessor
 
@@ -13,9 +15,26 @@ class BasePipeline:
         self.logger = logger
 
         # Initialize values
+        self.consumers: List[BaseConsumer] = []
+        self.processors: List[BaseProcessor] = []
         self.cacher: Optional[BaseCacher] = None
         self.writers: List[BaseWriter] = []
-        self.processors: List[BaseProcessor] = []
+        self.consumer_threads: List[threading.Thread] = []
+
+    def start(self):
+        if self.consumers:
+            for consumer in self.consumers:
+                thread = threading.Thread(target=consumer.consume_messages, name=f"Consumer-{type(consumer).__name__}")
+                thread.daemon = True
+                thread.start()
+                self.consumer_threads.append(thread)
+            self.logger.info(f"Started {len(self.consumer_threads)} consumer threads")
+        else:
+            self.logger.warning("No consumers to start")
+
+        # block until threads are done (they won't be, unless there's an error)       
+        for thread in self.consumer_threads:
+            thread.join()
 
     def process_message(self, msg, consumer_metadata: Optional[Dict] = None):
         if not msg:
@@ -53,11 +72,26 @@ class BasePipeline:
         return processors
 
     def close(self):
+        if self.consumers:
+            for consumer in self.consumers:
+                consumer.close()
+            self.logger.info("Consumers closed")
+
+        # Wait for all consumer threads to finish
+        if self.consumer_threads:
+            self.logger.info("Waiting for consumer threads to finish...")
+            for thread in self.consumer_threads:
+                thread.join(timeout=10.0)  # Wait up to 10 seconds per thread
+                if thread.is_alive():
+                    self.logger.warning(f"Thread {thread.name} did not finish within timeout")
+            self.consumer_threads.clear()
+            self.logger.info("Consumer threads cleanup completed")
+
         if self.writers:
             for writer in self.writers:
                 writer.close()
             self.logger.info("Writers closed")
-    
+
         if self.cacher:
             self.cacher.close()
             self.logger.info("Cacher closed")

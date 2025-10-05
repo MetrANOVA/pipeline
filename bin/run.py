@@ -2,7 +2,6 @@ import os
 import logging
 from metranova.pipelines.krc import KRCPipeline
 from metranova.pipelines.json import JSONPipeline
-from metranova.consumers import KafkaConsumer
 
 # Configure logging
 log_level = logging.INFO
@@ -17,35 +16,27 @@ logger = logging.getLogger(__name__)
 
 def main():
     """Main entry point"""
-    logger.info("Starting ClickHouse Writer Service")
-    
-    output = None
-    kafka_consumer = None
-    
+    logger.info("Starting MetrANova Pipeline")
+    pipeline = None
     try:
         #determine output method
-        output_method = os.getenv('PIPELINE_TYPE', 'json').lower()
-        if output_method == 'clickhouse':
-            output = KRCPipeline()
+        pipeline_type = os.getenv('PIPELINE_TYPE', 'json').lower()
+        if pipeline_type == 'clickhouse':
+            pipeline = KRCPipeline()
         else:
-            output = JSONPipeline()
+            pipeline = JSONPipeline()
 
-        # Initialize Kafka consumer
-        kafka_consumer = KafkaConsumer(pipeline=output)
-
-        # Start consuming messages
-        kafka_consumer.consume_messages()
-        
+        # Start the pipeline
+        pipeline.start()
+    except KeyboardInterrupt:
+        logger.info("Shutting down due to keyboard interrupt")
     except Exception as e:
         logger.error(f"Application error: {e}")
-        raise
+        raise 
     finally:
         # Clean shutdown
-        if hasattr(output, 'close'):
-            output.close()
-        if kafka_consumer:
-            kafka_consumer.close()
-
+        if pipeline:
+            pipeline.close()
 
 if __name__ == "__main__":
     main()

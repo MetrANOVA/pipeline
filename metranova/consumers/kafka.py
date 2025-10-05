@@ -1,42 +1,18 @@
-"""
-Base consumer classes for different message sources
-"""
-
+import os
 import logging
 import orjson
-import os
 from metranova.pipelines.base import BasePipeline
+from metranova.consumers.base import BaseConsumer
 from confluent_kafka import Consumer, KafkaError
 
-# Configure logging
-log_level = logging.INFO
-if os.getenv('DEBUG', 'false').lower() == 'true' or os.getenv('DEBUG') == '1':
-    log_level = logging.DEBUG
-logging.basicConfig(
-    level=log_level,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
-class BaseConsumer:
-    
-    def __init__(self, pipeline: BasePipeline):
-        # Initialize pipeline
-        self.pipeline = pipeline
-    
-    def consume_messages(self):
-        """Consume messages from source"""
-        raise NotImplementedError("Subclasses should implement this method")
-
-    def close(self):
-        """Close operation if needed"""
-        return
-    
 class KafkaConsumer(BaseConsumer):
     """Kafka consumer with SSL authentication using confluent-kafka"""
     
     def __init__(self, pipeline: BasePipeline):
         super().__init__(pipeline)
+        self.logger = logger
         self.consumer = None
         """Initialize Kafka consumer with SSL configuration"""
         try:
@@ -70,7 +46,7 @@ class KafkaConsumer(BaseConsumer):
             
             # Add SSL configuration if certificates are provided
             if ssl_ca_location and os.path.exists(ssl_ca_location):
-                logger.info("Configuring Kafka SSL authentication")
+                self.logger.info("Configuring Kafka SSL authentication")
                 consumer_config.update({
                     'security.protocol': 'SSL',
                     'ssl.ca.location': ssl_ca_location,
@@ -84,30 +60,30 @@ class KafkaConsumer(BaseConsumer):
                     consumer_config['ssl.key.password'] = ssl_key_password
                     
             else:
-                logger.warning("SSL certificates not found, using PLAINTEXT protocol")
+                self.logger.warning("SSL certificates not found, using PLAINTEXT protocol")
                 consumer_config['security.protocol'] = 'PLAINTEXT'
             
             # Create consumer
             self.consumer = Consumer(consumer_config)
             self.consumer.subscribe([topic])
-            
-            logger.info(f"Kafka consumer initialized for topic: {topic}")
-            logger.info(f"Bootstrap servers: {bootstrap_servers}")
-            logger.info(f"Group ID: {group_id}")
-            logger.info(f"Client ID: {client_id}")
+
+            self.logger.info(f"Kafka consumer initialized for topic: {topic}")
+            self.logger.info(f"Bootstrap servers: {bootstrap_servers}")
+            self.logger.info(f"Group ID: {group_id}")
+            self.logger.info(f"Client ID: {client_id}")
             
         except Exception as e:
-            logger.error(f"Failed to setup Kafka consumer: {e}")
+            self.logger.error(f"Failed to setup Kafka consumer: {e}")
             raise
     
     def consume_messages(self):
         """Consume messages from Kafka"""
         if not self.consumer:
-            logger.error("Kafka consumer not initialized")
+            self.logger.error("Kafka consumer not initialized")
             return
 
         try:
-            logger.info("Starting message consumption...")
+            self.logger.info("Starting message consumption...")
             while True:
                 # Poll for messages
                 msg = self.consumer.poll(timeout=1.0)
@@ -117,10 +93,10 @@ class KafkaConsumer(BaseConsumer):
                 # check for errors
                 if msg.error():
                     if msg.error().code() == KafkaError._PARTITION_EOF:
-                        logger.debug(f"End of partition reached {msg.topic()}/{msg.partition()}")
+                        self.logger.debug(f"End of partition reached {msg.topic()}/{msg.partition()}")
                         continue
                     else:
-                        logger.error(f"Kafka error: {msg.error()}")
+                        self.logger.error(f"Kafka error: {msg.error()}")
                         break
                 
                 # format the response as JSON
@@ -137,17 +113,17 @@ class KafkaConsumer(BaseConsumer):
                 try:
                     self.pipeline.process_message(msg_data, consumer_metadata=msg_metadata)
                 except Exception as e:
-                    logger.error(f"Error processing message: {e}")
+                    self.logger.error(f"Error processing message: {e}")
                     # Continue processing other messages
                     continue
                     
         except KeyboardInterrupt:
-            logger.info("Received interrupt signal, stopping consumer...")
+            self.logger.info("Received interrupt signal, stopping consumer...")
         finally:
             self.close()
 
     def close(self):
         """Close Kafka consumer"""
         if self.consumer:
-            logger.info("Closing Kafka consumer...")
+            self.logger.info("Closing Kafka consumer...")
             self.consumer.close()

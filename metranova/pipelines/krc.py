@@ -1,6 +1,7 @@
 import logging
 import os
 from metranova.cachers.redis import RedisCacher
+from metranova.consumers.kafka import KafkaConsumer
 from metranova.pipelines.base import BasePipeline
 from metranova.processors.clickhouse.base import BaseClickHouseProcessor
 from metranova.writers.clickhouse import ClickHouseWriter
@@ -13,6 +14,9 @@ class KRCPipeline(BasePipeline):
 
         # setup logger
         self.logger = logger
+
+        # setup Kafka consumers
+        self.consumers.append(KafkaConsumer(pipeline=self))
 
         # Initialize Redis connection
         self.cacher = RedisCacher()
