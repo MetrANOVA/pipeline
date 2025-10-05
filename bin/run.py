@@ -1,7 +1,7 @@
 import os
 import logging
 from metranova.pipelines.krc import KRCPipeline
-from metranova.pipelines.json import JSONPipeline
+from metranova.pipelines.json import KafkaToJSONPipeline
 
 # Configure logging
 log_level = logging.INFO
@@ -24,7 +24,7 @@ def main():
         if pipeline_type == 'clickhouse':
             pipeline = KRCPipeline()
         else:
-            pipeline = JSONPipeline()
+            pipeline = KafkaToJSONPipeline()
 
         # Start the pipeline
         pipeline.start()

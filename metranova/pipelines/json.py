@@ -1,11 +1,19 @@
 import logging
 from typing import Dict, Optional
 import orjson
+from metranova.consumers.kafka import KafkaConsumer
 from metranova.pipelines.base import BasePipeline
 
 logger = logging.getLogger(__name__)
 
-class JSONPipeline(BasePipeline):
+class KafkaToJSONPipeline(BasePipeline):
+    def __init__(self):
+        super().__init__()
+        # setup logger
+        self.logger = logger
+        # setup Kafka consumers
+        self.consumers.append(KafkaConsumer(pipeline=self))
+
     def process_message(self, msg, consumer_metadata: Optional[Dict] = None):
         """Process individual Kafka message"""
         logger.debug(f"Received message from topic {consumer_metadata.get('topic', None)}, partition {consumer_metadata.get('partition')}, offset {consumer_metadata.get('offset')}")
