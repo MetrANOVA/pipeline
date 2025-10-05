@@ -41,10 +41,10 @@ class RedisConnector(BaseConnector):
                 redis_config['password'] = self.redis_password
             
             # Create Redis connection with client-side caching enabled
-            self.redis_client = redis.Redis(**redis_config)
+            self.client = redis.Redis(**redis_config)
             
             # Test connection
-            self.redis_client.ping()
+            self.client.ping()
             logger.info(f"Connected to Redis at {self.redis_host}:{self.redis_port}, db: {self.redis_db}")
         except Exception as e:
             logger.warning(f"Failed to connect to Redis: {e}")

@@ -7,16 +7,17 @@ from typing import List, Dict, Any, Optional
 
 from metranova.connectors.clickhouse import ClickHouseConnector
 from metranova.processors.base import BaseProcessor
+from metranova.writers.base import BaseWriter
 
 logger = logging.getLogger(__name__)
 
-class ClickHouseWriter:
+class ClickHouseWriter(BaseWriter):
     def __init__(self, processors: List[BaseProcessor]):
+        super().__init__(processors)
         # setup logger
         self.logger = logger
         self.datastore = ClickHouseConnector()
         self.batchers = []
-        self.processors = processors
 
         # Setup batch writers for each processor
         for processor in self.processors:

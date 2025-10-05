@@ -1,0 +1,101 @@
+import logging
+import os
+import time
+from metranova.connectors.clickhouse import ClickHouseConnector
+from metranova.consumers.base import BaseConsumer
+from metranova.pipelines.base import BasePipeline
+
+logger = logging.getLogger(__name__)
+
+class BaseClickHouseConsumer(BaseConsumer):
+    def __init__(self, pipeline: BasePipeline):
+        super().__init__(pipeline)
+        self.logger = logger
+        self.datasource = ClickHouseConnector()
+        self.update_interval = -1
+        self.tables = []
+
+    def consume_messages(self):
+        # check connection and tables
+        if not self.datasource.client:
+            self.logger.error("ClickHouse client not initialized")
+            return
+        if not self.tables:
+            self.logger.error("No tables specified for metadata loading")
+            return
+        
+        # If update_interval is set, run periodically
+        while True:
+            # Load from tables serially
+            self.logger.info("Starting metadata loading from ClickHouse to Redis...")
+            for table in self.tables:
+                try:
+                    msg = self.query_table(table)
+                    self.pipeline.process_message(msg)
+                except Exception as e:
+                    self.logger.error(f"Error processing message: {e}")
+                    # Continue processing other messages
+                    continue
+
+            # Break if no update interval is set
+            if self.update_interval <= 0:
+                break  # Run once if no interval is set
+
+            # Sleep before next update
+            self.logger.info(f"Sleeping for {self.update_interval} seconds before next update")
+            time.sleep(self.update_interval)
+
+    def query_table(self, table: str) -> dict:
+        raise NotImplementedError("Subclasses must implement query_table method")
+
+class MetadataClickHouseConsumer(BaseClickHouseConsumer):
+    """ClickHouse consumer for loading metadata tables to Redis"""
+    def __init__(self, pipeline: BasePipeline):
+        super().__init__(pipeline)
+        self.logger = logger
+        self.update_interval = int(os.getenv('META_UPDATE_INTERVAL', -1))
+        # Load tables from environment variable
+        tables_str = os.getenv('META_LOOKUP_TABLES', '')
+        if tables_str:
+            self.tables = [table.strip() for table in tables_str.split(',') if table.strip()]
+            logger.info(f"Found {len(self.tables)} meta lookup tables: {self.tables}")
+        else:
+            logger.warning("META_LOOKUP_TABLES environment variable is empty")
+
+    def build_query(self, table: str) -> str:
+        """Build the metadata query for a specific table"""
+        query = f"""
+        SELECT argMax(id, insert_ts) as latest_id, 
+               argMax(ref, insert_ts) as latest_ref
+        FROM {table} 
+        GROUP BY id
+        ORDER BY id
+        """
+        return query
+
+    def query_table(self, table: str) -> dict:
+        """Load metadata from a single ClickHouse table to Redis"""
+        logger.info(f"Loading metadata from table: {table}")
+        
+        try:
+            # Build and execute query
+            query = self.build_query(table)
+            logger.debug(f"Executing query: {query}")
+            
+            start_time = time.time()
+            result = self.datasource.client.query(query)
+            query_time = time.time() - start_time
+            
+            # Get the data
+            rows = result.result_rows
+            logger.info(f"Query completed in {query_time:.2f}s, found {len(rows)} records")
+            
+            if not rows:
+                logger.warning(f"No data found in table {table}")
+                return {}
+
+            return {"table": table, "rows": rows}
+            
+        except Exception as e:
+            logger.error(f"Failed to load metadata from table {table}: {e}")
+            raise

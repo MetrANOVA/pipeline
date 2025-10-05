@@ -37,15 +37,16 @@ services:
       mode: replicated
       replicas: 10
 
-  meta_loader:
+  metadata_pipeline:
     image: metranova/pipeline:latest
     build:
       context: .
       dockerfile: Dockerfile
+    environment:
+      - PIPELINE_TYPE=metadata
     env_file:
       - .env
     restart: always
-    command: ["python", "bin/meta_loader.py"]
   
   redis:
     image: redis:8.2.1
