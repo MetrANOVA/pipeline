@@ -7,15 +7,18 @@ from metranova.writers.base import BaseWriter
 
 logger = logging.getLogger(__name__)
 
-class RedisWriter(BaseWriter):
+class BaseRedisWriter(BaseWriter):
     def __init__(self, processors: List[BaseProcessor]):
         super().__init__(processors)
         # setup logger
         self.logger = logger
         self.datastore = RedisConnector()
- 
+
+class RedisMetadataRefWriter(BaseRedisWriter):
     def process_message(self, msg, consumer_metadata: Optional[Dict] = None):
         #parse rows and tables
+        if not msg:
+            return
         rows = msg.get('rows', None)
         if not rows:
             self.logger.debug("No rows to process in message")
@@ -64,11 +67,73 @@ class RedisWriter(BaseWriter):
                 'table_name': table
             }
             self.datastore.client.hset(metadata_key, mapping=metadata_value)
-            
-            return loaded_count
-            
         except Exception as e:
             self.logger.error(f"Failed to load data to Redis for table {table}: {e}")
             raise
     
-   
+class RedisHashWriter(BaseRedisWriter):
+
+    def process_message(self, msg, consumer_metadata: Optional[Dict] = None):
+        # transform msg by looping through processors
+        for processor in self.processors:
+            if processor.match_message(msg):
+                msgs = processor.build_message(msg, consumer_metadata)
+                for msg in msgs:
+                    self.process_matched_message(msg, consumer_metadata)
+
+    def process_matched_message(self, msg, consumer_metadata: Optional[Dict] = None):
+        #grab table, key, data and expires object
+        if not msg:
+            return
+
+        table = msg.get('table', None)
+        if not table:
+            self.logger.warning("Message missing 'table' field")
+            return
+        self.logger.debug(f"Processing message for Redis hash table: {table}")
+
+        key = msg.get('key', None)
+        if not key:
+            self.logger.debug("No key to process in message")
+            return
+        
+        data = msg.get('data', None)
+        if not data:
+            self.logger.debug("No data object to process in message")
+            return
+        
+        # Filter out None values as Redis can't handle them
+        filtered_data = {k: v for k, v in data.items() if v is not None}
+        if not filtered_data:
+            self.logger.debug("No valid data to process after filtering None values")
+            return
+        
+        expires = msg.get('expires', None)
+        if expires is not None:
+            try:
+                expires = int(expires)
+            except ValueError:
+                self.logger.warning(f"Invalid expires value: {expires}, must be an integer representing seconds")
+                expires = None
+
+        #load into redis setting field expires using HEXPIRE
+        self.logger.debug(f"Loading data to Redis hash table: {table}, key: {key}, expires: {expires}, data: {filtered_data}") 
+        try:
+            # build redis key
+            redis_key = f"{table}:{key}"
+
+            # Use pipeline for efficient batch operations
+            pipe = self.datastore.client.pipeline()
+            
+            # Set the hash fields
+            pipe.hset(redis_key, mapping=filtered_data)
+            
+            # Use hexpire to set expire for each field in data
+            if expires is not None and expires > 0:
+                pipe.hexpire(redis_key, expires, *filtered_data.keys())
+
+            # Execute the pipeline
+            pipe.execute()
+        except Exception as e:
+            self.logger.error(f"Failed to load data to Redis for table {table}: {e}")
+            raise

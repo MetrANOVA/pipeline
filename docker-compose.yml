@@ -27,6 +27,7 @@ services:
     environment:
       - PIPELINE_TYPE=clickhouse
       - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface_base.InterfaceBaseProcessor,metranova.processors.clickhouse.interface_sap_queue.InterfaceSAPQueueProcessor,metranova.processors.clickhouse.interface_port_queue.InterfacePortQueueProcessor
+      - REDIS_PROCESSORS=metranova.processors.redis.interface.InterfaceMetadataProcessor
       - KAFKA_TOPIC=metranova_interface
     env_file:
       - .env
@@ -37,13 +38,24 @@ services:
       mode: replicated
       replicas: 10
 
-  metadata_pipeline:
+  metadata_export_pipeline:
     image: metranova/pipeline:latest
     build:
       context: .
       dockerfile: Dockerfile
     environment:
-      - PIPELINE_TYPE=metadata
+      - PIPELINE_TYPE=metadata_export
+    env_file:
+      - .env
+    restart: always
+
+  metadata_import_pipeline:
+    image: metranova/pipeline:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PIPELINE_TYPE=metadata_import
     env_file:
       - .env
     restart: always

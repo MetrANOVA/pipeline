@@ -21,6 +21,5 @@ class BaseClickHouseProcessor(BaseProcessor):
         for col in self.column_names:
             if col not in message.keys():
                 raise ValueError(f"Missing column '{col}' in message")
-            self.logger.debug(f"Column '{col}': {message.get(col)}")
             cols.append(message.get(col))
         return cols

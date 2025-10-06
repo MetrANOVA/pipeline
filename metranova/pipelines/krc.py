@@ -4,7 +4,9 @@ from metranova.cachers.redis import RedisCacher
 from metranova.consumers.kafka import KafkaConsumer
 from metranova.pipelines.base import BasePipeline
 from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+from metranova.processors.redis.base import BaseRedisProcessor
 from metranova.writers.clickhouse import ClickHouseWriter
+from metranova.writers.redis import RedisHashWriter
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +29,11 @@ class KRCPipeline(BasePipeline):
         if not self.processors:
             raise ValueError("At least one processor must be provided")
 
-        # Load ClickHouse writers and for each clickhouse processor
+        # Load ClickHouse writer
         self.writers.append(ClickHouseWriter(self.processors))
 
-        # Load redis processors
-        #TODO: Write some redis processors
-
-        #load redis writers for each redis processor
-        #TODO: Write some redis processors
-    
+        # Load Redis processors and set writer if any
+        redis_processors_str = os.getenv('REDIS_PROCESSORS', '')
+        self.redis_processors = self.load_processors(redis_processors_str, required_class=BaseRedisProcessor)
+        if self.redis_processors:
+            self.writers.append(RedisHashWriter(self.redis_processors))

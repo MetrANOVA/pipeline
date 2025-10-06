@@ -1,6 +1,6 @@
 import os
 import logging
-from metranova.pipelines.metadata import CRMetadataPipeline
+from metranova.pipelines.metadata import CRMetadataPipeline, RCMetadataPipeline
 from metranova.pipelines.krc import KRCPipeline
 from metranova.pipelines.json import KafkaToJSONPipeline
 
@@ -24,8 +24,10 @@ def main():
         pipeline_type = os.getenv('PIPELINE_TYPE', 'json').lower()
         if pipeline_type == 'clickhouse':
             pipeline = KRCPipeline()
-        elif pipeline_type == 'metadata':
+        elif pipeline_type == 'metadata_import':
             pipeline = CRMetadataPipeline()
+        elif pipeline_type == 'metadata_export':
+            pipeline = RCMetadataPipeline()
         else:
             pipeline = KafkaToJSONPipeline()
 

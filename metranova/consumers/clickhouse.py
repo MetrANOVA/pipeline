@@ -27,7 +27,7 @@ class BaseClickHouseConsumer(BaseConsumer):
         # If update_interval is set, run periodically
         while True:
             # Load from tables serially
-            self.logger.info("Starting metadata loading from ClickHouse to Redis...")
+            self.logger.info("Starting metadata loading from ClickHouse")
             for table in self.tables:
                 try:
                     msg = self.query_table(table)
@@ -49,7 +49,7 @@ class BaseClickHouseConsumer(BaseConsumer):
         raise NotImplementedError("Subclasses must implement query_table method")
 
 class MetadataClickHouseConsumer(BaseClickHouseConsumer):
-    """ClickHouse consumer for loading metadata tables to Redis"""
+    """ClickHouse consumer for loading metadata tables"""
     def __init__(self, pipeline: BasePipeline):
         super().__init__(pipeline)
         self.logger = logger
@@ -74,7 +74,7 @@ class MetadataClickHouseConsumer(BaseClickHouseConsumer):
         return query
 
     def query_table(self, table: str) -> dict:
-        """Load metadata from a single ClickHouse table to Redis"""
+        """Load metadata from a single ClickHouse table"""
         logger.info(f"Loading metadata from table: {table}")
         
         try:

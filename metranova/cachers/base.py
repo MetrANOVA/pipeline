@@ -4,7 +4,10 @@ from typing import Optional, List
 class BaseCacher:
     def __init__(self):
         pass
-
+    
+    def prime(self):
+        pass
+    
     def lookup(self, table, key: str) -> Optional[str]:
         raise NotImplementedError("Subclasses should implement this method")
 
