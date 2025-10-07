@@ -51,8 +51,4 @@ class RedisCacher(BaseCacher):
                 vals.append(v)
 
         return vals
-    
-    def close(self):
-        if self.cache.client:
-            self.cache.client.close()
-            logger.info("Redis cache connection closed")
+

@@ -1,12 +1,15 @@
-
+import logging
 from typing import Optional, List
+
+logger = logging.getLogger(__name__)
 
 class BaseCacher:
     def __init__(self):
-        pass
+        self.logger = logger
+        self.cache = None
     
     def prime(self):
-        pass
+        return
     
     def lookup(self, table, key: str) -> Optional[str]:
         raise NotImplementedError("Subclasses should implement this method")
@@ -15,4 +18,5 @@ class BaseCacher:
         raise NotImplementedError("Subclasses should implement this method")
 
     def close(self):
-        raise NotImplementedError("Subclasses should implement this method")
+        if self.cache:
+            self.cache.close()

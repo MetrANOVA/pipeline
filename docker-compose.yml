@@ -26,7 +26,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface_base.InterfaceBaseProcessor,metranova.processors.clickhouse.interface_sap_queue.InterfaceSAPQueueProcessor,metranova.processors.clickhouse.interface_port_queue.InterfacePortQueueProcessor
+      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface.InterfaceTrafficProcessor,metranova.processors.clickhouse.interface.InterfaceSAPQueueProcessor,metranova.processors.clickhouse.interface.InterfacePortQueueProcessor
       - REDIS_PROCESSORS=metranova.processors.redis.interface.InterfaceMetadataProcessor
       - KAFKA_TOPIC=metranova_interface
     env_file:
@@ -45,6 +45,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=metadata_export
+      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface.InterfaceMetadataProcessor
     env_file:
       - .env
     restart: always

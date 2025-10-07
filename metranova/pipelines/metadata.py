@@ -36,8 +36,8 @@ class RCMetadataPipeline(BasePipeline):
         self.cacher = ClickHouseCacher()
 
         # set processor to METADATA PROCESSORS
-        meta_processors_str = os.getenv('METADATA_PROCESSORS', '')
-        self.processors = self.load_processors(meta_processors_str)
+        ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')
+        self.processors = self.load_processors(ch_processors_str)
         if not self.processors:
             raise ValueError("At least one processor must be provided for metadata pipeline")
 
