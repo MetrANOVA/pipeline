@@ -7,8 +7,8 @@ logger = logging.getLogger(__name__)
 class InterfaceMetadataProcessor(BaseRedisProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
-        self.table = os.getenv('REDIS_INTERFACE_META_TABLE', 'meta_if_cache')
-        self.expires = int(os.getenv('REDIS_INTERFACE_META_EXPIRES', '86400'))  # default 1 day
+        self.table = os.getenv('REDIS_IF_METADATA_TABLE', 'meta_if_cache')
+        self.expires = int(os.getenv('REDIS_IF_METADATA_EXPIRES', '86400'))  # default 1 day
         self.required_fields = [["meta", "id"], ["meta", "name"], ["meta", "device"]]
         self.match_fields = [
             ["meta", "id"], ["meta", "name"], ["meta", "device"], ["meta", "description"],

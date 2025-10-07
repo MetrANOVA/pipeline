@@ -53,14 +53,14 @@ class MetadataClickHouseConsumer(BaseClickHouseConsumer):
     def __init__(self, pipeline: BasePipeline):
         super().__init__(pipeline)
         self.logger = logger
-        self.update_interval = int(os.getenv('META_UPDATE_INTERVAL', -1))
+        self.update_interval = int(os.getenv('CLICKHOUSE_CONSUMER_UPDATE_INTERVAL', -1))
         # Load tables from environment variable
-        tables_str = os.getenv('META_LOOKUP_TABLES', '')
+        tables_str = os.getenv('CLICKHOUSE_CONSUMER_TABLES', '')
         if tables_str:
             self.tables = [table.strip() for table in tables_str.split(',') if table.strip()]
             logger.info(f"Found {len(self.tables)} meta lookup tables: {self.tables}")
         else:
-            logger.warning("META_LOOKUP_TABLES environment variable is empty")
+            logger.warning("CLICKHOUSE_CONSUMER_TABLES environment variable is empty")
 
     def build_query(self, table: str) -> str:
         """Build the metadata query for a specific table"""

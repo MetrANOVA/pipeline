@@ -59,9 +59,9 @@ class RedisHashConsumer(RedisConsumer):
     def __init__(self, pipeline: BasePipeline):
         super().__init__(pipeline)
         self.logger = logger
-        self.update_interval = int(os.getenv('REDIS_HASH_CONSUMER_UPDATE_INTERVAL', -1))
+        self.update_interval = int(os.getenv('REDIS_CONSUMER_UPDATE_INTERVAL', -1))
         # Load tables from environment variable
-        tables_str = os.getenv('REDIS_HASH_CONSUMER_TABLES', '')
+        tables_str = os.getenv('REDIS_CONSUMER_TABLES', '')
         if tables_str:
             self.tables = [table.strip() for table in tables_str.split(',') if table.strip()]
 

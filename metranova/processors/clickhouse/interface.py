@@ -69,7 +69,7 @@ class InterfaceMetadataProcessor(BaseClickHouseProcessor):
     # Note does not use BaseInterfaceProcessor as sourced from redis not kafka-style
     def __init__(self, pipeline):
         super().__init__(pipeline)
-        self.table = os.getenv('CLICKHOUSE_IF_METADATA_TABLE', 'if_meta')
+        self.table = os.getenv('CLICKHOUSE_IF_METADATA_TABLE', 'meta_if')
         self.force_update = os.getenv('CLICKHOUSE_IF_METADATA_FORCE_UPDATE', 'false').lower() in ['true', '1', 'yes']
         self.create_table_cmd = f"""
         CREATE TABLE IF NOT EXISTS {self.table} (
@@ -229,7 +229,7 @@ class InterfaceTrafficProcessor(BaseInterfaceProcessor):
 
     def __init__(self, pipeline):
         super().__init__(pipeline)
-        self.table = os.getenv('CLICKHOUSE_IF_BASE_TABLE', 'if_base')
+        self.table = os.getenv('CLICKHOUSE_IF_TRAFFIC_TABLE', 'if_traffic')
         self.create_table_cmd = f"""
         CREATE TABLE IF NOT EXISTS {self.table} (
             `start_ts` DateTime64(3, 'UTC') CODEC(Delta,ZSTD),
@@ -316,10 +316,9 @@ class InterfaceTrafficProcessor(BaseInterfaceProcessor):
 class InterfacePortQueueProcessor(BaseInterfaceQueueProcessor):
      def __init__(self, pipeline):
         super().__init__(pipeline)
-        self.table = os.getenv('CLICKHOUSE_IF_PORT_QUEUE_TABLE', 'if_base')
-        self.meta_if_lookup_table = os.getenv('CLICKHOUSE_IF_METADATA_TABLE', 'meta_if')
-        self.min_queue = int(os.getenv('INTERFACE_PORT_MIN_QUEUE', '1'))
-        self.max_queue = int(os.getenv('INTERFACE_PORT_MAX_QUEUE', '16'))
+        self.table = os.getenv('CLICKHOUSE_IF_PORT_QUEUE_TABLE', 'if_port_queue')
+        self.min_queue = int(os.getenv('CLICKHOUSE_IF_PORT_QUEUE_MIN', '1'))
+        self.max_queue = int(os.getenv('CLICKHOUSE_IF_PORT_QUEUE_MAX', '16'))
         self.queue_values_fields = [
             "in_inprof_dropped_bits",
             "in_inprof_dropped_pkts", 
@@ -413,9 +412,9 @@ class InterfacePortQueueProcessor(BaseInterfaceQueueProcessor):
 class InterfaceSAPQueueProcessor(BaseInterfaceQueueProcessor):
      def __init__(self, pipeline):
         super().__init__(pipeline)
-        self.min_queue = int(os.getenv('INTERFACE_SAP_MIN_QUEUE', '1'))
-        self.max_queue = int(os.getenv('INTERFACE_SAP_MAX_QUEUE', '16'))
-        self.table = os.getenv('CLICKHOUSE_IF_SAP_QUEUE_TABLE', 'if_base')
+        self.min_queue = int(os.getenv('CLICKHOUSE_IF_SAP_QUEUE_MIN', '1'))
+        self.max_queue = int(os.getenv('CLICKHOUSE_IF_SAP_QUEUE_MAX', '16'))
+        self.table = os.getenv('CLICKHOUSE_IF_SAP_QUEUE_TABLE', 'if_sap_queue')
         self.queue_values_fields = [
             "in_unicast_priority_hiprio_offered_pkts",
             "in_unicast_priority_hiprio_offered_bits",
