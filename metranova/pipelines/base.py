@@ -67,7 +67,7 @@ class BasePipeline:
             else: 
                 self.logger.warning("No valid ClickHouse processors loaded")
         else: 
-            self.logger.warning("CLICKHOUSE_PROCESSORS environment variable is empty") 
+            self.logger.warning("Processors string is empty") 
         
         return processors
 

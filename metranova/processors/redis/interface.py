@@ -40,10 +40,13 @@ class InterfaceMetadataProcessor(BaseRedisProcessor):
                 parts = meta_id.split('::', 1)
                 if len(parts) == 2:
                     value.setdefault('meta', {})['name'] = parts[1]
-        # double check name is now present
-        if value.get('meta', {}).get('name', None) is None:
-            self.logger.error(f"Missing required field 'name' in message value and has no parsable meta.id")
-            return None
+
+        #format edge boolean as a string. if it is a list, take the first element
+        if isinstance(value.get('meta', {}).get('intercloud', None), bool):
+            value['meta']['intercloud'] = 'true' if value['meta']['intercloud'] else 'false'
+        elif isinstance(value.get('meta', {}).get('intercloud', None), list) and len(value['meta']['intercloud']) > 0:
+            #no idea why this is ever a list, but handle it anyway
+            value['meta']['intercloud'] = 'true' if value['meta']['intercloud'][0] else 'false'
 
         return [{
             "table": self.table,
@@ -54,7 +57,7 @@ class InterfaceMetadataProcessor(BaseRedisProcessor):
                 "device": value.get('meta', {}).get('device', None),
                 "description": value.get('meta', {}).get('description', None),
                 "ifindex": value.get('meta', {}).get('if_index', None),
-                #"edge": value.get('meta', {}).get('intercloud', None),
+                "edge": value.get('meta', {}).get('intercloud', None),
                 "ipv4": value.get('meta', {}).get('ipv4', None),
                 "ipv6": value.get('meta', {}).get('ipv6', None),
                 "netflow_index": value.get('meta', {}).get('netflow_index', None),
