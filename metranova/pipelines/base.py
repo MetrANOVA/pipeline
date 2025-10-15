@@ -2,7 +2,7 @@ import importlib
 import logging
 import threading
 from typing import Dict, Optional, List
-from metranova.cachers.base import BaseCacher
+from metranova.cachers.base import BaseCacher, NoOpCacher
 from metranova.consumers.base import BaseConsumer
 from metranova.writers.base import BaseWriter
 from metranova.processors.base import BaseProcessor
@@ -17,7 +17,7 @@ class BasePipeline:
         # Initialize values
         self.consumers: List[BaseConsumer] = []
         self.processors: List[BaseProcessor] = []
-        self.cacher: Optional[BaseCacher] = None
+        self.cachers: Dict[str, BaseCacher] = {}
         self.writers: List[BaseWriter] = []
         self.consumer_threads: List[threading.Thread] = []
 
@@ -35,6 +35,10 @@ class BasePipeline:
         # block until threads are done (they won't be, unless there's an error)       
         for thread in self.consumer_threads:
             thread.join()
+
+    def cacher(self, name: str) -> BaseCacher:
+        # Return NoOpCacher if not found so don't have to check for None
+        return self.cachers.get(name, NoOpCacher())
 
     def process_message(self, msg, consumer_metadata: Optional[Dict] = None):
         if not msg:
@@ -92,6 +96,7 @@ class BasePipeline:
                 writer.close()
             self.logger.info("Writers closed")
 
-        if self.cacher:
-            self.cacher.close()
-            self.logger.info("Cacher closed")
+        if self.cachers:
+            for cacher in self.cachers.values():
+                cacher.close()
+            self.logger.info("Cachers closed")

@@ -59,7 +59,7 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
 
         #determine ref and if we need new record
         ref = "{}__v1".format(id)
-        cached_record = self.pipeline.cacher.lookup(self.table, id) if self.pipeline.cacher else None
+        cached_record = self.pipeline.cacher("clickhouse").lookup(self.table, id)
         if not self.force_update and cached_record and cached_record['hash'] == record_md5:
             self.logger.debug(f"Record {id} unchanged, skipping")
             return None

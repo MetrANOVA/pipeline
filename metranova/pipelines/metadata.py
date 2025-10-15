@@ -33,7 +33,7 @@ class RCMetadataPipeline(BasePipeline):
         self.logger = logger
 
         # add clickerhouse cacher
-        self.cacher = ClickHouseCacher()
+        self.cachers["clickhouse"] = ClickHouseCacher()
 
         # set processor to METADATA PROCESSORS
         ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')

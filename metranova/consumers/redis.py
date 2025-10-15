@@ -32,8 +32,9 @@ class RedisConsumer(BaseConsumer):
             for table in self.tables:
                 try:
                     # Prime cacher if exists
-                    if self.pipeline.cacher:
-                        self.pipeline.cacher.prime()
+                    if self.pipeline.cachers:
+                        for cacher in self.pipeline.cachers.values():
+                            cacher.prime()
 
                     # Query all records from the table
                     for msg in self.query_table(table):

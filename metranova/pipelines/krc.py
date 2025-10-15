@@ -21,7 +21,7 @@ class KRCPipeline(BasePipeline):
         self.consumers.append(KafkaConsumer(pipeline=self))
 
         # Initialize Redis connection
-        self.cacher = RedisCacher()
+        self.cachers['redis'] = RedisCacher()
 
         # Load clickhouse processors
         ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')

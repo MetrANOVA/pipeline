@@ -20,3 +20,16 @@ class BaseCacher:
     def close(self):
         if self.cache:
             self.cache.close()
+
+class NoOpCacher(BaseCacher):
+    def __init__(self):
+        super().__init__()
+    
+    def prime(self):
+        return
+    
+    def lookup(self, table, key: str) -> Optional[str]:
+        return None
+
+    def lookup_list(self, table, keys: List[str]) -> List[str]:
+        return []
