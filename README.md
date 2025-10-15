@@ -192,7 +192,7 @@ Imports metadata from ClickHouse into Redis for fast lookup operations. This pip
 | `CLICKHOUSE_CONSUMER_UPDATE_INTERVAL` | `-1` | Update interval in seconds |
 | `CLICKHOUSE_CONSUMER_TABLES` | `` | Comma-separated table list |
 | `CLICKHOUSE_CACHER_TABLES` | `` | Tables for caching |
-| `CLICKHOUSE_IF_METADATA_FORCE_UPDATE` | `false` | Force metadata updates |
+| `CLICKHOUSE_METADATA_FORCE_UPDATE` | `false` | Force metadata updates |
 
 ### Interface Queue Settings
 | Variable | Default | Description |

@@ -61,6 +61,18 @@ services:
       - .env
     restart: always
   
+  scireg_pipeline:
+    image: metranova/pipeline:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PIPELINE_TYPE=scireg
+      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.scireg.ScienceRegistryProcessor
+    env_file:
+      - .env
+    restart: always
+  
   redis:
     image: redis:8.2.1
     ports:

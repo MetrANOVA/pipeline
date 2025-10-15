@@ -3,6 +3,7 @@ import logging
 from metranova.pipelines.metadata import CRMetadataPipeline, RCMetadataPipeline
 from metranova.pipelines.krc import KRCPipeline
 from metranova.pipelines.json import KafkaToJSONPipeline
+from metranova.pipelines.scireg import ScienceRegistryPipeline
 
 # Configure logging
 log_level = logging.INFO
@@ -28,6 +29,8 @@ def main():
             pipeline = CRMetadataPipeline()
         elif pipeline_type == 'metadata_export':
             pipeline = RCMetadataPipeline()
+        elif pipeline_type == 'scireg':
+            pipeline = ScienceRegistryPipeline()
         else:
             pipeline = KafkaToJSONPipeline()
 

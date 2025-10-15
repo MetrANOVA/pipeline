@@ -3,7 +3,7 @@ import logging
 import orjson
 import os
 import re
-from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseMetadataProcessor
 from typing import Iterator, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -65,12 +65,12 @@ class BaseInterfaceQueueProcessor(BaseInterfaceProcessor):
                 return True
         return False
 
-class InterfaceMetadataProcessor(BaseClickHouseProcessor):
+class InterfaceMetadataProcessor(BaseMetadataProcessor):
     # Note does not use BaseInterfaceProcessor as sourced from redis not kafka-style
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.table = os.getenv('CLICKHOUSE_IF_METADATA_TABLE', 'meta_if')
-        self.force_update = os.getenv('CLICKHOUSE_IF_METADATA_FORCE_UPDATE', 'false').lower() in ['true', '1', 'yes']
+        self.val_id_field = ['data', 'id']
         self.create_table_cmd = f"""
         CREATE TABLE IF NOT EXISTS {self.table} (
             ref String,
@@ -128,44 +128,11 @@ class InterfaceMetadataProcessor(BaseClickHouseProcessor):
         ]
 
         self.required_fields = [ ['data', 'id'], ['data', 'device'], ['data', 'name'] ]
-    
-    def build_message(self, value: dict, msg_metadata: dict) -> list:
-        # check required fields
-        if not self.has_required_fields(value):
-            return None
 
-        #convert record to json, sort keys, and get md5 hash
-        value_json = orjson.dumps(value, option=orjson.OPT_SORT_KEYS).decode('utf-8')
-        record_md5 = hashlib.md5(value_json.encode('utf-8')).hexdigest()
-        
-        #determine ref and if we need new record
-        ref = "{}__v1".format(value['data']['id'])
-        cached_record = self.pipeline.cacher.lookup(self.table, value['data']['id']) if self.pipeline.cacher else None
-        if not self.force_update and cached_record and cached_record['hash'] == record_md5:
-            self.logger.debug(f"Record {value['data']['id']} unchanged, skipping")
-            return None
-        elif cached_record:
-            #change so update
-            self.logger.info(f"Record {value['data']['id']} changed, updating")
-            #get latest version number from end of existing ref suffix ov __v{version_num} which may be multiple digits
-            latest_ref = cached_record.get('ref', '')
-            #use regex to extract version number
-            match = re.search(r'__v(\d+)$', latest_ref)
-            if match:
-                version_num = int(match.group(1)) + 1
-                ref = "{}__v{}".format(value['data']['id'], version_num)
-            else:
-                # If no version found, log a warning and skip
-                self.logger.warning(f"No version found in ref {latest_ref} for record {value['data']['id']}, skipping version increment")
-                return None
-    
-        #init hash
+    def build_metadata_fields(self, value: dict) -> dict:
         formatted_record = {
-            'ref': ref,
-            'hash': record_md5,
             'description': value.get('data', {}).get('description', None),
             'device': value.get('data', {}).get('device', None),
-            'id': value.get('data', {}).get('id', None),
             'ifindex': value.get('data', {}).get('ifindex', None),
             'edge': value.get('data', {}).get('edge', False),
             'ipv4': value.get('data', {}).get('ipv4', None),
@@ -223,7 +190,7 @@ class InterfaceMetadataProcessor(BaseClickHouseProcessor):
                     formatted_record[field] = None
 
         #build a hash with all the keys and values from value['data']
-        return [formatted_record]
+        return formatted_record
 
 class InterfaceTrafficProcessor(BaseInterfaceProcessor):
 
