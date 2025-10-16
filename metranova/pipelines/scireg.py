@@ -1,6 +1,7 @@
 import logging
 import os
 
+from metranova.cachers.clickhouse import ClickHouseCacher
 from metranova.pipelines.base import BasePipeline
 from metranova.writers.clickhouse import ClickHouseWriter
 from metranova.consumers.http import HTTPConsumer
@@ -14,6 +15,9 @@ class ScienceRegistryPipeline(BasePipeline):
         super().__init__()
         # setup logger
         self.logger = logger
+
+        # add clickerhouse cacher to load existing metadata references
+        self.cachers["clickhouse"] = ClickHouseCacher()
 
         # set processor to METADATA PROCESSORS
         ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')

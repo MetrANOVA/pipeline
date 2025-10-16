@@ -56,6 +56,8 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         if id is None:
             self.logger.error(f"Missing identifier field(s) {self.val_id_field} in message value")
             return None
+        #make sure id is string
+        id = str(id)
 
         #determine ref and if we need new record
         ref = "{}__v1".format(id)

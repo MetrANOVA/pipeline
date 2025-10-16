@@ -20,7 +20,6 @@ class ClickHouseCacher(BaseCacher):
     def prime(self):
         for table in self.tables:
             self.prime_table(table)
-        self.logger.debug(f"ClickHouse Cacher value: {self.local_cache}")
     
     def prime_table(self, table):
         """Preload any necessary data into local cache"""

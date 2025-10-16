@@ -41,6 +41,12 @@ class HTTPConsumer(BaseConsumer):
         while True:
             # Load HTTP endpoints serially
             self.logger.info("Starting metadata loading from HTTP source")
+
+            # Prime cacher if exists
+            if self.pipeline.cachers:
+                for cacher in self.pipeline.cachers.values():
+                    cacher.prime()
+
             for url in self.urls:
                 try:
                     result = self.datasource.client.get(url)
