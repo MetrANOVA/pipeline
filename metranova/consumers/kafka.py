@@ -17,49 +17,35 @@ class KafkaConsumer(BaseConsumer):
     
     def consume_messages(self):
         """Consume messages from Kafka"""
-        if not self.datasource.client:
-            self.logger.error("Kafka consumer not initialized")
+        msg = self.datasource.client.poll(timeout=1.0)
+        if msg is None:
             return
+        
+        # check for errors
+        if msg.error():
+            if msg.error().code() == KafkaError._PARTITION_EOF:
+                self.logger.debug(f"End of partition reached {msg.topic()}/{msg.partition()}")
+                return
+            else:
+                self.logger.error(f"Kafka error: {msg.error()}")
+                return
 
+        # format the response as JSON
+        msg_data = orjson.loads(msg.value()) if msg.value() else None
+        msg_metadata = {
+            'topic': msg.topic(),
+            'partition': msg.partition(),
+            'offset': msg.offset(),
+            'timestamp': msg.timestamp()[1] if msg.timestamp() else None,
+            'key': msg.key().decode('utf-8') if msg.key() else None
+        }
+
+        # Process the message
         try:
-            self.logger.info("Starting message consumption...")
-            while True:
-                # Poll for messages
-                msg = self.datasource.client.poll(timeout=1.0)
-                if msg is None:
-                    continue
-                
-                # check for errors
-                if msg.error():
-                    if msg.error().code() == KafkaError._PARTITION_EOF:
-                        self.logger.debug(f"End of partition reached {msg.topic()}/{msg.partition()}")
-                        continue
-                    else:
-                        self.logger.error(f"Kafka error: {msg.error()}")
-                        break
-                
-                # format the response as JSON
-                msg_data = orjson.loads(msg.value()) if msg.value() else None
-                msg_metadata = {
-                    'topic': msg.topic(),
-                    'partition': msg.partition(),
-                    'offset': msg.offset(),
-                    'timestamp': msg.timestamp()[1] if msg.timestamp() else None,
-                    'key': msg.key().decode('utf-8') if msg.key() else None
-                }
-
-                # Process the message
-                try:
-                    self.pipeline.process_message(msg_data, consumer_metadata=msg_metadata)
-                except Exception as e:
-                    self.logger.error(f"Error processing message: {e}")
-                    # Continue processing other messages
-                    continue
-                    
-        except KeyboardInterrupt:
-            self.logger.info("Received interrupt signal, stopping consumer...")
-        finally:
-            self.close()
+            self.pipeline.process_message(msg_data, consumer_metadata=msg_metadata)
+        except Exception as e:
+            self.logger.error(f"Error processing message: {e}")
+            # Continue processing other messages
 
     def close(self):
         """Close Kafka consumer"""

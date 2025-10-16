@@ -3,54 +3,32 @@ import os
 import time
 from typing import Iterable
 from metranova.connectors.redis import RedisConnector
-from metranova.consumers.base import BaseConsumer
+from metranova.consumers.base import TimedIntervalConsumer
 from metranova.pipelines.base import BasePipeline
 
 logger = logging.getLogger(__name__)
 
-class RedisConsumer(BaseConsumer):
+class RedisConsumer(TimedIntervalConsumer):
     def __init__(self, pipeline: BasePipeline):
         super().__init__(pipeline)
         self.logger = logger
         self.datasource = RedisConnector()
-        self.update_interval = -1
         self.tables = []
 
     def consume_messages(self):
-        # check connection and tables
-        if not self.datasource.client:
-            self.logger.error("Redis client not initialized")
-            return
         if not self.tables:
             self.logger.error("No tables specified for loading")
             return
-        
-        # If update_interval is set, run periodically
-        while True:
-            # Load from tables serially
-            self.logger.info("Starting loading from Redis...")
-            for table in self.tables:
-                try:
-                    # Prime cacher if exists
-                    if self.pipeline.cachers:
-                        for cacher in self.pipeline.cachers.values():
-                            cacher.prime()
-
-                    # Query all records from the table
-                    for msg in self.query_table(table):
-                        self.pipeline.process_message(msg)
-                except Exception as e:
-                    self.logger.error(f"Error processing message: {e}")
-                    # Continue processing other messages
-                    continue
-
-            # Break if no update interval is set
-            if self.update_interval <= 0:
-                break  # Run once if no interval is set
-
-            # Sleep before next update
-            self.logger.info(f"Sleeping for {self.update_interval} seconds before next update")
-            time.sleep(self.update_interval)
+        self.logger.info("Starting loading from Redis...")
+        for table in self.tables:
+            try:
+                # Query all records from the table
+                for msg in self.query_table(table):
+                    self.pipeline.process_message(msg)
+            except Exception as e:
+                self.logger.error(f"Error processing message: {e}")
+                # Continue processing other messages
+                continue
 
     def query_table(self, table: str) -> dict:
         raise NotImplementedError("Subclasses must implement query_table method")

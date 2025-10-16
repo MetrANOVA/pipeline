@@ -24,7 +24,7 @@ class BasePipeline:
     def start(self):
         if self.consumers:
             for consumer in self.consumers:
-                thread = threading.Thread(target=consumer.consume_messages, name=f"Consumer-{type(consumer).__name__}")
+                thread = threading.Thread(target=consumer.consume, name=f"Consumer-{type(consumer).__name__}")
                 thread.daemon = True
                 thread.start()
                 self.consumer_threads.append(thread)
