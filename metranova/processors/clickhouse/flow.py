@@ -2,7 +2,7 @@ from typing import Any, Dict, Iterator
 from metranova.processors.clickhouse.base import BaseClickHouseProcessor
 import os
 
-class FlowProcessor(BaseClickHouseProcessor):
+class BaseFlowProcessor(BaseClickHouseProcessor):
 
     def __init__(self, pipeline):
         super().__init__(pipeline)
@@ -217,6 +217,10 @@ class FlowProcessor(BaseClickHouseProcessor):
             "pkts_per_sec",
         ]
 
+class StardustFlowProcessor(BaseFlowProcessor):
+    """Processor for Stardust flow data - will be deleted in future"""
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
         self.required_fields = [
             ['start'], 
             ['end'], 

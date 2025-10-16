@@ -8,7 +8,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.flow.FlowProcessor
+      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.flow.StardustFlowProcessor
       - KAFKA_TOPIC=metranova_flow
       - IP_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE}
     env_file:
@@ -92,7 +92,27 @@ services:
     volumes:
       - ./caches:/app/caches:rw
     restart: always
-  
+
+  sfacctd_pipeline:
+    image: metranova/pipeline:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PIPELINE_TYPE=clickhouse
+      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.pmacct.SFAcctdFlowProcessor
+      - KAFKA_TOPIC=metranova_sflow
+      - IP_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE}
+    env_file:
+      - .env
+    volumes:
+      - ./certificates:/app/certificates:ro
+      - ./caches:/app/caches:ro
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 10
+
   redis:
     image: redis:8.2.1
     ports:
