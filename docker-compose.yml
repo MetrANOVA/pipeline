@@ -10,10 +10,12 @@ services:
       - PIPELINE_TYPE=clickhouse
       - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.flow.FlowProcessor
       - KAFKA_TOPIC=metranova_flow
+      - IP_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE}
     env_file:
       - .env
     volumes:
       - ./certificates:/app/certificates:ro
+      - ./caches:/app/caches:ro
     restart: always
     deploy:
       mode: replicated
@@ -46,6 +48,7 @@ services:
     environment:
       - PIPELINE_TYPE=metadata_export
       - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface.InterfaceMetadataProcessor
+      - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_IF_METADATA_TABLE}
     env_file:
       - .env
     restart: always
@@ -57,6 +60,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=metadata_import
+      - CLICKHOUSE_CONSUMER_TABLES=${CLICKHOUSE_IF_METADATA_TABLE}
     env_file:
       - .env
     restart: always
@@ -69,8 +73,24 @@ services:
     environment:
       - PIPELINE_TYPE=scireg
       - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.scireg.ScienceRegistryProcessor
+      - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE}
     env_file:
       - .env
+    restart: always
+  
+  ip_metadata_import_pipeline:
+    image: metranova/pipeline:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PIPELINE_TYPE=ip_metadata_import
+      - CLICKHOUSE_CONSUMER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE}
+      - FILE_PROCESSORS=metranova.processors.file.base.IPTriePickleFileProcessor
+    env_file:
+      - .env
+    volumes:
+      - ./caches:/app/caches:rw
     restart: always
   
   redis:

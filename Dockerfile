@@ -19,6 +19,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY bin/ ./bin/
 COPY metranova/ ./metranova/
 
+#Create a directory for storing cache files
+RUN mkdir caches
+
 # Create __init__.py file to make metranova a proper Python package
 RUN touch ./metranova/__init__.py
 

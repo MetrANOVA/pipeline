@@ -1,6 +1,6 @@
 import os
 import logging
-from metranova.pipelines.metadata import CRMetadataPipeline, RCMetadataPipeline
+from metranova.pipelines.metadata import CRMetadataPipeline, IPTrieMetadataPipeline, RCMetadataPipeline
 from metranova.pipelines.krc import KRCPipeline
 from metranova.pipelines.json import KafkaToJSONPipeline
 from metranova.pipelines.scireg import ScienceRegistryPipeline
@@ -31,6 +31,8 @@ def main():
             pipeline = RCMetadataPipeline()
         elif pipeline_type == 'scireg':
             pipeline = ScienceRegistryPipeline()
+        elif pipeline_type == 'ip_metadata_import':
+            pipeline = IPTrieMetadataPipeline()
         else:
             pipeline = KafkaToJSONPipeline()
 

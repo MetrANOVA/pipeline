@@ -26,6 +26,7 @@ class ClickHouseWriter(BaseWriter):
             self.batchers.append(batcher)
 
     def process_message(self, msg, consumer_metadata: Optional[Dict] = None):
+        """Override process_message to use batchers"""
         if not msg:
             return
         for batcher in self.batchers:

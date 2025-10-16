@@ -12,10 +12,7 @@ class BaseConsumer:
     
     def pre_consume_messages(self):
         """Hook to run before starting message consumption, e.g. to prime cachers"""
-        # Prime cacher if exists
-        if self.pipeline.cachers:
-            for cacher in self.pipeline.cachers.values():
-                cacher.prime()
+        return
 
     def post_consume_messages(self):
         """Hook to run after finishing message consumption"""
@@ -50,9 +47,17 @@ class TimedIntervalConsumer(BaseConsumer):
     def __init__(self, pipeline: BaseConsumer):
         super().__init__(pipeline)
         self.logger = logger
-        # Override update_interval in subclass
+        # Override below in subclass
         self.update_interval = -1  # in seconds, -1 means run once
-    
+        self.auto_prime_cachers = True
+
+    def pre_consume_messages(self):
+        """Hook to run before starting message consumption, e.g. to prime cachers"""
+        # Prime cacher if exists
+        if self.auto_prime_cachers and self.pipeline.cachers:
+            for cacher in self.pipeline.cachers.values():
+                cacher.prime()
+
     def post_consume_messages(self):
         # Break if no update interval is set
         if self.update_interval <= 0:

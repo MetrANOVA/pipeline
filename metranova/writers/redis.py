@@ -16,6 +16,7 @@ class BaseRedisWriter(BaseWriter):
 
 class RedisMetadataRefWriter(BaseRedisWriter):
     def process_message(self, msg, consumer_metadata: Optional[Dict] = None):
+        """Override process_message since don't use processors here"""
         #parse rows and tables
         if not msg:
             return
@@ -73,15 +74,7 @@ class RedisMetadataRefWriter(BaseRedisWriter):
     
 class RedisHashWriter(BaseRedisWriter):
 
-    def process_message(self, msg, consumer_metadata: Optional[Dict] = None):
-        # transform msg by looping through processors
-        for processor in self.processors:
-            if processor.match_message(msg):
-                msgs = processor.build_message(msg, consumer_metadata)
-                for msg in msgs:
-                    self.process_matched_message(msg, consumer_metadata)
-
-    def process_matched_message(self, msg, consumer_metadata: Optional[Dict] = None):
+    def write_message(self, msg, consumer_metadata: Optional[Dict] = None):
         #grab table, key, data and expires object
         if not msg:
             return

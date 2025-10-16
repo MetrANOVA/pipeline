@@ -2,12 +2,12 @@ import logging
 import os
 import time
 from metranova.connectors.clickhouse import ClickHouseConnector
-from metranova.consumers.base import BaseConsumer
+from metranova.consumers.base import TimedIntervalConsumer
 from metranova.pipelines.base import BasePipeline
 
 logger = logging.getLogger(__name__)
 
-class BaseClickHouseConsumer(BaseConsumer):
+class BaseClickHouseConsumer(TimedIntervalConsumer):
     def __init__(self, pipeline: BasePipeline):
         super().__init__(pipeline)
         self.logger = logger
@@ -16,34 +16,18 @@ class BaseClickHouseConsumer(BaseConsumer):
         self.tables = []
 
     def consume_messages(self):
-        # check connection and tables
-        if not self.datasource.client:
-            self.logger.error("ClickHouse client not initialized")
-            return
         if not self.tables:
             self.logger.error("No tables specified for metadata loading")
             return
-        
-        # If update_interval is set, run periodically
-        while True:
-            # Load from tables serially
-            self.logger.info("Starting metadata loading from ClickHouse")
-            for table in self.tables:
-                try:
-                    msg = self.query_table(table)
-                    self.pipeline.process_message(msg)
-                except Exception as e:
-                    self.logger.error(f"Error processing message: {e}")
-                    # Continue processing other messages
-                    continue
-
-            # Break if no update interval is set
-            if self.update_interval <= 0:
-                break  # Run once if no interval is set
-
-            # Sleep before next update
-            self.logger.info(f"Sleeping for {self.update_interval} seconds before next update")
-            time.sleep(self.update_interval)
+    
+        # Load from tables serially
+        self.logger.info("Starting metadata loading from ClickHouse")
+        for table in self.tables:
+            try:
+                msg = self.query_table(table)
+                self.pipeline.process_message(msg)
+            except Exception as e:
+                self.logger.error(f"Error processing message: {e}")
 
     def query_table(self, table: str) -> dict:
         raise NotImplementedError("Subclasses must implement query_table method")
@@ -99,3 +83,16 @@ class MetadataClickHouseConsumer(BaseClickHouseConsumer):
         except Exception as e:
             logger.error(f"Failed to load metadata from table {table}: {e}")
             raise
+
+class IPMetadataClickHouseConsumer(MetadataClickHouseConsumer):
+    def build_query(self, table: str) -> str:
+        """Build the metadata query for a specific table"""
+        query = f"""
+        SELECT argMax(id, insert_ts) as latest_id, 
+               argMax(ref, insert_ts) as latest_ref,
+               argMax(addresses, insert_ts) as latest_addresses
+        FROM {table} 
+        GROUP BY id
+        ORDER BY id
+        """
+        return query

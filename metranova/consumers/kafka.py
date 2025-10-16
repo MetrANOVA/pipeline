@@ -51,4 +51,7 @@ class KafkaConsumer(BaseConsumer):
         """Close Kafka consumer"""
         if self.datasource.client:
             self.logger.info("Closing Kafka consumer...")
-            self.datasource.client.close()
+            try:
+                self.datasource.client.close()
+            except Exception as e:
+                self.logger.info(f"Kafka consumer closed with message: {e}")

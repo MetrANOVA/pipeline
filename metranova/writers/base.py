@@ -13,7 +13,14 @@ class BaseWriter:
         # Initialize datastore connection in child class
         self.datastore = None
     
-    def process_message(self, msg, consumer_metadata: Optional[Dict] = None):
+    def process_message(self, msg, consumer_metadata=None):
+        for processor in self.processors:
+            if processor.match_message(msg):
+                processed_msgs = processor.build_message(msg, consumer_metadata)
+                for processed_msg in processed_msgs:
+                    self.write_message(processed_msg, consumer_metadata)
+
+    def write_message(self, msg, consumer_metadata=None):
         raise NotImplementedError("Subclasses should implement this method")
 
     def close(self):
