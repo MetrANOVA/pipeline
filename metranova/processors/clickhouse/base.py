@@ -1,3 +1,4 @@
+from collections import defaultdict
 import logging
 import os
 import re
@@ -27,6 +28,8 @@ class BaseClickHouseProcessor(BaseProcessor):
         self.column_defs = []
         # dict where key is extension field name and value is array in same format as column_defs but only those columns that are extensions
         self.extension_defs = {"ext": []}
+        #dictionary where key is extension field name and value is dict of options for that extension. Populated via get_extension_defs()
+        self.extension_enabled = defaultdict(dict)
         self.partition_by = ""
         self.primary_keys = []
         self.order_by = []
@@ -76,7 +79,7 @@ class BaseClickHouseProcessor(BaseProcessor):
         create_table_cmd += "SETTINGS index_granularity = {} \n".format(self.table_granularity)
         return create_table_cmd
 
-    def get_extension_defs(self, env_var_name: str, extension_options: dict) -> list:
+    def get_extension_defs(self, env_var_name: str, extension_options: dict, json_column_name: str = "ext") -> list:
         """Get extension column definitions from environment variable and applies only those in extension_options which takes form {extension_name: [[col_name, col_definition], ...]}"""
         extension_str = os.getenv(env_var_name, None)
         if not extension_str:
@@ -89,7 +92,13 @@ class BaseClickHouseProcessor(BaseProcessor):
                 continue
             if ext in extension_options:
                 extension_defs.extend(extension_options[ext])
+            # enable even if there are no type hints for this extension
+            # processor may still want to store it without initial type hints
+            self.extension_enabled[json_column_name][ext] = True
         return extension_defs
+
+    def extension_is_enabled(self, extension_name: str, json_column_name: str = "ext") -> bool:
+        return self.extension_enabled.get(json_column_name, {}).get(extension_name, False)
 
     def message_to_columns(self, message: dict) -> list:
         """Convert a message dict to a list of column values for insertion into ClickHouse"""
