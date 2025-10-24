@@ -76,6 +76,21 @@ class BaseClickHouseProcessor(BaseProcessor):
         create_table_cmd += "SETTINGS index_granularity = {} \n".format(self.table_granularity)
         return create_table_cmd
 
+    def get_extension_defs(self, env_var_name: str, extension_options: dict) -> list:
+        """Get extension column definitions from environment variable and applies only those in extension_options which takes form {extension_name: [[col_name, col_definition], ...]}"""
+        extension_str = os.getenv(env_var_name, None)
+        if not extension_str:
+            return []
+        extension_str = extension_str.strip()
+        extension_defs = []
+        for ext in extension_str.split(','):
+            ext = ext.strip()
+            if not ext:
+                continue
+            if ext in extension_options:
+                extension_defs.extend(extension_options[ext])
+        return extension_defs
+
     def message_to_columns(self, message: dict) -> list:
         """Convert a message dict to a list of column values for insertion into ClickHouse"""
         column_values = []

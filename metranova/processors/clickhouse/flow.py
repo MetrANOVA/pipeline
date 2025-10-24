@@ -1,201 +1,76 @@
 from typing import Any, Dict, Iterator
-from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+from metranova.processors.clickhouse.base import BaseDataProcessor
 import os
 
-class BaseFlowProcessor(BaseClickHouseProcessor):
+class BaseFlowProcessor(BaseDataProcessor):
 
     def __init__(self, pipeline):
         super().__init__(pipeline)
-        self.table = os.getenv('CLICKHOUSE_FLOW_TABLE', 'flow_edge')
-        self.table_granularity = int(os.getenv('CLICKHOUSE_FLOW_TABLE_GRANULARITY', '8192'))
-        #TODO: add replication support
-        table_engine = "MergeTree"
-        # build dictionary of extensions to include
-        extensions = os.getenv('CLICKHOUSE_FLOW_EXTENSION', '')
-        self.extensions = self.get_table_extensions(extensions)
-        self.create_table_cmd = f"""
-        CREATE TABLE IF NOT EXISTS {self.table} (
-            `start_time` DateTime64(3, 'UTC'),
-            `end_time` DateTime64(3, 'UTC'),
-            `insert_time` DateTime64(3, 'UTC') DEFAULT now64(),
-            `collector_id` LowCardinality(String),
-            `policy_originator` LowCardinality(String),
-            `policy_level` LowCardinality(String),
-            `policy_scope` Array(LowCardinality(String)),
-            `ext` JSON(
-                {self.extensions}
-            ),
-            `flow_type` LowCardinality(String),
-            `device_id` LowCardinality(String),
-            `device_ref` Nullable(String),
-            `src_as_id` UInt32,
-            `src_as_ref` Nullable(String),
-            `src_ip` IPv6,
-            `src_ip_ref` Nullable(String),
-            `src_port` UInt16,
-            `dst_as_id` UInt32,
-            `dst_as_ref` Nullable(String),
-            `dst_ip` IPv6,
-            `dst_ip_ref` Nullable(String),
-            `dst_port` UInt16,
-            `protocol` LowCardinality(String),
-            `in_interface_id` LowCardinality(Nullable(String)),
-            `in_interface_ref` Nullable(String),
-            `out_interface_id` LowCardinality(Nullable(String)),
-            `out_interface_ref` Nullable(String),
-            `peer_as_id` Nullable(UInt32),
-            `peer_as_ref` Nullable(String),
-            `peer_ip` Nullable(IPv6),
-            `peer_ip_ref` Nullable(String),
-            `ip_version` UInt8,
-            `application_port` UInt16,
-            `bit_count` UInt64,
-            `packet_count` UInt64
-        )
-        ENGINE = {table_engine}
-        PARTITION BY toYYYYMMDD(`start_time`)
-        ORDER BY (`src_as_id`,`dst_as_id`, `src_ip`,`dst_ip`, `start_time`)
-        SETTINGS index_granularity = {self.table_granularity}
-        """
-
-        self.column_names = [
-            "start_ts",
-            "end_ts",
-            "policy_originator",
-            "policy_level",
-            "policy_scopes",
-            "app_name",
-            "app_port",
-            "bgp_as_path",
-            "bgp_as_path_name",
-            "bgp_as_path_org",
-            "bgp_as_path_padding",
-            "bgp_as_path_padded_len",
-            "bgp_comms",
-            "bgp_ecomms",
-            "bgp_lcomms",
-            "bgp_local_pref",
-            "bgp_med",
-            "bgp_next_hop",
-            "bgp_peer_as_dst",
-            "bgp_peer_as_dst_name",
-            "bgp_peer_as_dst_org",
-            "collector_id",
-            "country_scope",
-            "device_ip",
-            "device_name",
-            "device_loc_name",
-            "device_loc_type",
-            "device_loc_lat",
-            "device_loc_lon",
-            "device_manufac",
-            "device_model",
-            "device_network",
-            "device_os",
-            "device_role",
-            "device_state",
-            "dscp",
-            "dst_as_name",
-            "dst_asn",
-            "dst_continent",
-            "dst_country_name",
-            "dst_esdb_ipsvc_ref",
-            "dst_ip",
-            "dst_loc_lat",
-            "dst_loc_lon",
-            "dst_org",
-            "dst_port",
-            "dst_pref_loc_lat",
-            "dst_pref_loc_lon",
-            "dst_pref_org",
-            "dst_pub_asn",
-            "dst_region_iso_code",
-            "dst_region_name",
-            "dst_scireg_ref",
-            "flow_type",
-            "ifin_ref",
-            "ifout_ref",
-            "ip_tos",
-            "ip_version",
-            "ipv6_flow_label",
-            "mpls_bottom_label",
-            "mpls_exp",
-            "mpls_labels",
-            "mpls_pw_id",
-            "mpls_stack_depth",
-            "mpls_top_label",
-            "mpls_top_label_ip",
-            "mpls_top_label_type",
-            "mpls_vpn_rd",
-            "protocol",
-            "src_as_name",
-            "src_asn",
-            "src_continent",
-            "src_country_name",
-            "src_esdb_ipsvc_ref",
-            "src_ip",
-            "src_loc_lat",
-            "src_loc_lon",
-            "src_org",
-            "src_port",
-            "src_pref_loc_lat",
-            "src_pref_loc_lon",
-            "src_pref_org",
-            "src_pub_asn",
-            "src_region_iso_code",
-            "src_region_name",
-            "src_scireg_ref",
-            "traffic_class",
-            "vrf_egress_id",
-            "vrf_ingress_id",
-            "bits_per_sec",
-            "duration",
-            "max_pkt_len",
-            "max_ttl",
-            "min_pkt_len",
-            "min_ttl",
-            "num_bits",
-            "num_pkts",
-            "pkts_per_sec",
-        ]
-
-    def get_table_extensions(self, extensions_str: str) -> str:
-            extension_command = ""
-            extensions = {
-                "bgp": f"""
-                `bgp_asn_path` Array(UInt32),
-                `bgp_asn_path_padding` Array(UInt16),
-                `bgp_community` Array(LowCardinality(String)),
-                `bgp_ext_community` Array(LowCardinality(String)),
-                `bgp_large_community` Array(LowCardinality(String)),
-                `bgp_local_pref` Nullable(UInt32),
-                `bgp_med` Nullable(UInt32)
-                """,
-                "ipv4": """
-                `ipv4_dscp` Nullable(UInt8),
-                `ipv4_tos` Nullable(UInt8)
-                """,
-                "ipv6": """
-                `ipv6_flow_label` Nullable(UInt32)
-                """,
-                "mpls": """
-                `mpls_bottom_label` Nullable(UInt32),
-                `mpls_exp` Array(UInt8),
-                `mpls_labels` Array(UInt32),
-                `mpls_pw` Nullable(UInt32),
-                `mpls_top_label_ip` Nullable(IPv6),
-                `mpls_top_label_type` Nullable(UInt32),
-                `mpls_vpn_rd` LowCardinality(Nullable(String))
-                """
+        self.table = os.getenv('CLICKHOUSE_FLOW_TABLE', 'data_flow')
+        
+        # add time fields to front of column names
+        self.column_defs.insert(0, ["start_time", "DateTime64(3, 'UTC')", True])
+        self.column_defs.insert(1, ["end_time", "DateTime64(3, 'UTC')", True])
+        self.column_defs.append(['flow_type', 'LowCardinality(String)', True])
+        self.column_defs.append(['device_id', 'LowCardinality(String)', True])
+        self.column_defs.append(['device_ref', 'Nullable(String)', True])
+        self.column_defs.append(['src_as_id', 'UInt32', True])
+        self.column_defs.append(['src_as_ref', 'Nullable(String)', True])
+        self.column_defs.append(['src_ip', 'IPv6', True])
+        self.column_defs.append(['src_ip_ref', 'Nullable(String)', True])
+        self.column_defs.append(['src_port', 'UInt16', True])
+        self.column_defs.append(['dst_as_id', 'UInt32', True])
+        self.column_defs.append(['dst_as_ref', 'Nullable(String)', True])
+        self.column_defs.append(['dst_ip', 'IPv6', True])
+        self.column_defs.append(['dst_ip_ref', 'Nullable(String)', True])
+        self.column_defs.append(['dst_port', 'UInt16', True])
+        self.column_defs.append(['protocol', 'LowCardinality(String)', True])
+        self.column_defs.append(['in_interface_id', 'LowCardinality(Nullable(String))', True])
+        self.column_defs.append(['in_interface_ref', 'Nullable(String)', True])
+        self.column_defs.append(['out_interface_id', 'LowCardinality(Nullable(String))', True])
+        self.column_defs.append(['out_interface_ref', 'Nullable(String)', True])
+        self.column_defs.append(['peer_as_id', 'Nullable(UInt32)', True])
+        self.column_defs.append(['peer_as_ref', 'Nullable(String)', True])
+        self.column_defs.append(['peer_ip', 'Nullable(IPv6)', True])
+        self.column_defs.append(['peer_ip_ref', 'Nullable(String)', True])
+        self.column_defs.append(['ip_version', 'UInt8', True])
+        self.column_defs.append(['application_port', 'UInt16', True])
+        self.column_defs.append(['bit_count', 'UInt64', True])
+        self.column_defs.append(['packet_count', 'UInt64', True])
+        # build list of potential ext type hints
+        extension_options = {
+                "bgp": [
+                    ["bgp_asn_path", "Array(UInt32)"],
+                    ["bgp_asn_path_padding", "Array(UInt16)"],
+                    ["bgp_community", "Array(LowCardinality(String))"],
+                    ["bgp_ext_community", "Array(LowCardinality(String))"],
+                    ["bgp_large_community", "Array(LowCardinality(String))"],
+                    ["bgp_local_pref", "Nullable(UInt32)"],
+                    ["bgp_med", "Nullable(UInt32)"]
+                ],
+                "ipv4": [
+                    ["ipv4_dscp", "Nullable(UInt8)"],
+                    ["ipv4_tos", "Nullable(UInt8)"]
+                ],
+                "ipv6": [
+                    ["ipv6_flow_label", "Nullable(UInt32)"]
+                ],
+                "mpls": [
+                    ["mpls_bottom_label", "Nullable(UInt32)"],
+                    ["mpls_exp", "Array(UInt8)"],
+                    ["mpls_labels", "Array(UInt32)"],
+                    ["mpls_pw", "Nullable(UInt32)"],
+                    ["mpls_top_label_ip", "Nullable(IPv6)"],
+                    ["mpls_top_label_type", "Nullable(UInt32)"],
+                    ["mpls_vpn_rd", "LowCardinality(Nullable(String))"]
+                ]
             }
-            for ext in extensions_str.split(','):
-                ext = ext.strip()
-                if not ext:
-                    continue
-                if ext in extensions:
-                    extension_command += ",\n" if extension_command else ""
-                    extension_command += extensions[ext]
-            return extension_command
+        # determine columns to use from environment
+        self.extension_defs['ext'] = self.get_extension_defs('CLICKHOUSE_FLOW_EXTENSIONS', extension_options)
+
+        # set additional table settings
+        self.partition_by = "toYYYYMMDD(start_time)"
+        self.order_by = ["src_as_id", "dst_as_id", "src_ip", "dst_ip", "start_time"]
 
 class StardustFlowProcessor(BaseFlowProcessor):
     """Processor for Stardust flow data - will be deleted in future"""
