@@ -64,12 +64,12 @@ class ClickHouseBatcher:
 
     def create_table(self):
         """Create the target table if it doesn't exist"""
-        if self.processor.create_table_cmd is None:
+        create_table_cmd = self.processor.create_table_command() # store for reference
+        if create_table_cmd is None:
             logger.info("No create_table_cmd defined, skipping table creation")
             return
-        
         try:
-            self.client.command(self.processor.create_table_cmd)
+            self.client.command(create_table_cmd)
             logger.info(f"Table {self.processor.table} is ready")
         except Exception as e:
             logger.error(f"Failed to create table {self.processor.table}: {e}")

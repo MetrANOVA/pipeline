@@ -7,113 +7,55 @@ class BaseFlowProcessor(BaseClickHouseProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.table = os.getenv('CLICKHOUSE_FLOW_TABLE', 'flow_edge')
+        self.table_granularity = int(os.getenv('CLICKHOUSE_FLOW_TABLE_GRANULARITY', '8192'))
+        #TODO: add replication support
+        table_engine = "MergeTree"
+        # build dictionary of extensions to include
+        extensions = os.getenv('CLICKHOUSE_FLOW_EXTENSION', '')
+        self.extensions = self.get_table_extensions(extensions)
         self.create_table_cmd = f"""
         CREATE TABLE IF NOT EXISTS {self.table} (
-            `start_ts` DateTime64(3, 'UTC'),
-            `end_ts` DateTime64(3, 'UTC'),
-            `insert_ts` DateTime64(3, 'UTC') DEFAULT now64(),
-            `policy_originator` LowCardinality(Nullable(String)),
-            `policy_level` LowCardinality(Nullable(String)),
-            `policy_scopes` Array(LowCardinality(String)),
-            `app_name` LowCardinality(Nullable(String)),
-            `app_port` Nullable(UInt16),
-            `bgp_as_path` Array(Nullable(UInt32)),
-            `bgp_as_path_name` Array(Nullable(String)),
-            `bgp_as_path_org` Array(Nullable(String)),
-            `bgp_as_path_padding` Array(Nullable(UInt32)),
-            `bgp_as_path_padded_len` Nullable(UInt32),
-            `bgp_comms` Array(LowCardinality(Nullable(String))),
-            `bgp_ecomms` Array(LowCardinality(Nullable(String))),
-            `bgp_lcomms` Array(LowCardinality(Nullable(String))),
-            `bgp_local_pref` Nullable(UInt32),
-            `bgp_med` Nullable(UInt32),
-            `bgp_next_hop` Nullable(IPv6),
-            `bgp_peer_as_dst` Nullable(UInt32),
-            `bgp_peer_as_dst_name` LowCardinality(Nullable(String)),
-            `bgp_peer_as_dst_org` LowCardinality(Nullable(String)),
-            `collector_id` LowCardinality(Nullable(String)),
-            `country_scope` LowCardinality(Nullable(String)),
-            `device_ip` Nullable(IPv6),
-            `device_name` LowCardinality(Nullable(String)),
-            `device_loc_name` LowCardinality(Nullable(String)),
-            `device_loc_type` LowCardinality(Nullable(String)),
-            `device_loc_lat` Nullable(Decimal(8, 6)),
-            `device_loc_lon` Nullable(Decimal(9, 6)),
-            `device_manufac` LowCardinality(Nullable(String)),
-            `device_model` LowCardinality(Nullable(String)),
-            `device_network` LowCardinality(Nullable(String)),
-            `device_os` LowCardinality(Nullable(String)),
-            `device_role` LowCardinality(Nullable(String)),
-            `device_state` LowCardinality(Nullable(String)),
-            `dscp` Nullable(UInt32),
-            `dst_as_name` LowCardinality(Nullable(String)),
-            `dst_asn` UInt32,
-            `dst_continent` LowCardinality(Nullable(String)),
-            `dst_country_name` LowCardinality(Nullable(String)),
-            `dst_esdb_ipsvc_ref` Array(Nullable(String)),
-            `dst_ip` IPv6,
-            `dst_loc_lat` Nullable(Decimal(8, 6)),
-            `dst_loc_lon` Nullable(Decimal(9, 6)),
-            `dst_org` LowCardinality(Nullable(String)),
-            `dst_port` UInt16,
-            `dst_pref_loc_lat` Nullable(Decimal(8, 6)),
-            `dst_pref_loc_lon` Nullable(Decimal(9, 6)),
-            `dst_pref_org` LowCardinality(Nullable(String)),
-            `dst_pub_asn` Nullable(UInt32),
-            `dst_region_iso_code` LowCardinality(Nullable(String)),
-            `dst_region_name` LowCardinality(Nullable(String)),
-            `dst_scireg_ref` Nullable(String),
-            `flow_type` LowCardinality(Nullable(String)),
-            `ifin_ref` Nullable(String),
-            `ifout_ref` Nullable(String),
-            `ip_tos` Nullable(UInt8),
-            `ip_version`  Nullable(UInt8),
-            `ipv6_flow_label` Nullable(UInt32),
-            `mpls_bottom_label` Nullable(UInt32),
-            `mpls_exp` Array(Nullable(UInt8)),
-            `mpls_labels` Array(Nullable(UInt32)),
-            `mpls_pw_id` Nullable(UInt32),
-            `mpls_stack_depth` Nullable(UInt32),
-            `mpls_top_label` Nullable(UInt32),
-            `mpls_top_label_ip` Nullable(IPv6),
-            `mpls_top_label_type` Nullable(UInt32),
-            `mpls_vpn_rd` LowCardinality(Nullable(String)),
-            `protocol` LowCardinality(Nullable(String)),
-            `src_as_name` LowCardinality(Nullable(String)),
-            `src_asn` UInt32,
-            `src_continent` LowCardinality(Nullable(String)),
-            `src_country_name` LowCardinality(Nullable(String)),
-            `src_esdb_ipsvc_ref` Array(Nullable(String)),
+            `start_time` DateTime64(3, 'UTC'),
+            `end_time` DateTime64(3, 'UTC'),
+            `insert_time` DateTime64(3, 'UTC') DEFAULT now64(),
+            `collector_id` LowCardinality(String),
+            `policy_originator` LowCardinality(String),
+            `policy_level` LowCardinality(String),
+            `policy_scope` Array(LowCardinality(String)),
+            `ext` JSON(
+                {self.extensions}
+            ),
+            `flow_type` LowCardinality(String),
+            `device_id` LowCardinality(String),
+            `device_ref` Nullable(String),
+            `src_as_id` UInt32,
+            `src_as_ref` Nullable(String),
             `src_ip` IPv6,
-            `src_loc_lat` Nullable(Decimal(8, 6)),
-            `src_loc_lon` Nullable(Decimal(9, 6)),
-            `src_org` LowCardinality(Nullable(String)),
+            `src_ip_ref` Nullable(String),
             `src_port` UInt16,
-            `src_pref_loc_lat` Nullable(Decimal(8, 6)),
-            `src_pref_loc_lon` Nullable(Decimal(9, 6)),
-            `src_pref_org` LowCardinality(Nullable(String)),
-            `src_pub_asn` Nullable(UInt32),
-            `src_region_iso_code` LowCardinality(Nullable(String)),
-            `src_region_name` LowCardinality(Nullable(String)),
-            `src_scireg_ref` Nullable(String),
-            `traffic_class` LowCardinality(Nullable(String)),
-            `vrf_egress_id` Nullable(UInt32),
-            `vrf_ingress_id` Nullable(UInt32),
-            `bits_per_sec` Nullable(Float64),
-            `duration` Nullable(Float64),
-            `max_pkt_len` Nullable(Float64),
-            `max_ttl` Nullable(Float64),
-            `min_pkt_len` Nullable(Float64),
-            `min_ttl` Nullable(Float64),
-            `num_bits` Nullable(Float64),
-            `num_pkts` Nullable(Float64),
-            `pkts_per_sec` Nullable(Float64)
+            `dst_as_id` UInt32,
+            `dst_as_ref` Nullable(String),
+            `dst_ip` IPv6,
+            `dst_ip_ref` Nullable(String),
+            `dst_port` UInt16,
+            `protocol` LowCardinality(String),
+            `in_interface_id` LowCardinality(Nullable(String)),
+            `in_interface_ref` Nullable(String),
+            `out_interface_id` LowCardinality(Nullable(String)),
+            `out_interface_ref` Nullable(String),
+            `peer_as_id` Nullable(UInt32),
+            `peer_as_ref` Nullable(String),
+            `peer_ip` Nullable(IPv6),
+            `peer_ip_ref` Nullable(String),
+            `ip_version` UInt8,
+            `application_port` UInt16,
+            `bit_count` UInt64,
+            `packet_count` UInt64
         )
-        ENGINE = MergeTree
-        PARTITION BY toYYYYMMDD(`start_ts`)
-        ORDER BY (`src_asn`,`dst_asn`, `src_ip`,`dst_ip`, `start_ts`)
-        TTL start_ts + INTERVAL 7 DAY
-        SETTINGS index_granularity = 8192
+        ENGINE = {table_engine}
+        PARTITION BY toYYYYMMDD(`start_time`)
+        ORDER BY (`src_as_id`,`dst_as_id`, `src_ip`,`dst_ip`, `start_time`)
+        SETTINGS index_granularity = {self.table_granularity}
         """
 
         self.column_names = [
@@ -216,6 +158,44 @@ class BaseFlowProcessor(BaseClickHouseProcessor):
             "num_pkts",
             "pkts_per_sec",
         ]
+
+    def get_table_extensions(self, extensions_str: str) -> str:
+            extension_command = ""
+            extensions = {
+                "bgp": f"""
+                `bgp_asn_path` Array(UInt32),
+                `bgp_asn_path_padding` Array(UInt16),
+                `bgp_community` Array(LowCardinality(String)),
+                `bgp_ext_community` Array(LowCardinality(String)),
+                `bgp_large_community` Array(LowCardinality(String)),
+                `bgp_local_pref` Nullable(UInt32),
+                `bgp_med` Nullable(UInt32)
+                """,
+                "ipv4": """
+                `ipv4_dscp` Nullable(UInt8),
+                `ipv4_tos` Nullable(UInt8)
+                """,
+                "ipv6": """
+                `ipv6_flow_label` Nullable(UInt32)
+                """,
+                "mpls": """
+                `mpls_bottom_label` Nullable(UInt32),
+                `mpls_exp` Array(UInt8),
+                `mpls_labels` Array(UInt32),
+                `mpls_pw` Nullable(UInt32),
+                `mpls_top_label_ip` Nullable(IPv6),
+                `mpls_top_label_type` Nullable(UInt32),
+                `mpls_vpn_rd` LowCardinality(Nullable(String))
+                """
+            }
+            for ext in extensions_str.split(','):
+                ext = ext.strip()
+                if not ext:
+                    continue
+                if ext in extensions:
+                    extension_command += ",\n" if extension_command else ""
+                    extension_command += extensions[ext]
+            return extension_command
 
 class StardustFlowProcessor(BaseFlowProcessor):
     """Processor for Stardust flow data - will be deleted in future"""
