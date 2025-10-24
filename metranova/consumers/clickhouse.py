@@ -49,8 +49,8 @@ class MetadataClickHouseConsumer(BaseClickHouseConsumer):
     def build_query(self, table: str) -> str:
         """Build the metadata query for a specific table"""
         query = f"""
-        SELECT argMax(id, insert_ts) as latest_id, 
-               argMax(ref, insert_ts) as latest_ref
+        SELECT argMax(id, insert_time) as latest_id, 
+               argMax(ref, insert_time) as latest_ref
         FROM {table} 
         GROUP BY id
         ORDER BY id
@@ -88,9 +88,9 @@ class IPMetadataClickHouseConsumer(MetadataClickHouseConsumer):
     def build_query(self, table: str) -> str:
         """Build the metadata query for a specific table"""
         query = f"""
-        SELECT argMax(id, insert_ts) as latest_id, 
-               argMax(ref, insert_ts) as latest_ref,
-               argMax(addresses, insert_ts) as latest_addresses
+        SELECT argMax(id, insert_time) as latest_id, 
+               argMax(ref, insert_time) as latest_ref,
+               argMax(ip_subnet, insert_time) as latest_ip_subnet
         FROM {table} 
         GROUP BY id
         ORDER BY id

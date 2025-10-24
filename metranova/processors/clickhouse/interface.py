@@ -75,7 +75,7 @@ class InterfaceMetadataProcessor(BaseMetadataProcessor):
         CREATE TABLE IF NOT EXISTS {self.table} (
             ref String,
             hash String,
-            insert_ts DateTime DEFAULT now(),
+            insert_time DateTime DEFAULT now(),
             description Nullable(String),
             device LowCardinality(Nullable(String)),
             id String,
@@ -200,7 +200,7 @@ class InterfaceTrafficProcessor(BaseInterfaceProcessor):
         self.create_table_cmd = f"""
         CREATE TABLE IF NOT EXISTS {self.table} (
             `start_ts` DateTime64(3, 'UTC') CODEC(Delta,ZSTD),
-            `insert_ts` DateTime64(3, 'UTC') DEFAULT now64() CODEC(Delta,ZSTD),
+            `insert_time` DateTime64(3, 'UTC') DEFAULT now64() CODEC(Delta,ZSTD),
             `policy_originator` LowCardinality(Nullable(String)),
             `policy_level` LowCardinality(Nullable(String)),
             `policy_scopes` Array(LowCardinality(String)),
@@ -308,7 +308,7 @@ class InterfacePortQueueProcessor(BaseInterfaceQueueProcessor):
         self.create_table_cmd = f"""
         CREATE TABLE IF NOT EXISTS {self.table} (
             `start_ts` DateTime64(3, 'UTC') CODEC(Delta,ZSTD),
-            `insert_ts` DateTime64(3, 'UTC') DEFAULT now64() CODEC(Delta,ZSTD),
+            `insert_time` DateTime64(3, 'UTC') DEFAULT now64() CODEC(Delta,ZSTD),
             `policy_originator` LowCardinality(Nullable(String)),
             `policy_level` LowCardinality(Nullable(String)),
             `policy_scopes` Array(LowCardinality(String)),
@@ -487,7 +487,7 @@ class InterfaceSAPQueueProcessor(BaseInterfaceQueueProcessor):
         self.create_table_cmd = f"""
         CREATE TABLE IF NOT EXISTS {self.table} (
             `start_ts` DateTime64(3, 'UTC') CODEC(Delta,ZSTD),
-            `insert_ts` DateTime64(3, 'UTC') DEFAULT now64() CODEC(Delta,ZSTD),
+            `insert_time` DateTime64(3, 'UTC') DEFAULT now64() CODEC(Delta,ZSTD),
             `policy_originator` LowCardinality(Nullable(String)),
             `policy_level` LowCardinality(Nullable(String)),
             `policy_scopes` Array(LowCardinality(String)),

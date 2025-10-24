@@ -7,7 +7,7 @@ class RawKafkaProcessor(BaseClickHouseProcessor):
 
     def __init__(self, pipeline):
         super().__init__(pipeline)
-        self.table = os.getenv('CLICKHOUSE_RAW_KAFKA_TABLE', 'kafka_messages')
+        self.table = os.getenv('CLICKHOUSE_RAW_KAFKA_TABLE', 'data_kafka_message')
         self.column_defs = [
             ['timestamp', 'DateTime64(3)', False],
             ['topic', 'String', True],

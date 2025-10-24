@@ -192,7 +192,9 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         formatted_record = {
             'ref': ref,
             'hash': record_md5,
-            'id': str(id)
+            'id': str(id),
+            'ext': '{}',
+            'tag': []
         }
         # merge formatted_record with result of self.build_metadata_fields(value)
         formatted_record.update(self.build_metadata_fields(value))

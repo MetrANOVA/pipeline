@@ -152,13 +152,13 @@ class StardustFlowProcessor(BaseFlowProcessor):
             })
         if self.extension_is_enabled("esdb"):
             ext.update({
-                "src_ip_esdb_ref": self.pipeline.cacher("redis").lookup_list("meta_esdb_ipsvc", value.get("meta", {}).get("esdb", {}).get("src", {}).get("service", {}).get("prefix_group_name", [])),
-                "dst_ip_esdb_ref": self.pipeline.cacher("redis").lookup_list("meta_esdb_ipsvc", value.get("meta", {}).get("esdb", {}).get("dst", {}).get("service", {}).get("prefix_group_name", []))
+                "src_ip_esdb_ref": self.pipeline.cacher("redis").lookup_list("meta_ip_esdb", value.get("meta", {}).get("esdb", {}).get("src", {}).get("service", {}).get("prefix_group_name", [])),
+                "dst_ip_esdb_ref": self.pipeline.cacher("redis").lookup_list("meta_ip_esdb", value.get("meta", {}).get("esdb", {}).get("dst", {}).get("service", {}).get("prefix_group_name", []))
             })
         if self.extension_is_enabled("scireg"):
             ext.update({
-                "dst_scireg_ref": self.pipeline.cacher("ip").lookup("meta_scireg", value.get("meta", {}).get("dst_ip", None)),
-                "src_scireg_ref": self.pipeline.cacher("ip").lookup("meta_scireg", value.get("meta", {}).get("src_ip", None))
+                "dst_scireg_ref": self.pipeline.cacher("ip").lookup("meta_ip_scireg", value.get("meta", {}).get("dst_ip", None)),
+                "src_scireg_ref": self.pipeline.cacher("ip").lookup("meta_ip_scireg", value.get("meta", {}).get("src_ip", None))
             })
 
         return [{
