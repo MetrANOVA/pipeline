@@ -100,6 +100,15 @@ class BaseClickHouseProcessor(BaseProcessor):
     def extension_is_enabled(self, extension_name: str, json_column_name: str = "ext") -> bool:
         return self.extension_enabled.get(json_column_name, {}).get(extension_name, False)
 
+    def column_names(self) -> list:
+        """Return list of column names for insertion into ClickHouse"""
+        column_names = []
+        for col_def in self.column_defs:
+            include_in_insert = col_def[2]
+            if include_in_insert:
+                column_names.append(col_def[0])
+        return column_names
+
     def message_to_columns(self, message: dict) -> list:
         """Convert a message dict to a list of column values for insertion into ClickHouse"""
         column_values = []

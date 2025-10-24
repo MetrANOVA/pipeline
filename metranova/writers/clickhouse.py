@@ -132,7 +132,7 @@ class ClickHouseBatcher:
             self.client.insert(
                 table=self.processor.table,
                 data=data_to_insert,
-                column_names=self.processor.column_names
+                column_names=self.processor.column_names()
             )
             
             self.logger.debug(f"Successfully inserted {len(self.batch)} messages into ClickHouse")
@@ -144,7 +144,7 @@ class ClickHouseBatcher:
         except Exception as e:
             self.logger.error(f"Failed to insert batch into ClickHouse: {e}")
             self.logger.debug(f"table= {self.processor.table}")
-            self.logger.debug(f"column_names= {self.processor.column_names}")
+            self.logger.debug(f"column_names= {self.processor.column_names()}")
             self.logger.debug(f"data_to_insert= {data_to_insert}")
     
     def close(self):

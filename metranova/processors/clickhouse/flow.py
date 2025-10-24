@@ -168,7 +168,7 @@ class StardustFlowProcessor(BaseFlowProcessor):
             "policy_originator": value.get("policy", {}).get("originator", None),
             "policy_level": value.get("policy", {}).get("level", None),
             "policy_scope": value.get("policy", {}).get("scopes", []),
-            "ext": orjson.dumps(ext),
+            "ext": orjson.dumps(ext).decode('utf-8'),
             "flow_type": value.get("meta", {}).get("flow_type", None),
             "device_id": value.get("meta", {}).get("router", {}).get("name", None),
             "device_ref": self.pipeline.cacher("redis").lookup("meta_device", value.get("meta", {}).get("router", {}).get("name", None)),
