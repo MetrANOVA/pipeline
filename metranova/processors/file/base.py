@@ -22,16 +22,16 @@ class IPTriePickleFileProcessor(BaseFileProcessor):
 
         # Got through rows and add to trie
         for row in value.get('rows', []):
-            id, ref, addresses = row
-            if id is None or ref is None or addresses is None:
-                self.logger.debug(f"Skipping row with null values: id={id}, ref={ref}, addresses={addresses}")
+            id, ref, ip_subnet = row
+            if id is None or ref is None or ip_subnet is None:
+                self.logger.debug(f"Skipping row with null values: id={id}, ref={ref}, ip_subnet={ip_subnet}")
                 continue
-            # check addresses is a list
-            if not isinstance(addresses, list):
-                self.logger.warning(f"Expected 'addresses' to be a list, got {type(addresses)}")
+            # check ip_subnet is a list
+            if not isinstance(ip_subnet, list):
+                self.logger.warning(f"Expected 'ip_subnet' to be a list, got {type(ip_subnet)}")
                 continue
-            for addr in addresses:
-                ip_trie[addr] = ref
+            for addr in ip_subnet:
+                ip_trie["{}/{}".format(addr[0], addr[1])] = ref
 
         #freeze the trie to make it read-only
         ip_trie.freeze()

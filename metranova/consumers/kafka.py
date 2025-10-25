@@ -52,6 +52,6 @@ class KafkaConsumer(BaseConsumer):
         if self.datasource.client:
             self.logger.info("Closing Kafka consumer...")
             try:
-                self.datasource.client.close()
+                self.datasource.client.close(timeout=5.0)  # 5 second timeout
             except Exception as e:
                 self.logger.info(f"Kafka consumer closed with message: {e}")

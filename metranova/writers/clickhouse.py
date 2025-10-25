@@ -64,12 +64,12 @@ class ClickHouseBatcher:
 
     def create_table(self):
         """Create the target table if it doesn't exist"""
-        if self.processor.create_table_cmd is None:
+        create_table_cmd = self.processor.create_table_command() # store for reference
+        if create_table_cmd is None:
             logger.info("No create_table_cmd defined, skipping table creation")
             return
-        
         try:
-            self.client.command(self.processor.create_table_cmd)
+            self.client.command(create_table_cmd)
             logger.info(f"Table {self.processor.table} is ready")
         except Exception as e:
             logger.error(f"Failed to create table {self.processor.table}: {e}")
@@ -132,7 +132,7 @@ class ClickHouseBatcher:
             self.client.insert(
                 table=self.processor.table,
                 data=data_to_insert,
-                column_names=self.processor.column_names
+                column_names=self.processor.column_names()
             )
             
             self.logger.debug(f"Successfully inserted {len(self.batch)} messages into ClickHouse")
@@ -144,7 +144,7 @@ class ClickHouseBatcher:
         except Exception as e:
             self.logger.error(f"Failed to insert batch into ClickHouse: {e}")
             self.logger.debug(f"table= {self.processor.table}")
-            self.logger.debug(f"column_names= {self.processor.column_names}")
+            self.logger.debug(f"column_names= {self.processor.column_names()}")
             self.logger.debug(f"data_to_insert= {data_to_insert}")
     
     def close(self):

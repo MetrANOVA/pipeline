@@ -30,10 +30,10 @@ class ClickHouseCacher(BaseCacher):
         
         # build query to get latest records by id
         query = f"""
-        SELECT argMax(id, insert_ts) as latest_id, 
-               argMax(ref, insert_ts) as latest_ref, 
-               argMax(hash, insert_ts) as latest_hash, 
-               MAX(insert_ts) as max_insert_ts
+        SELECT argMax(id, insert_time) as latest_id, 
+               argMax(ref, insert_time) as latest_ref, 
+               argMax(hash, insert_time) as latest_hash, 
+               MAX(insert_time) as max_insert_time
         FROM {table} 
         GROUP BY id 
         ORDER BY id
@@ -44,11 +44,11 @@ class ClickHouseCacher(BaseCacher):
             result = self.cache.client.query(query)
             tmp_cache = {}
             for row in result.result_rows:
-                latest_id, latest_ref, latest_hash, max_insert_ts = row
+                latest_id, latest_ref, latest_hash, max_insert_time = row
                 tmp_cache[latest_id] = {
                     'ref': latest_ref,
                     'hash': latest_hash,
-                    'max_insert_ts': max_insert_ts
+                    'max_insert_time': max_insert_time
                 }
             self.local_cache[table] = tmp_cache
             logger.info(f"Loaded {len(tmp_cache)} existing records from {table}")

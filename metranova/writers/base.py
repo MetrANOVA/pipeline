@@ -17,6 +17,9 @@ class BaseWriter:
         for processor in self.processors:
             if processor.match_message(msg):
                 processed_msgs = processor.build_message(msg, consumer_metadata)
+                if not processed_msgs:
+                    self.logger.debug(f"Processor {processor.__class__.__name__} returned no messages to write")
+                    continue
                 for processed_msg in processed_msgs:
                     self.write_message(processed_msg, consumer_metadata)
 

@@ -6,3 +6,8 @@
 .env*
 certificates/
 caches/*.pickle
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
