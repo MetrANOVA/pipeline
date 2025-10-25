@@ -8,7 +8,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.flow.StardustFlowProcessor
+      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.stardust.FlowProcessor
       - KAFKA_TOPIC=metranova_flow
       - IP_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE}
     env_file:
@@ -28,8 +28,8 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface.InterfaceTrafficProcessor,metranova.processors.clickhouse.interface.InterfaceSAPQueueProcessor,metranova.processors.clickhouse.interface.InterfacePortQueueProcessor
-      - REDIS_PROCESSORS=metranova.processors.redis.interface.InterfaceMetadataProcessor
+      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.stardust.InterfaceTrafficProcessor
+#      - REDIS_PROCESSORS=metranova.processors.redis.interface.InterfaceMetadataProcessor
       - KAFKA_TOPIC=metranova_interface
     env_file:
       - .env
