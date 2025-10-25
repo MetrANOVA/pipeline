@@ -213,7 +213,7 @@ class BaseDataProcessor(BaseClickHouseProcessor):
         # array of arrays in format [['col_name', 'col_definition', bool_include_in_insert], ...]
         # for extension columns, col_definition is ignored and can be set to None
         self.column_defs = [
-            ["insert_time", "DateTime64(3, 'UTC') DEFAULT now64()", False],
+            ["insert_time", "DateTime64(3, 'UTC') DEFAULT now64() CODEC(Delta,ZSTD)", False],
             ["collector_id", "LowCardinality(String)", True],
             ["policy_originator", "LowCardinality(String)", True],
             ["policy_level", "LowCardinality(String)", True],
@@ -231,7 +231,7 @@ class BaseDataGenericMetricProcessor(BaseDataProcessor):
         #add standard columns
         id_field ="{}_id".format(self.resource_name)
         ref_field ="{}_ref".format(self.resource_name)
-        self.column_defs.insert(0, ["observation_time", "DateTime64(3, 'UTC')", True])
+        self.column_defs.insert(0, ["observation_time", "DateTime64(3, 'UTC') CODEC(Delta,ZSTD)", True])
         self.column_defs.append([id_field, "LowCardinality(String)", True])
         self.column_defs.append([ref_field, "Nullable(String)", True])
         self.column_defs.append(["metric_name", "String", True])
@@ -243,7 +243,7 @@ class DataCounterProcessor(BaseDataGenericMetricProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.table = "data_{}_counter".format(self.resource_name)
-        self.column_defs.append(["metric_value", "UInt64", True])
+        self.column_defs.append(["metric_value", "UInt64 CODEC(Delta,ZSTD)", True])
 
 class DataGaugeProcessor(BaseDataGenericMetricProcessor):
     def __init__(self, pipeline):

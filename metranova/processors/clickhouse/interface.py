@@ -140,27 +140,27 @@ class BaseInterfaceTrafficProcessor(BaseDataProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.table = os.getenv('CLICKHOUSE_IF_TRAFFIC_TABLE', 'data_interface_traffic')
-        self.column_defs.insert(0, ["start_time", "DateTime64(3, 'UTC')", True])
-        self.column_defs.insert(1, ["end_time", "DateTime64(3, 'UTC')", True])
+        self.column_defs.insert(0, ["start_time", "DateTime64(3, 'UTC') CODEC(Delta,ZSTD)", True])
+        self.column_defs.insert(1, ["end_time", "DateTime64(3, 'UTC') CODEC(Delta,ZSTD)", True])
         self.column_defs.extend([
             ['interface_id', 'String', True],
             ['interface_ref', 'Nullable(String)', True],
             ['admin_status', 'LowCardinality(Nullable(String))', True],
             ['oper_status', 'LowCardinality(Nullable(String))', True],
-            ['in_bit_count', 'Nullable(UInt64)', True],
-            ['in_packet_count', 'Nullable(UInt64)', True],
-            ['in_discard_packet_count', 'Nullable(UInt64)', True],
-            ['in_error_packet_count', 'Nullable(UInt64)', True],
-            ['in_bcast_packet_count', 'Nullable(UInt64)', True],
-            ['in_ucast_packet_count', 'Nullable(UInt64)', True],
-            ['in_mcast_packet_count', 'Nullable(UInt64)', True],
-            ['out_bit_count', 'Nullable(UInt64)', True],
-            ['out_packet_count', 'Nullable(UInt64)', True],
-            ['out_discard_packet_count', 'Nullable(UInt64)', True],
-            ['out_error_packet_count', 'Nullable(UInt64)', True],
-            ['out_bcast_packet_count', 'Nullable(UInt64)', True],
-            ['out_ucast_packet_count', 'Nullable(UInt64)', True],
-            ['out_mcast_packet_count', 'Nullable(UInt64)', True]
+            ['in_bit_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True],
+            ['in_packet_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True],
+            ['in_discard_packet_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True],
+            ['in_error_packet_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True],
+            ['in_bcast_packet_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True],
+            ['in_ucast_packet_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True],
+            ['in_mcast_packet_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True],
+            ['out_bit_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True],
+            ['out_packet_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True],
+            ['out_discard_packet_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True],
+            ['out_error_packet_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True],
+            ['out_bcast_packet_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True],
+            ['out_ucast_packet_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True],
+            ['out_mcast_packet_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True]
         ])
         self.table_engine = "CoalescingMergeTree"
         self.partition_by = 'toYYYYMMDD(start_time)'
