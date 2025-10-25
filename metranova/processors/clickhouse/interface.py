@@ -1,130 +1,80 @@
-import hashlib
 import logging
 import orjson
 import os
-import re
 from metranova.processors.clickhouse.base import BaseDataProcessor, BaseMetadataProcessor
-from typing import Iterator, Dict, Any
 
 logger = logging.getLogger(__name__)
 
 class InterfaceMetadataProcessor(BaseMetadataProcessor):
-    # Note does not use BaseInterfaceProcessor as sourced from redis not kafka-style
+
     def __init__(self, pipeline):
         super().__init__(pipeline)
-        self.table = os.getenv('CLICKHOUSE_IF_METADATA_TABLE', 'meta_if')
+        self.table = os.getenv('CLICKHOUSE_IF_METADATA_TABLE', 'meta_interface')
+        self.column_defs.extend([
+            ['type', 'LowCardinality(String)', True],
+            ['description', 'Nullable(String)', True],
+            ['device_id', 'String', True],
+            ['device_ref', 'Nullable(String)', True],
+            ['edge', 'Bool', True],
+            ['flow_index', 'Nullable(UInt32)', True],
+            ['ipv4', 'Nullable(IPv4)', True],
+            ['ipv6', 'Nullable(IPv6)', True],
+            ['name', 'String', True],
+            ['speed', 'Nullable(UInt64)', True],
+            ['circuit_id', 'Array(String)', True],
+            ['circuit_ref', 'Array(Nullable(String))', True],
+            ['peer_as_id', 'Nullable(UInt32)', True],
+            ['peer_as_ref', 'Nullable(String)', True],
+            ['peer_interface_ipv4', 'Nullable(IPv4)', True],
+            ['peer_interface_ipv6', 'Nullable(IPv6)', True],
+            ['lag_member_interface_id', 'Array(LowCardinality(String))', True],
+            ['lag_member_interface_ref', 'Array(String)', True],
+            ['port_interface_id', 'LowCardinality(Nullable(String))', True],
+            ['port_interface_ref', 'Nullable(String)', True],
+            ['remote_interface_id', 'LowCardinality(Nullable(String))', True],
+            ['remote_interface_ref', 'Nullable(String)', True],
+            ['remote_organization_id', 'LowCardinality(Nullable(String))', True],
+            ['remote_organization_ref', 'Nullable(String)', True]
+        ])
         self.val_id_field = ['data', 'id']
-        self.create_table_cmd = f"""
-        CREATE TABLE IF NOT EXISTS {self.table} (
-            ref String,
-            hash String,
-            insert_time DateTime DEFAULT now(),
-            description Nullable(String),
-            device LowCardinality(Nullable(String)),
-            id String,
-            ifindex Nullable(UInt32),
-            edge Bool,
-            ipv4 Nullable(IPv4),
-            ipv6 Nullable(IPv6),
-            name Nullable(String),
-            netflow_index Nullable(UInt32),
-            peer_asn Nullable(UInt32),
-            peer_ipv4 Nullable(IPv4),
-            peer_ipv6 Nullable(IPv6),
-            port_name Nullable(String),
-            remote_device LowCardinality(Nullable(String)),
-            remote_full_name LowCardinality(Nullable(String)),
-            remote_id Nullable(String),
-            remote_lldp_device LowCardinality(Nullable(String)),
-            remote_lldp_port LowCardinality(Nullable(String)),
-            remote_loc_name LowCardinality(Nullable(String)),
-            remote_loc_type LowCardinality(Nullable(String)),
-            remote_loc_lat Nullable(Decimal(8, 6)),
-            remote_loc_lon Nullable(Decimal(9, 6)),
-            remote_manufacturer LowCardinality(Nullable(String)),
-            remote_model LowCardinality(Nullable(String)),
-            remote_network LowCardinality(Nullable(String)),
-            remote_os LowCardinality(Nullable(String)),
-            remote_port LowCardinality(Nullable(String)),
-            remote_role LowCardinality(Nullable(String)),
-            remote_short_name LowCardinality(Nullable(String)),
-            remote_state LowCardinality(Nullable(String)),
-            site LowCardinality(Nullable(String)),
-            speed Nullable(UInt32),
-            visibility LowCardinality(Nullable(String)),
-            vrtr_ifglobalindex Nullable(UInt32),
-            vrtr_ifindex Nullable(String),
-            vrtr_name LowCardinality(Nullable(String))
-        ) ENGINE = MergeTree()
-        ORDER BY (ref)
-        """
-
-        self.column_names = [
-            'ref', 'hash', 'description', 'device', 'id', 'ifindex', 'edge',
-            'ipv4', 'ipv6', 'name', 'netflow_index', 'peer_asn', 'peer_ipv4',
-            'peer_ipv6', 'port_name', 'remote_device', 'remote_full_name',
-            'remote_id', 'remote_lldp_device', 'remote_lldp_port', 'remote_loc_name',
-            'remote_loc_type', 'remote_loc_lat', 'remote_loc_lon', 'remote_manufacturer',
-            'remote_model', 'remote_network', 'remote_os', 'remote_port', 'remote_role',
-            'remote_short_name', 'remote_state', 'site', 'speed', 'visibility',
-            'vrtr_ifglobalindex', 'vrtr_ifindex', 'vrtr_name'
-        ]
-
-        self.required_fields = [ ['data', 'id'], ['data', 'device'], ['data', 'name'] ]
+        self.required_fields = [ ['data', 'id'], ['data', 'device_id'], ['data', 'name'], ['data', 'type'] ]
 
     def build_metadata_fields(self, value: dict) -> dict:
+        redis_data = value.get('data', {})
         formatted_record = {
-            'description': value.get('data', {}).get('description', None),
-            'device': value.get('data', {}).get('device', None),
-            'ifindex': value.get('data', {}).get('ifindex', None),
-            'edge': value.get('data', {}).get('edge', False),
-            'ipv4': value.get('data', {}).get('ipv4', None),
-            'ipv6': value.get('data', {}).get('ipv6', None),
-            'name': value.get('data', {}).get('name', None),
-            'netflow_index': value.get('data', {}).get('netflow_index', None),
-            'peer_asn': value.get('data', {}).get('peer_asn', None),
-            'peer_ipv4': value.get('data', {}).get('peer_ipv4', None),
-            'peer_ipv6': value.get('data', {}).get('peer_ipv6', None),
-            'port_name': value.get('data', {}).get('port_name', None),
-            'remote_device': value.get('data', {}).get('remote_device', None),
-            'remote_full_name': value.get('data', {}).get('remote_full_name', None),
-            'remote_id': value.get('data', {}).get('remote_id', None),
-            'remote_lldp_device': value.get('data', {}).get('remote_lldp_device', None),
-            'remote_lldp_port': value.get('data', {}).get('remote_lldp_port', None),
-            'remote_loc_name': value.get('data', {}).get('remote_loc_name', None),
-            'remote_loc_type': value.get('data', {}).get('remote_loc_type', None),
-            'remote_loc_lat': value.get('data', {}).get('remote_loc_lat', None),
-            'remote_loc_lon': value.get('data', {}).get('remote_loc_lon', None),
-            'remote_manufacturer': value.get('data', {}).get('remote_manufacturer', None),
-            'remote_model': value.get('data', {}).get('remote_model', None),
-            'remote_network': value.get('data', {}).get('remote_network', None),
-            'remote_os': value.get('data', {}).get('remote_os', None),
-            'remote_port': value.get('data', {}).get('remote_port', None),
-            'remote_role': value.get('data', {}).get('remote_role', None),
-            'remote_short_name': value.get('data', {}).get('remote_short_name', None),
-            'remote_state': value.get('data', {}).get('remote_state', None),
-            'site': value.get('data', {}).get('site', None),
-            'speed': value.get('data', {}).get('speed', None),
-            'visibility': value.get('data', {}).get('visibility', None),
-            'vrtr_ifglobalindex': value.get('data', {}).get('vrtr_ifglobalindex', None),
-            'vrtr_ifindex': value.get('data', {}).get('vrtr_ifindex', None),
-            'vrtr_name': value.get('data', {}).get('vrtr_name', None)
+            "type": redis_data.get('type', "interface"),
+            "device_id": redis_data.get('device_id', None),
+            "device_ref": self.pipeline.cacher("redis").lookup("meta_device", redis_data.get('device_id', None)),
+            "description": redis_data.get('description', None),
+            "edge": redis_data.get('edge', None),
+            "flow_index": redis_data.get('flow_index', None),
+            "ipv4": redis_data.get('ipv4', None),
+            "ipv6": redis_data.get('ipv6', None),
+            "name": redis_data.get('name', None),
+            "speed": redis_data.get('speed', None),
+            "circuit_id": orjson.loads(redis_data.get('circuit_id', '[]')),
+            "circuit_ref": [self.pipeline.cacher("redis").lookup("meta_circuit", cid) for cid in orjson.loads(redis_data.get('circuit_id', '[]'))],
+            "peer_as_id": redis_data.get('peer_as_id', None),
+            "peer_as_ref": self.pipeline.cacher("redis").lookup("meta_as", redis_data.get('peer_as_id', None)),
+            "peer_interface_ipv4": redis_data.get('peer_interface_ipv4', None),
+            "peer_interface_ipv6": redis_data.get('peer_interface_ipv6', None),
+            "lag_member_interface_id": orjson.loads(redis_data.get('lag_members', '[]')),
+            "lag_member_interface_ref": [self.pipeline.cacher("redis").lookup("meta_interface", iid) for iid in orjson.loads(redis_data.get('lag_members', '[]'))],
+            "port_interface_id": redis_data.get('port_interface_id', None),
+            "port_interface_ref": self.pipeline.cacher("redis").lookup("meta_interface", redis_data.get('port_interface_id', None)),
+            "remote_interface_id": redis_data.get('remote_interface_id', None),
+            "remote_interface_ref": self.pipeline.cacher("redis").lookup("meta_interface", redis_data.get('remote_interface_id', None)),
+            "remote_organization_id": redis_data.get('remote_organization_id', None),
+            "remote_organization_ref": self.pipeline.cacher("redis").lookup("meta_organization", redis_data.get('remote_organization_id', None)),
+            "tags": orjson.loads(redis_data.get('tags', '[]')),
+            "ext": redis_data.get('ext', '{}')
         }
 
         #format boolean
         formatted_record['edge'] = formatted_record['edge'] in [True, 'true', 'True', 1, '1']
-
-        #format floats
-        float_fields = ['remote_loc_lat', 'remote_loc_lon']
-        for field in float_fields:
-            if formatted_record[field] is not None:
-                try:
-                    formatted_record[field] = float(formatted_record[field])
-                except ValueError:
-                    formatted_record[field] = None
         
         # format integers
-        int_fields = ['ifindex', 'netflow_index', 'peer_asn', 'speed', 'vrtr_ifglobalindex']
+        int_fields = ['flow_index', 'speed', 'peer_as_id']
         for field in int_fields:
             if formatted_record[field] is not None:
                 try:

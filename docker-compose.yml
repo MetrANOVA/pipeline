@@ -29,7 +29,7 @@ services:
     environment:
       - PIPELINE_TYPE=clickhouse
       - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.stardust.InterfaceTrafficProcessor
-#      - REDIS_PROCESSORS=metranova.processors.redis.interface.InterfaceMetadataProcessor
+      - REDIS_PROCESSORS=metranova.processors.redis.stardust.InterfaceMetadataProcessor
       - KAFKA_TOPIC=metranova_interface
     env_file:
       - .env
@@ -49,6 +49,7 @@ services:
       - PIPELINE_TYPE=metadata_export
       - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface.InterfaceMetadataProcessor
       - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_IF_METADATA_TABLE}
+      - REDIS_CONSUMER_TABLES=meta_interface_cache
     env_file:
       - .env
     restart: always
