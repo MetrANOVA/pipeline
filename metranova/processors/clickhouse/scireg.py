@@ -63,7 +63,7 @@ class ScienceRegistryProcessor(BaseMetadataProcessor):
                     ip_obj = ipaddress.ip_address(addr)
                     default_prefix = 32 if ip_obj.version == 4 else 128
                     ip_subnets.append((addr, default_prefix))
-                except ipaddress.AddressValueError:
+                except (ipaddress.AddressValueError, ValueError):
                     self.logger.warning(f"Invalid IP address format: {addr}")
                     continue
 
