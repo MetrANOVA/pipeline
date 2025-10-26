@@ -37,18 +37,30 @@ class RedisMetadataRefWriter(BaseRedisWriter):
             
             loaded_count = 0
             for row in rows:
-                latest_id, latest_ref = row
+                if len(row) < 2:
+                    self.logger.debug(f"Skipping row with insufficient columns: {row}")
+                    continue
+                latest_id, latest_ref = row[0], row[1]
                 
                 # Skip rows with null values
                 if latest_id is None or latest_ref is None:
                     self.logger.debug(f"Skipping row with null values: id={latest_id}, ref={latest_ref}")
                     continue
-                
-                # Set the key-value pair in Redis
-                # Key format: table:id, Value: ref
-                redis_key = f"{table}:{latest_id}"
-                pipe.set(redis_key, latest_ref)
-                loaded_count += 1
+
+                # If there are additional fields (e.g., flow_index), then index by those fields instead
+                if len(row) > 2:
+                    redis_key = f"{table}".replace(':', '__')
+                    for latest_field in row[2:]:
+                        if latest_field is None:
+                            continue
+                        redis_key += f":{latest_field}"
+                    pipe.set(redis_key, latest_id)
+                else:
+                    # Set the key-value pair in Redis
+                    # Key format: table:id, Value: ref
+                    redis_key = f"{table}:{latest_id}"
+                    pipe.set(redis_key, latest_ref)
+                    loaded_count += 1
                 
                 # Execute batch every 1000 records
                 if loaded_count % 1000 == 0:

@@ -7,8 +7,18 @@ class BaseFlowProcessor(BaseDataProcessor):
 
     def __init__(self, pipeline):
         super().__init__(pipeline)
+        # environment settings
         self.table = os.getenv('CLICKHOUSE_FLOW_TABLE', 'data_flow')
-        
+        self.flow_type = os.getenv('CLICKHOUSE_FLOW_TYPE', 'unknown')
+        self.policy_originator = os.getenv('CLICKHOUSE_FLOW_POLICY_ORIGINATOR', 'unknown')
+        self.policy_level = os.getenv('CLICKHOUSE_FLOW_POLICY_LEVEL', 'tlp:amber')
+        self.policy_auto_scopes = os.getenv('CLICKHOUSE_FLOW_POLICY_AUTO_SCOPES', 'true').lower() in ('true', '1', 'yes')
+        self.policy_scope = os.getenv('CLICKHOUSE_FLOW_POLICY_SCOPE', None)
+        if self.policy_scope:
+            self.policy_scope = [s.strip() for s in self.policy_scope.split(',')]
+        else:
+            self.policy_scope = []
+
         # add time fields to front of column names
         self.column_defs.insert(0, ["start_time", "DateTime64(3, 'UTC')", True])
         self.column_defs.insert(1, ["end_time", "DateTime64(3, 'UTC')", True])

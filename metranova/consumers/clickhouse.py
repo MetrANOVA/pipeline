@@ -38,7 +38,7 @@ class MetadataClickHouseConsumer(BaseClickHouseConsumer):
         super().__init__(pipeline)
         self.logger = logger
         self.update_interval = int(os.getenv('CLICKHOUSE_CONSUMER_UPDATE_INTERVAL', -1))
-        # Load tables from environment variable
+        # Load tables from environment variable - can be in format table or table:field[:field...]
         tables_str = os.getenv('CLICKHOUSE_CONSUMER_TABLES', '')
         if tables_str:
             self.tables = [table.strip() for table in tables_str.split(',') if table.strip()]
@@ -48,13 +48,16 @@ class MetadataClickHouseConsumer(BaseClickHouseConsumer):
 
     def build_query(self, table: str) -> str:
         """Build the metadata query for a specific table"""
-        query = f"""
-        SELECT argMax(id, insert_time) as latest_id, 
-               argMax(ref, insert_time) as latest_ref
-        FROM {table} 
-        GROUP BY id
-        ORDER BY id
-        """
+        (table_name, *fields) = table.split(':') if ':' in table else (table, None)
+        query = "SELECT argMax(id, insert_time) as latest_id,argMax(ref, insert_time) as latest_ref"
+        for field in fields:
+            if field is not None:
+                query += f", argMax({field}, insert_time) as latest_{field}"
+        query += f" FROM {table_name} WHERE id IS NOT NULL AND ref IS NOT NULL"
+        for field in fields:
+            if field is not None:
+                query += f" AND {field} IS NOT NULL"
+        query += " GROUP BY id ORDER BY id"
         return query
 
     def query_table(self, table: str) -> dict:
