@@ -16,17 +16,6 @@ snmp_if:
         path:
           - fields
           - SNMP_IF-MIB::ifName
-  cache_id_lookup:
-    - table: ifindex_to_ifname
-      key:
-        - type: field
-          path:
-            - tags
-            - device
-        - type: field
-          path:
-            - tags
-            - oidIndex
 
 snmp_timetra_vrtr:
   type: interface
