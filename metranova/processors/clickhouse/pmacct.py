@@ -138,7 +138,12 @@ class NFAcctdFlowProcessor(BaseFlowProcessor):
         #todo: map to in and out interface ids as strings
         interface_in_id = str(value.get("iface_in"))
         interface_out_id = str(value.get("iface_out"))
-
+        #todo : uncomment this when we have reliable device_id mapping
+        # interface_in_index = str(value.get("iface_in"))
+        # interface_in_id = self.pipeline.cacher("redis").lookup("meta_interface__device_id__flow_index", "{}:{}".format(device_id, interface_in_index))
+        # interface_out_index = str(value.get("iface_out"))
+        # interface_out_id = self.pipeline.cacher("redis").lookup("meta_interface__device_id__flow_index", "{}:{}".format(device_id, interface_out_index))
+        
         # todo: determine application port - use dst port if available, else src port
         application_port = value.get("port_dst", None)
         if application_port is None:

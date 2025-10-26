@@ -8,7 +8,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.stardust.FlowProcessor
+      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.pmacct.NFAcctdFlowProcessor
       - KAFKA_TOPIC=metranova_flow
       - IP_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE}
     env_file:
@@ -61,7 +61,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=metadata_import
-      - CLICKHOUSE_CONSUMER_TABLES=${CLICKHOUSE_IF_METADATA_TABLE}
+      - CLICKHOUSE_CONSUMER_TABLES=${CLICKHOUSE_IF_METADATA_TABLE},${CLICKHOUSE_IF_METADATA_TABLE}:device_id:flow_index
     env_file:
       - .env
     restart: always
