@@ -126,7 +126,7 @@ Processes network interface statistics and queue data from Kafka, storing metric
 **Configuration:**
 - `PIPELINE_TYPE=clickhouse`
 - `CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface.InterfaceTrafficProcessor,metranova.processors.clickhouse.interface.InterfaceSAPQueueProcessor,metranova.processors.clickhouse.interface.InterfacePortQueueProcessor`
-- `REDIS_PROCESSORS=metranova.processors.redis.interface.InterfaceMetadataProcessor`
+- `REDIS_HASH_PROCESSORS=metranova.processors.redis.interface.InterfaceMetadataProcessor`
 - `KAFKA_TOPIC=metranova_interface`
 
 **Data processed:** Interface traffic statistics, port queue metrics, SAP queue data, and interface metadata.
@@ -258,6 +258,7 @@ These variables are typically set in `docker-compose.yml` rather than `.env`:
 | `PIPELINE_TYPE` | Pipeline type: `clickhouse`, `metadata_import`, `metadata_export`, `json` |
 | `CLICKHOUSE_PROCESSORS` | Comma-separated list of ClickHouse processor classes |
 | `REDIS_PROCESSORS` | Comma-separated list of Redis processor classes |
+| `REDIS_HASH_PROCESSORS` | Comma-separated list of Redis hash processor classes |
 
 ## Development
 

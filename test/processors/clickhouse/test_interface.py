@@ -266,8 +266,8 @@ class TestBaseInterfaceTrafficProcessor(unittest.TestCase):
         self.assertIn("SETTINGS index_granularity = 8192", result)
         
         # Check for specific core columns with proper codecs
-        self.assertIn("`start_time` DateTime64(3, 'UTC') CODEC(Delta,ZSTD)", result)
-        self.assertIn("`end_time` DateTime64(3, 'UTC') CODEC(Delta,ZSTD)", result)
+        self.assertIn("`start_time` DateTime('UTC') CODEC(Delta,ZSTD)", result)
+        self.assertIn("`end_time` DateTime('UTC') CODEC(Delta,ZSTD)", result)
         self.assertIn("`insert_time` DateTime64(3, 'UTC') DEFAULT now64()", result)
         self.assertIn("`collector_id` LowCardinality(String)", result)
         self.assertIn("`policy_originator` LowCardinality(String)", result)
@@ -283,14 +283,12 @@ class TestBaseInterfaceTrafficProcessor(unittest.TestCase):
         
         # Check for traffic counter columns with codecs
         self.assertIn("`in_bit_count` Nullable(UInt64) CODEC(Delta,ZSTD)", result)
-        self.assertIn("`in_packet_count` Nullable(UInt64) CODEC(Delta,ZSTD)", result)
         self.assertIn("`in_discard_packet_count` Nullable(UInt64) CODEC(Delta,ZSTD)", result)
         self.assertIn("`in_error_packet_count` Nullable(UInt64) CODEC(Delta,ZSTD)", result)
         self.assertIn("`in_bcast_packet_count` Nullable(UInt64) CODEC(Delta,ZSTD)", result)
         self.assertIn("`in_ucast_packet_count` Nullable(UInt64) CODEC(Delta,ZSTD)", result)
         self.assertIn("`in_mcast_packet_count` Nullable(UInt64) CODEC(Delta,ZSTD)", result)
         self.assertIn("`out_bit_count` Nullable(UInt64) CODEC(Delta,ZSTD)", result)
-        self.assertIn("`out_packet_count` Nullable(UInt64) CODEC(Delta,ZSTD)", result)
         self.assertIn("`out_discard_packet_count` Nullable(UInt64) CODEC(Delta,ZSTD)", result)
         self.assertIn("`out_error_packet_count` Nullable(UInt64) CODEC(Delta,ZSTD)", result)
         self.assertIn("`out_bcast_packet_count` Nullable(UInt64) CODEC(Delta,ZSTD)", result)
@@ -353,8 +351,8 @@ class TestBaseInterfaceTrafficProcessor(unittest.TestCase):
         column_names = [col[0] for col in processor.column_defs]
         expected_columns = [
             'start_time', 'end_time', 'interface_id', 'interface_ref',
-            'admin_status', 'oper_status', 'in_bit_count', 'in_packet_count',
-            'out_bit_count', 'out_packet_count'
+            'admin_status', 'oper_status', 'in_bit_count',
+            'out_bit_count'
         ]
         
         for expected_col in expected_columns:

@@ -30,9 +30,21 @@ class BaseProcessor:
                     return False
         return True
 
+    def has_match_field(self, value: dict) -> bool:
+        for path in self.match_fields:
+            current = value
+            for key in path:
+                if not isinstance(current, dict) or key not in current:
+                    break
+                current = current[key]
+            else: # only executed if inner loop did not break
+                if current is not None:
+                    return True
+        return False
+
     def match_message(self, value: dict) -> bool:
         """Determine if this processor should handle the given message"""
-        return True  # Default to match all messages with required fields, override in subclass if needed
+        return self.has_match_field(value)
     
     def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
         """Build message dictionary for ClickHouse insertion"""

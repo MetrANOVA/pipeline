@@ -1,0 +1,110 @@
+snmp_if:
+  resource_type: interface
+  cache_lookup_table_builder:
+    - name: ifindex_to_ifname
+      key:
+        - type: field
+          path:
+            - tags
+            - device
+        - type: field
+          path:
+            - tags
+            - oidIndex
+      value:
+        type: field
+        path:
+          - fields
+          - SNMP_IF-MIB::ifName
+  cache_id_lookup:
+    - table: ifindex_to_ifname
+      key:
+        - type: field
+          path:
+            - tags
+            - device
+        - type: field
+          path:
+            - tags
+            - oidIndex
+
+snmp_timetra_vrtr:
+  type: interface
+  cache_lookup_table_builder:
+    - name: vrtrifindex_to_ifname
+      key:
+        - type: field
+          path:
+            - tags
+            - device
+        - type: field
+          path:
+            - tags
+            - oidIndex
+      value:
+        type: field
+        path:
+          - fields
+          - SNMP_TIMETRA-VRTR-MIB::vRtrIfName
+    - name: sapindex_to_ifname
+      key:
+        - type: field
+          path:
+            - tags
+            - device
+        - type: field
+          path:
+            - fields
+            - SNMP_TIMETRA-VRTR-MIB::vRtrIfServiceId
+        - type: field
+          path:
+            - fields
+            - SNMP_TIMETRA-VRTR-MIB::vRtrIfPortID
+        - type: field
+          path:
+            - fields
+            - SNMP_TIMETRA-VRTR-MIB::vRtrIfEncapValue
+      value:
+        type: field
+        path:
+          - fields
+          - SNMP_TIMETRA-VRTR-MIB::vRtrIfName
+
+snmp_timetra_sap:
+  type: interface
+  cache_lookup_table_builder:
+    - name: sapindex_to_sapname
+      key:
+        - type: field
+          path:
+            - tags
+            - device
+        - type: field
+          path:
+            - tags
+            - oidIndex
+      value:
+        type: field
+        format: tmnxsapid
+        path:
+          - tags
+          - oidIndex
+
+snmp_timetra_lag:
+  type: interface
+  cache_lookup_table_builder:
+    - name: lagindex_to_ifindex
+      key:
+        - type: field
+          path:
+            - tags
+            - device
+        - type: field
+          path:
+            - tags
+            - oidIndex
+      value:
+        type: field
+        path:
+          - fields
+          - SNMP_TIMETRA-LAG-MIB::tLagIfIndex

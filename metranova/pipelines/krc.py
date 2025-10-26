@@ -7,7 +7,7 @@ from metranova.pipelines.base import BasePipeline
 from metranova.processors.clickhouse.base import BaseClickHouseProcessor
 from metranova.processors.redis.base import BaseRedisProcessor
 from metranova.writers.clickhouse import ClickHouseWriter
-from metranova.writers.redis import RedisHashWriter
+from metranova.writers.redis import RedisHashWriter, RedisWriter
 
 logger = logging.getLogger(__name__)
 
@@ -38,4 +38,10 @@ class KRCPipeline(BasePipeline):
         redis_processors_str = os.getenv('REDIS_PROCESSORS', '')
         self.redis_processors = self.load_processors(redis_processors_str, required_class=BaseRedisProcessor)
         if self.redis_processors:
-            self.writers.append(RedisHashWriter(self.redis_processors))
+            self.writers.append(RedisWriter(self.redis_processors))
+
+        # Load Redis hash processors and set writer if any
+        redis_hash_processors_str = os.getenv('REDIS_HASH_PROCESSORS', '')
+        self.redis_hash_processors = self.load_processors(redis_hash_processors_str, required_class=BaseRedisProcessor)
+        if self.redis_hash_processors:
+            self.writers.append(RedisHashWriter(self.redis_hash_processors))

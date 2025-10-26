@@ -209,6 +209,13 @@ class BaseDataProcessor(BaseClickHouseProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.required_fields = []  # List of lists of required fields, any one of which must be present
+        self.policy_originator = os.getenv('CLICKHOUSE_POLICY_ORIGINATOR', 'unknown')
+        self.policy_level = os.getenv('CLICKHOUSE_POLICY_LEVEL', 'tlp:amber')
+        self.policy_scope = os.getenv('CLICKHOUSE_POLICY_SCOPE', None)
+        if self.policy_scope:
+            self.policy_scope = [s.strip() for s in self.policy_scope.split(',')]
+        else:
+            self.policy_scope = []
 
         # array of arrays in format [['col_name', 'col_definition', bool_include_in_insert], ...]
         # for extension columns, col_definition is ignored and can be set to None

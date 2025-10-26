@@ -14,6 +14,44 @@ class BaseRedisWriter(BaseWriter):
         self.logger = logger
         self.datastore = RedisConnector()
 
+class RedisWriter(BaseRedisWriter):
+    def write_message(self, msg, consumer_metadata=None):
+        #parse table, key and value
+        if not msg:
+            return
+        table = msg.get('table', None)
+        if not table:
+            self.logger.warning("Message missing 'table' field")
+            return
+        key = msg.get('key', None)
+        if not key:
+            self.logger.warning("Message missing 'key' field")
+            return
+        value = msg.get('value', None)
+        if not value:
+            self.logger.warning("Message missing 'value' field")
+            return
+        expires = msg.get('expires', None)
+        if expires is not None:
+            try:
+                expires = int(expires)
+            except ValueError:
+                self.logger.warning(f"Invalid expires value: {expires}, must be an integer representing seconds")
+                expires = None
+        else:
+            expires = 0  # default no expire
+
+        # Load data into Redis
+        self.logger.debug(f"Loading message to Redis: {msg}")
+        try:
+            redis_key = f"{table}:{key}"
+            self.datastore.client.set(redis_key, value)
+            if expires:
+                self.datastore.client.expire(redis_key, expires)
+        except Exception as e:
+            self.logger.error(f"Failed to load data to Redis for key {redis_key}: {e}")
+            raise
+
 class RedisMetadataRefWriter(BaseRedisWriter):
     def process_message(self, msg, consumer_metadata: Optional[Dict] = None):
         """Override process_message since don't use processors here"""
