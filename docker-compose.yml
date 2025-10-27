@@ -8,9 +8,9 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.pmacct.NFAcctdFlowProcessor
-      - KAFKA_TOPIC=metranova_flow
-      - IP_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE}
+      - CLICKHOUSE_PROCESSORS=${PIPELINE_FLOW_CLICKHOUSE_PROCESSORS}
+      - KAFKA_TOPIC=${PIPELINE_FLOW_KAFKA_TOPIC}
+      - IP_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}
     env_file:
       - .env
     volumes:
@@ -28,28 +28,45 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.stardust.InterfaceTrafficProcessor
-      - REDIS_PROCESSORS=metranova.processors.redis.stardust.InterfaceMetadataProcessor
-      - KAFKA_TOPIC=metranova_interface
+      - CLICKHOUSE_PROCESSORS=${PIPELINE_IF_CLICKHOUSE_PROCESSORS}
+      - REDIS_HASH_PROCESSORS=${PIPELINE_IF_REDIS_PROCESSORS}
+      - KAFKA_TOPIC=${PIPELINE_IF_KAFKA_TOPIC}
     env_file:
       - .env
     volumes:
       - ./certificates:/app/certificates:ro
+      - ./conf:/etc/metranova_pipeline:ro
     restart: always
     deploy:
       mode: replicated
       replicas: 10
 
-  metadata_export_pipeline:
+  metadata_redis_export_pipeline:
     image: metranova/pipeline:latest
     build:
       context: .
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=metadata_export
-      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface.InterfaceMetadataProcessor
+      - CLICKHOUSE_PROCESSORS=${PIPELINE_METADATA_REDIS_EXPORT_CLICKHOUSE_PROCESSORS}
       - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_IF_METADATA_TABLE}
-      - REDIS_CONSUMER_TABLES=meta_interface_cache
+      - REDIS_CONSUMER_TABLES=${REDIS_IF_METADATA_TABLE}
+    env_file:
+      - .env
+    restart: always
+
+  metadata_file_export_pipeline:
+    image: metranova/pipeline:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PIPELINE_TYPE=metadata_file_export
+      - CLICKHOUSE_PROCESSORS=${PIPELINE_METADATA_FILE_EXPORT_CLICKHOUSE_PROCESSORS}
+      - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_IF_METADATA_TABLE},${CLICKHOUSE_DEVICE_METADATA_TABLE},${CLICKHOUSE_ORGANIZATION_METADATA_TABLE},${CLICKHOUSE_CIRCUIT_METADATA_TABLE},${CLICKHOUSE_AS_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}
+      - FILE_CONSUMER_PATHS=${PIPELINE_METADATA_FILE_EXPORT_PATHS}
+    volumes:
+      - ./conf:/etc/metranova_pipeline:ro
     env_file:
       - .env
     restart: always
@@ -61,7 +78,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=metadata_import
-      - CLICKHOUSE_CONSUMER_TABLES=${CLICKHOUSE_IF_METADATA_TABLE},${CLICKHOUSE_IF_METADATA_TABLE}:device_id:flow_index
+      - CLICKHOUSE_CONSUMER_TABLES=${CLICKHOUSE_IP_METADATA_TABLE},${CLICKHOUSE_AS_METADATA_TABLE},${CLICKHOUSE_ORGANIZATION_METADATA_TABLE},${CLICKHOUSE_CIRCUIT_METADATA_TABLE},${CLICKHOUSE_DEVICE_METADATA_TABLE},${CLICKHOUSE_IF_METADATA_TABLE},${CLICKHOUSE_IF_METADATA_TABLE}:device_id:flow_index
     env_file:
       - .env
     restart: always
@@ -86,7 +103,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=ip_metadata_import
-      - CLICKHOUSE_CONSUMER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE}
+      - CLICKHOUSE_CONSUMER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}
       - FILE_PROCESSORS=metranova.processors.file.base.IPTriePickleFileProcessor
     env_file:
       - .env
@@ -101,9 +118,9 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.pmacct.SFAcctdFlowProcessor
-      - KAFKA_TOPIC=metranova_sflow
-      - IP_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE}
+      - CLICKHOUSE_PROCESSORS=${PIPELINE_SFACCTD_CLICKHOUSE_PROCESSORS}
+      - KAFKA_TOPIC=${PIPELINE_SFACCTD_KAFKA_TOPIC}
+      - IP_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}
     env_file:
       - .env
     volumes:
