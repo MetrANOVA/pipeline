@@ -235,6 +235,159 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         self.assertEqual(result["lag_member_interface_ref"], [])
         self.assertEqual(result["tags"], [])
 
+    def test_build_metadata_fields_json_parsing_error(self):
+        """Test that invalid JSON strings are handled gracefully."""
+        
+        processor = InterfaceMetadataProcessor(self.mock_pipeline)
+        
+        input_data = {
+            "data": {
+                "id": "interface1",
+                "device_id": "device1", 
+                "name": "eth0",
+                "type": "ethernet",
+                "circuit_id": "invalid_json_string",
+                "lag_members": "[malformed json",
+                "tags": "not_json_at_all"
+            }
+        }
+        
+        result = processor.build_metadata_fields(input_data)
+        
+        # Should default to empty arrays for invalid JSON
+        self.assertEqual(result["circuit_id"], [])
+        self.assertEqual(result["circuit_ref"], [])
+        self.assertEqual(result["lag_member_interface_id"], [])
+        self.assertEqual(result["lag_member_interface_ref"], [])
+        self.assertEqual(result["tags"], [])
+
+    def test_build_metadata_fields_array_ref_lookup(self):
+        """Test that array reference lookups work correctly."""
+        
+        # Configure mock to return different values for different lookups
+        def mock_lookup(table, key):
+            return f"ref_for_{key}" if key else None
+        
+        self.mock_pipeline.cacher.return_value.lookup.side_effect = mock_lookup
+        
+        processor = InterfaceMetadataProcessor(self.mock_pipeline)
+        
+        input_data = {
+            "data": {
+                "id": "interface1",
+                "device_id": "device1", 
+                "name": "eth0",
+                "type": "ethernet",
+                "circuit_id": '["circuit1", "circuit2"]',
+                "lag_members": '["lag1", "lag2", "lag3"]'
+            }
+        }
+        
+        result = processor.build_metadata_fields(input_data)
+        
+        # Check that circuit_ref is populated correctly
+        self.assertEqual(result["circuit_id"], ["circuit1", "circuit2"])
+        self.assertEqual(result["circuit_ref"], ["ref_for_circuit1", "ref_for_circuit2"])
+        
+        # Check that lag_member_interface_ref is populated correctly
+        self.assertEqual(result["lag_member_interface_id"], ["lag1", "lag2", "lag3"])
+        self.assertEqual(result["lag_member_interface_ref"], ["ref_for_lag1", "ref_for_lag2", "ref_for_lag3"])
+
+    def test_build_metadata_fields_ext_dict_conversion(self):
+        """Test that ext field dict is converted to JSON string."""
+        
+        processor = InterfaceMetadataProcessor(self.mock_pipeline)
+        
+        input_data = {
+            "data": {
+                "id": "interface1",
+                "device_id": "device1", 
+                "name": "eth0",
+                "type": "ethernet",
+                "ext": {"custom_field": "value", "number": 42}
+            }
+        }
+        
+        result = processor.build_metadata_fields(input_data)
+        
+        # Should be converted to JSON string
+        self.assertIsInstance(result["ext"], str)
+        # Parse it back to verify content
+        import orjson
+        parsed_ext = orjson.loads(result["ext"])
+        self.assertEqual(parsed_ext["custom_field"], "value")
+        self.assertEqual(parsed_ext["number"], 42)
+
+    def test_build_metadata_fields_comprehensive_scenario(self):
+        """Test build_metadata_fields with a comprehensive real-world scenario including all new functionality."""
+        
+        # Configure mock lookup to simulate different ref resolutions
+        def mock_lookup(table, key):
+            lookup_map = {
+                ("meta_device", "device1"): "Device Reference 1",
+                ("meta_as", "65001"): "AS Reference 65001",
+                ("meta_interface", "port1"): "Port Interface Ref",
+                ("meta_interface", "remote1"): "Remote Interface Ref",
+                ("meta_interface", "circuit1"): "Circuit 1 Ref",
+                ("meta_interface", "circuit2"): "Circuit 2 Ref", 
+                ("meta_interface", "lag1"): "LAG Member 1 Ref",
+                ("meta_interface", "lag2"): "LAG Member 2 Ref",
+                ("meta_organization", "org1"): "Organization Ref"
+            }
+            return lookup_map.get((table, key), None)
+        
+        self.mock_pipeline.cacher.return_value.lookup.side_effect = mock_lookup
+        
+        processor = InterfaceMetadataProcessor(self.mock_pipeline)
+        
+        input_data = {
+            "data": {
+                "id": "interface1",
+                "device_id": "device1", 
+                "name": "eth0",
+                "type": "ethernet",
+                "description": "Main interface",
+                "edge": "true",
+                "flow_index": "100",
+                "ipv4": "192.168.1.1",
+                "ipv6": "2001:db8::1",
+                "speed": "1000000000",
+                "circuit_id": '["circuit1", "circuit2"]',
+                "peer_as_id": "65001",
+                "peer_interface_ipv4": "192.168.1.2",
+                "peer_interface_ipv6": "2001:db8::2",
+                "lag_members": '["lag1", "lag2"]',
+                "port_interface_id": "port1",
+                "remote_interface_id": "remote1",
+                "remote_organization_id": "org1",
+                "tags": '["production", "critical"]',
+                "ext": {"vlan": 100, "mtu": 1500}
+            }
+        }
+        
+        result = processor.build_metadata_fields(input_data)
+        
+        # Verify all the new JSON array processing and ref lookups
+        self.assertEqual(result["circuit_id"], ["circuit1", "circuit2"])
+        self.assertEqual(result["circuit_ref"], ["Circuit 1 Ref", "Circuit 2 Ref"])
+        self.assertEqual(result["lag_member_interface_id"], ["lag1", "lag2"])
+        self.assertEqual(result["lag_member_interface_ref"], ["LAG Member 1 Ref", "LAG Member 2 Ref"])
+        self.assertEqual(result["tags"], ["production", "critical"])
+        
+        # Verify ext conversion
+        self.assertIsInstance(result["ext"], str)
+        import orjson
+        parsed_ext = orjson.loads(result["ext"])
+        self.assertEqual(parsed_ext["vlan"], 100)
+        self.assertEqual(parsed_ext["mtu"], 1500)
+        
+        # Verify other standard lookups still work
+        self.assertEqual(result["device_ref"], "Device Reference 1")
+        self.assertEqual(result["peer_as_ref"], "AS Reference 65001")
+        self.assertEqual(result["port_interface_ref"], "Port Interface Ref")
+        self.assertEqual(result["remote_interface_ref"], "Remote Interface Ref")
+        self.assertEqual(result["remote_organization_ref"], "Organization Ref")
+
 
 class TestBaseInterfaceTrafficProcessor(unittest.TestCase):
     def setUp(self):

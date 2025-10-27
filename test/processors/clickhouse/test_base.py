@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 # Add the project root to the Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from metranova.processors.clickhouse.base import BaseMetadataProcessor, DataCounterProcessor, DataGaugeProcessor
+from metranova.processors.clickhouse.base import BaseMetadataProcessor, DataCounterProcessor, DataGaugeProcessor, BaseDataProcessor
 
 
 class TestBaseMetadataProcessor(unittest.TestCase):
@@ -164,6 +164,266 @@ class TestBaseMetadataProcessor(unittest.TestCase):
         with self.assertRaises(ValueError) as context:
             self.processor.create_table_command()
         self.assertIn("Table engine is not set", str(context.exception))
+
+    @patch.dict(os.environ, {'TEST_EXTENSION_VAR': 'ext1,ext2,invalid_ext'})
+    def test_get_extension_defs(self):
+        """Test get_extension_defs method with various scenarios."""
+        
+        # Test with valid extension options
+        extension_options = {
+            'ext1': [['field1', 'String', True], ['field2', 'UInt32', True]],
+            'ext2': [['field3', 'Float64', True]]
+        }
+        
+        result = self.processor.get_extension_defs('TEST_EXTENSION_VAR', extension_options)
+        
+        # Should return all fields from valid extensions
+        expected = [['field1', 'String', True], ['field2', 'UInt32', True], ['field3', 'Float64', True]]
+        self.assertEqual(result, expected)
+        
+        # Check that extension_enabled is populated
+        self.assertTrue(self.processor.extension_is_enabled('ext1'))
+        self.assertTrue(self.processor.extension_is_enabled('ext2'))
+        self.assertTrue(self.processor.extension_is_enabled('invalid_ext'))  # Still enabled even without options
+
+    def test_get_extension_defs_empty_env_var(self):
+        """Test get_extension_defs with empty environment variable."""
+        
+        extension_options = {'ext1': [['field1', 'String', True]]}
+        result = self.processor.get_extension_defs('NON_EXISTENT_VAR', extension_options)
+        
+        self.assertEqual(result, [])
+
+    def test_extension_is_enabled(self):
+        """Test extension_is_enabled method."""
+        
+        # Initially no extensions should be enabled
+        self.assertFalse(self.processor.extension_is_enabled('test_ext'))
+        
+        # Enable an extension manually
+        self.processor.extension_enabled['ext']['test_ext'] = True
+        self.assertTrue(self.processor.extension_is_enabled('test_ext'))
+        
+        # Test with different json_column_name
+        self.processor.extension_enabled['custom_col']['another_ext'] = True
+        self.assertTrue(self.processor.extension_is_enabled('another_ext', 'custom_col'))
+        self.assertFalse(self.processor.extension_is_enabled('another_ext', 'ext'))
+
+    def test_column_names(self):
+        """Test column_names method returns only columns marked for insertion."""
+        
+        result = self.processor.column_names()
+        
+        # Should only include columns where include_in_insert is True
+        expected = ['id', 'ref', 'hash', 'ext', 'tag']  # insert_time has False
+        self.assertEqual(result, expected)
+
+    def test_message_to_columns(self):
+        """Test message_to_columns method."""
+        
+        # Test with valid message
+        message = {
+            'id': 'test_id',
+            'ref': 'test_ref',
+            'hash': 'test_hash',
+            'ext': '{}',
+            'tag': []
+        }
+        
+        result = self.processor.message_to_columns(message)
+        expected = ['test_id', 'test_ref', 'test_hash', '{}', []]
+        self.assertEqual(result, expected)
+
+    def test_message_to_columns_missing_field(self):
+        """Test message_to_columns with missing required field."""
+        
+        # Missing 'ref' field
+        message = {
+            'id': 'test_id',
+            'hash': 'test_hash',
+            'ext': '{}',
+            'tag': []
+        }
+        
+        with self.assertRaises(ValueError) as context:
+            self.processor.message_to_columns(message)
+        self.assertIn("Missing column 'ref' in message", str(context.exception))
+
+
+class TestBaseMetadataProcessorBuildMessage(unittest.TestCase):
+    def setUp(self):
+        """Set up test fixtures for build_message tests."""
+        # Create a mock pipeline with cachers
+        self.mock_pipeline = Mock()
+        mock_clickhouse_cacher = Mock()
+        mock_clickhouse_cacher.lookup.return_value = None  # No existing record
+        self.mock_pipeline.cacher.return_value = mock_clickhouse_cacher
+        
+        # Create processor
+        self.processor = BaseMetadataProcessor(self.mock_pipeline)
+        self.processor.table = "test_table"
+        self.processor.val_id_field = ['data', 'id']
+        self.processor.required_fields = [['data', 'id'], ['data', 'name']]
+
+    def test_build_message_new_record(self):
+        """Test build_message creates new record with v1 ref."""
+        
+        input_data = {
+            'data': {
+                'id': 'test_id',
+                'name': 'test_name',
+                'description': 'test_desc'
+            }
+        }
+        
+        result = self.processor.build_message(input_data, {})
+        
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+        
+        record = result[0]
+        self.assertEqual(record['id'], 'test_id')
+        self.assertEqual(record['ref'], 'test_id__v1')
+        self.assertIn('hash', record)
+        self.assertEqual(record['ext'], '{}')
+        self.assertEqual(record['tag'], [])
+
+    def test_build_message_existing_record_no_change(self):
+        """Test build_message skips unchanged records."""
+        
+        input_data = {
+            'data': {
+                'id': 'test_id',
+                'name': 'test_name'
+            }
+        }
+        
+        # Mock existing record with same hash
+        import hashlib
+        import orjson
+        value_json = orjson.dumps(input_data, option=orjson.OPT_SORT_KEYS).decode('utf-8')
+        record_hash = hashlib.md5(value_json.encode('utf-8')).hexdigest()
+        
+        mock_existing = {'hash': record_hash, 'ref': 'test_id__v1'}
+        self.mock_pipeline.cacher.return_value.lookup.return_value = mock_existing
+        
+        result = self.processor.build_message(input_data, {})
+        
+        self.assertIsNone(result)
+
+    def test_build_message_existing_record_changed(self):
+        """Test build_message creates new version for changed records."""
+        
+        input_data = {
+            'data': {
+                'id': 'test_id',
+                'name': 'test_name_updated'
+            }
+        }
+        
+        # Mock existing record with different hash
+        mock_existing = {'hash': 'different_hash', 'ref': 'test_id__v2'}
+        self.mock_pipeline.cacher.return_value.lookup.return_value = mock_existing
+        
+        result = self.processor.build_message(input_data, {})
+        
+        self.assertIsInstance(result, list)
+        record = result[0]
+        self.assertEqual(record['ref'], 'test_id__v3')  # Should increment version
+
+    def test_build_message_missing_required_fields(self):
+        """Test build_message returns None for missing required fields."""
+        
+        input_data = {
+            'data': {
+                'id': 'test_id'
+                # Missing 'name' field
+            }
+        }
+        
+        result = self.processor.build_message(input_data, {})
+        self.assertIsNone(result)
+
+    def test_build_message_missing_id_field(self):
+        """Test build_message returns None when id field is missing."""
+        
+        input_data = {
+            'data': {
+                'name': 'test_name'
+                # Missing 'id' field
+            }
+        }
+        
+        result = self.processor.build_message(input_data, {})
+        self.assertIsNone(result)
+
+    @patch.dict(os.environ, {'CLICKHOUSE_METADATA_FORCE_UPDATE': 'true'})
+    def test_build_message_force_update(self):
+        """Test build_message with force update enabled."""
+        
+        # Create a new processor instance with force_update enabled
+        force_processor = BaseMetadataProcessor(self.mock_pipeline)
+        force_processor.table = "test_table"
+        force_processor.val_id_field = ['data', 'id']
+        force_processor.required_fields = [['data', 'id'], ['data', 'name']]
+        
+        input_data = {
+            'data': {
+                'id': 'test_id',
+                'name': 'test_name'
+            }
+        }
+        
+        # Mock existing record with same hash
+        import hashlib
+        import orjson
+        value_json = orjson.dumps(input_data, option=orjson.OPT_SORT_KEYS).decode('utf-8')
+        record_hash = hashlib.md5(value_json.encode('utf-8')).hexdigest()
+        
+        mock_existing = {'hash': record_hash, 'ref': 'test_id__v1'}
+        self.mock_pipeline.cacher.return_value.lookup.return_value = mock_existing
+        
+        result = force_processor.build_message(input_data, {})
+        
+        # Should create new version even with same hash due to force update
+        self.assertIsInstance(result, list)
+        record = result[0]
+        self.assertEqual(record['ref'], 'test_id__v2')
+
+    def test_match_message(self):
+        """Test match_message method."""
+        
+        # Should match when table matches
+        self.assertTrue(self.processor.match_message({'table': 'test_table'}))
+        
+        # Should not match when table doesn't match
+        self.assertFalse(self.processor.match_message({'table': 'other_table'}))
+        
+        # Should not match when no table specified
+        self.assertFalse(self.processor.match_message({}))
+
+
+class TestBaseDataProcessor(unittest.TestCase):
+    def setUp(self):
+        """Set up test fixtures for BaseDataProcessor tests."""
+        self.mock_pipeline = Mock()
+        self.processor = BaseDataProcessor(self.mock_pipeline)
+
+    def test_policy_scope_parsing(self):
+        """Test that policy_scope environment variable is properly parsed."""
+        
+        with patch.dict(os.environ, {'CLICKHOUSE_POLICY_SCOPE': 'scope1,scope2,scope3'}):
+            processor = BaseDataProcessor(self.mock_pipeline)
+            self.assertEqual(processor.policy_scope, ['scope1', 'scope2', 'scope3'])
+
+    def test_policy_scope_empty(self):
+        """Test policy_scope when environment variable is not set."""
+        
+        if 'CLICKHOUSE_POLICY_SCOPE' in os.environ:
+            del os.environ['CLICKHOUSE_POLICY_SCOPE']
+        
+        processor = BaseDataProcessor(self.mock_pipeline)
+        self.assertEqual(processor.policy_scope, [])
 
 
 class TestDataCounterProcessor(unittest.TestCase):
