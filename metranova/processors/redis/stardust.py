@@ -22,10 +22,7 @@ class InterfaceMetadataProcessor(BaseInterfaceMetadataProcessor):
             ["meta", "speed"], ["meta", "visibility"], ["meta", "vrtr_ifglobalindex"],
             ["meta", "vrtr_ifindex"], ["meta", "vrtr_name"]
         ]
-    
-    def match_message(self, value):
-        return self.has_match_field(value)
-    
+
     def build_message(self, value, msg_metadata):
         # check required fields
         if not self.has_required_fields(value):
