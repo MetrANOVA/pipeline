@@ -1,0 +1,36 @@
+table: meta_ip
+data:
+  - id: "ucla-ipv4-block-1"
+    ip_subnet:
+      - ["164.67.0.0", 16]
+      - ["128.97.0.0", 16]
+    city_name: "Los Angeles"
+    continent_name: "North America"
+    country_name: "United States"
+    country_code: "US"
+    country_sub_name: "California"
+    country_sub_code: "CA"
+    latitude: 34.0522
+    longitude: -118.2437
+    as_id: 67890
+  - id: "ucla-ipv6-block-1"
+    ip_subnet:
+      - ["2607:f010::", 32]
+    city_name: "Los Angeles"
+    continent_name: "North America"
+    country_name: "United States"
+    country_code: "US"
+    country_sub_name: "California"
+    country_sub_code: "CA"
+    latitude: 34.0522
+    longitude: -118.2437
+    as_id: 67890
+    ext:
+      allocation_date: "2006-05-01"
+      registry: "ARIN"
+      organization: "University of California, Los Angeles"
+      purpose: "research and education"
+    tag:
+      - "education"
+      - "research"
+      - "ipv6"
