@@ -16,12 +16,13 @@ class ClickHouseWriter(BaseWriter):
         super().__init__(processors)
         # setup logger
         self.logger = logger
+        # Clickhouse connection for primary thread, batchers will use their own connections
         self.datastore = ClickHouseConnector()
         self.batchers = []
 
         # Setup batch writers for each processor
         for processor in self.processors:
-            batcher = ClickHouseBatcher(self.datastore.client, processor)
+            batcher = ClickHouseBatcher(processor)
             batcher.start_flush_timer()
             self.batchers.append(batcher)
 
@@ -41,12 +42,13 @@ class ClickHouseWriter(BaseWriter):
         logger.info("Datastore connection closed")
 
 class ClickHouseBatcher:
-    def __init__(self, client, processor):
+    def __init__(self, processor):
         # Logger
         self.logger = logger
 
         #Clickhouse Client and message processor
-        self.client = client
+        # each batcher gets its own client to avoid threading issues
+        self.client = ClickHouseConnector().client
         self.processor = processor
 
         # Batching configuration
