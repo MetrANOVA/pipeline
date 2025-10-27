@@ -128,6 +128,7 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         self.force_update = os.getenv('CLICKHOUSE_METADATA_FORCE_UPDATE', 'false').lower() in ['true', '1', 'yes']
         self.db_ref_field = 'ref'  # Field in the data to use as the versioned reference
         self.val_id_field = ['id']  # Field in the data to use as the identifier
+        self.match_fields = []  # Fields to match incoming messages against
         self.required_fields = []  # List of lists of required fields, any one of which must be present
 
         # array of arrays in format [['col_name', 'col_definition', bool_include_in_insert], ...]
@@ -142,6 +143,11 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         ]
         # dict where key is extension field name and value is array in same format as column_defs but only those columns that are extensions
         self.order_by = ['ref', 'id', 'insert_time']
+
+    def match_message(self, value):
+        if value.get("table", None) == self.table:
+            return super().match_message(value)
+        return False
 
     def build_message(self, value: dict, msg_metadata: dict) -> list:
         # check required fields

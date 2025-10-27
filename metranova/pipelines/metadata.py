@@ -3,6 +3,7 @@ import os
 
 from metranova.cachers.clickhouse import ClickHouseCacher
 from metranova.consumers.clickhouse import IPMetadataClickHouseConsumer, MetadataClickHouseConsumer
+from metranova.consumers.file import MetadataYAMLFileConsumer
 from metranova.consumers.redis import RedisHashConsumer
 from metranova.pipelines.base import BasePipeline
 from metranova.processors.file.base import BaseFileProcessor
@@ -45,6 +46,28 @@ class RCMetadataPipeline(BasePipeline):
 
         # Add Redis consumers
         self.consumers.append(RedisHashConsumer(pipeline=self))
+
+        # Add ClickHouse writer
+        self.writers.append(ClickHouseWriter(processors=self.processors))
+
+class FCMetadataPipeline(BasePipeline):
+    """Pipeline to load metadata from File to Clickhouse"""
+    def __init__(self):
+        super().__init__()
+        # setup logger
+        self.logger = logger
+
+        # add clickerhouse cacher
+        self.cachers["clickhouse"] = ClickHouseCacher()
+
+        # set processor to METADATA PROCESSORS
+        ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')
+        self.processors = self.load_processors(ch_processors_str)
+        if not self.processors:
+            raise ValueError("At least one processor must be provided for metadata pipeline")
+
+        # Add Redis consumers
+        self.consumers.append(MetadataYAMLFileConsumer(pipeline=self))
 
         # Add ClickHouse writer
         self.writers.append(ClickHouseWriter(processors=self.processors))

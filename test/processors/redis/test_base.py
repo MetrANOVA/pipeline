@@ -54,7 +54,7 @@ class TestBaseRedisProcessor(unittest.TestCase):
         }
         
         result = processor.has_match_field(test_value)
-        self.assertFalse(result)
+        self.assertTrue(result)
 
     def test_has_match_field_single_level_match(self):
         """Test has_match_field with single-level field path that matches."""

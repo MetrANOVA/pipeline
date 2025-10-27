@@ -1,6 +1,5 @@
 import logging
 import os
-import time
 from typing import Iterable
 from metranova.connectors.redis import RedisConnector
 from metranova.consumers.base import TimedIntervalConsumer

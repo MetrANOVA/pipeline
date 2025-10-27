@@ -1,0 +1,23 @@
+table: meta_interface
+data:
+  - id: losa-cr6::pwave-losa_se-1553
+    type: service_l3vpn
+    description: PWAVE Los Angeles SE-1553
+    device_id: losa-cr6
+    edge: true
+    flow_index: 12356
+    ipv4: 207.231.240.164
+    ipv6: 2001:504:b:20::164
+    name: pwave-losa_se-1553
+    speed: 1000
+    circuit_id: 
+      - '12345'
+    peer_as_id: 67890
+    peer_interface_ipv4: 207.231.240.165
+    peer_interface_ipv6: 2001:504:b:20::165
+  # lag_member_interface_id:
+    port_interface_id: losa-cr6::ae1553
+  # remote_interface_id:
+  # remote_organization_id:
+
+

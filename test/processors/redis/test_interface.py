@@ -66,7 +66,7 @@ class TestBaseInterfaceMetadataProcessor(unittest.TestCase):
         }
         
         result = processor.match_message(test_message)
-        self.assertFalse(result)
+        self.assertTrue(result)
 
     def test_match_message_with_valid_match_fields(self):
         """Test match_message when match_fields are configured and data matches."""

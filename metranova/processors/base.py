@@ -31,6 +31,8 @@ class BaseProcessor:
         return True
 
     def has_match_field(self, value: dict) -> bool:
+        if not self.match_fields:
+            return True  # No match fields defined, always match
         for path in self.match_fields:
             current = value
             for key in path:

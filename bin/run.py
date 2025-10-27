@@ -1,6 +1,6 @@
 import os
 import logging
-from metranova.pipelines.metadata import CRMetadataPipeline, IPTrieMetadataPipeline, RCMetadataPipeline
+from metranova.pipelines.metadata import CRMetadataPipeline, IPTrieMetadataPipeline, RCMetadataPipeline, FCMetadataPipeline
 from metranova.pipelines.krc import KRCPipeline
 from metranova.pipelines.json import KafkaToJSONPipeline
 from metranova.pipelines.scireg import ScienceRegistryPipeline
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     """Main entry point"""
-    logger.info("Starting MetrANova Pipeline")
+    logger.info("Starting MetrANOVA Pipeline")
     pipeline = None
     try:
         #determine output method
@@ -29,6 +29,8 @@ def main():
             pipeline = CRMetadataPipeline()
         elif pipeline_type == 'metadata_export':
             pipeline = RCMetadataPipeline()
+        elif pipeline_type == 'metadata_file_export':
+            pipeline = FCMetadataPipeline()
         elif pipeline_type == 'scireg':
             pipeline = ScienceRegistryPipeline()
         elif pipeline_type == 'ip_metadata_import':

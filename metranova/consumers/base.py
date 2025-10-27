@@ -24,7 +24,7 @@ class BaseConsumer:
 
     def consume(self):
         # check connection and tables
-        if not self.datasource.client:
+        if self.datasource and not self.datasource.client:
             self.logger.error("Datasource client not initialized")
             return
         # Run the consumer
