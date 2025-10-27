@@ -1,0 +1,20 @@
+table: meta_organization
+data:
+  - id: ucla
+    name: University of California, Los Angeles
+    type:
+      - university
+      - research
+      - education
+    funding_agency:
+      - NSF
+      - NIH
+      - DOE
+    city_name: Los Angeles
+    continent_name: North America
+    country_name: United States
+    country_code: US
+    country_sub_name: California
+    country_sub_code: CA
+    latitude: 34.0689
+    longitude: -118.4452

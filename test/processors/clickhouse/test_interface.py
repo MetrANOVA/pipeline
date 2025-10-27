@@ -328,8 +328,8 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
                 ("meta_as", "65001"): "AS Reference 65001",
                 ("meta_interface", "port1"): "Port Interface Ref",
                 ("meta_interface", "remote1"): "Remote Interface Ref",
-                ("meta_interface", "circuit1"): "Circuit 1 Ref",
-                ("meta_interface", "circuit2"): "Circuit 2 Ref", 
+                ("meta_circuit", "circuit1"): "Circuit 1 Ref",
+                ("meta_circuit", "circuit2"): "Circuit 2 Ref", 
                 ("meta_interface", "lag1"): "LAG Member 1 Ref",
                 ("meta_interface", "lag2"): "LAG Member 2 Ref",
                 ("meta_organization", "org1"): "Organization Ref"

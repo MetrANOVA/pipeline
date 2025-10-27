@@ -130,6 +130,10 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         self.val_id_field = ['id']  # Field in the data to use as the identifier
         self.match_fields = []  # Fields to match incoming messages against
         self.required_fields = []  # List of lists of required fields, any one of which must be present
+        self.float_fields = []  # List of fields to format as floats
+        self.int_fields = []  # List of fields to format as integers
+        self.boolean_fields = []  # List of fields to format as booleans
+        self.array_fields = []  # List of fields to format as arrays
 
         # array of arrays in format [['col_name', 'col_definition', bool_include_in_insert], ...]
         # for extension columns, col_definition is ignored and can be set to None
@@ -209,6 +213,40 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
 
         return [formatted_record]
     
+    def format_float_fields(self, formatted_record: dict) -> dict:
+        """Format specified fields in formatted_record as floats if possible"""
+        for field in self.float_fields:
+            if formatted_record.get(field, None) is not None:
+                try:
+                    formatted_record[field] = float(formatted_record[field])
+                except (TypeError, ValueError):
+                    formatted_record[field] = None
+
+    def format_int_fields(self, formatted_record: dict) -> dict:
+        """Format specified fields in formatted_record as integers if possible"""
+        for field in self.int_fields:
+            if formatted_record.get(field, None) is not None:
+                try:
+                    formatted_record[field] = int(formatted_record[field])
+                except (TypeError, ValueError):
+                    formatted_record[field] = None
+
+    def format_boolean_fields(self, formatted_record: dict) -> dict:
+        """Format specified fields in formatted_record as booleans"""
+        for field in self.boolean_fields:
+            formatted_record[field] = formatted_record.get(field, False) in [True, 'true', 'True', 1, '1']
+
+    def format_array_fields(self, formatted_record: dict) -> dict:
+        """Format specified fields in formatted_record as arrays"""
+        for field in self.array_fields:
+            if formatted_record[field] is None:
+                formatted_record[field] = []
+            elif isinstance(formatted_record[field], str):
+                try:
+                    formatted_record[field] = orjson.loads(formatted_record[field])
+                except orjson.JSONDecodeError:
+                    formatted_record[field] = []
+
     def build_metadata_fields(self, value: dict) -> dict:
         """Grabs values from column defs. Override in child class to extract additional fields from value"""
         value_data = value.get('data', {})
@@ -234,6 +272,12 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
                 formatted_record['tag'] = orjson.loads(formatted_record['tag'])
             except orjson.JSONDecodeError:
                 formatted_record['tag'] = []
+
+        #format data types
+        self.format_float_fields(formatted_record)
+        self.format_int_fields(formatted_record)
+        self.format_boolean_fields(formatted_record)
+        self.format_array_fields(formatted_record)
 
         return formatted_record
 

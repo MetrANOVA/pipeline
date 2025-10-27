@@ -10,6 +10,9 @@ class InterfaceMetadataProcessor(BaseMetadataProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.table = os.getenv('CLICKHOUSE_IF_METADATA_TABLE', 'meta_interface')
+        self.boolean_fields = ['edge']
+        self.int_fields = ['flow_index', 'speed', 'peer_as_id']
+        self.array_fields = ['circuit_id', 'lag_member_interface_id']
         self.column_defs.extend([
             ['type', 'LowCardinality(String)', True],
             ['description', 'Nullable(String)', True],
@@ -53,32 +56,9 @@ class InterfaceMetadataProcessor(BaseMetadataProcessor):
             "remote_organization_ref": self.pipeline.cacher("redis").lookup("meta_organization", value_data.get('remote_organization_id', None))
         })
 
-        #format potential JSON strings from redis
-        json_array_fields = ['circuit_id', 'lag_member_interface_id']
-        for field in json_array_fields:
-            if formatted_record[field] is None:
-                formatted_record[field] = []
-            elif isinstance(formatted_record[field], str):
-                try:
-                    formatted_record[field] = orjson.loads(formatted_record[field])
-                except orjson.JSONDecodeError:
-                    formatted_record[field] = []
         #now lookup refs for json_array_fields
-        array_refs = ['circuit', 'lag_member_interface']
-        for field in array_refs:
-            formatted_record[f"{field}_ref"] = [self.pipeline.cacher("redis").lookup("meta_interface", iid) for iid in formatted_record[f"{field}_id"]]
-
-        #format boolean
-        formatted_record['edge'] = formatted_record['edge'] in [True, 'true', 'True', 1, '1']
-        
-        # format integers
-        int_fields = ['flow_index', 'speed', 'peer_as_id']
-        for field in int_fields:
-            if formatted_record[field] is not None:
-                try:
-                    formatted_record[field] = int(formatted_record[field])
-                except ValueError:
-                    formatted_record[field] = None
+        formatted_record[f"circuit_ref"] = [self.pipeline.cacher("redis").lookup("meta_circuit", iid) for iid in formatted_record[f"circuit_id"]]
+        formatted_record[f"lag_member_interface_ref"] = [self.pipeline.cacher("redis").lookup("meta_interface", iid) for iid in formatted_record[f"lag_member_interface_id"]]
 
         #build a hash with all the keys and values from value['data']
         return formatted_record
