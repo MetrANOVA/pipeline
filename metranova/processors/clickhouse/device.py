@@ -1,8 +1,6 @@
 import logging
 import os
 
-import orjson
-
 from metranova.processors.clickhouse.base import BaseMetadataProcessor
 
 logger = logging.getLogger(__name__)
@@ -11,6 +9,7 @@ class DeviceMetadataProcessor(BaseMetadataProcessor):
 
     def __init__(self, pipeline):
         super().__init__(pipeline)
+        self.logger = logger
         self.table = os.getenv('CLICKHOUSE_DEVICE_METADATA_TABLE', 'meta_device')
         self.float_fields = ['latitude', 'longitude']
         self.array_fields = ['loopback_ip', 'management_ip', 'location_type']
