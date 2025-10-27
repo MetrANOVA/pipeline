@@ -12,6 +12,9 @@ class BaseProcessor:
         self.pipeline = pipeline
 
         # override in child class
+        self.match_fields = []
+
+        # override in child class
         self.required_fields = []
 
     def has_required_fields(self, value: dict) -> bool:
