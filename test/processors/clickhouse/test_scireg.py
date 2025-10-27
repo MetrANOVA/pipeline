@@ -436,8 +436,12 @@ class TestScienceRegistryProcessor(unittest.TestCase):
         
         result = processor.build_message(input_data, {})
         
-        # Verify cacher was called
-        self.mock_pipeline.cacher.assert_called_with("redis")
+        # Verify both cachers were called - clickhouse for base record lookup and redis for organization lookup
+        expected_calls = [
+            (("clickhouse",), {}),
+            (("redis",), {})
+        ]
+        self.mock_pipeline.cacher.assert_has_calls(expected_calls, any_order=True)
         self.mock_redis_cacher.lookup.assert_called_with("meta_organization", "Test University")
         
         # Verify the result includes the mocked reference

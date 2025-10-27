@@ -154,10 +154,8 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         if not self.has_required_fields(value):
             return None
 
-        #convert record to json, sort keys, and get md5 hash
-        value_json = orjson.dumps(value, option=orjson.OPT_SORT_KEYS).decode('utf-8')
-        record_md5 = hashlib.md5(value_json.encode('utf-8')).hexdigest()
-        #iterate through val_id_field, get the value if exists and the try next
+        # Get ID
+        # iterate through val_id_field, get the value if exists and the try next
         id = None
         for field in self.val_id_field:
             if id is None:
@@ -173,6 +171,16 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
             return None
         #make sure id is string
         id = str(id)
+
+        # Build Initial Record which will be used to calculate hash
+        formatted_record = { "id": id }
+        # merge formatted_record with result of self.build_metadata_fields(value)
+        formatted_record.update(self.build_metadata_fields(value))
+
+        # Calculate hash - do after building full record so any refs or other changes in hash
+        # convert record to json, sort keys, and get md5 hash
+        record_json = orjson.dumps(formatted_record, option=orjson.OPT_SORT_KEYS).decode('utf-8')
+        record_md5 = hashlib.md5(record_json.encode('utf-8')).hexdigest()
 
         #determine ref and if we need new record
         ref = "{}__v1".format(id)
@@ -194,22 +202,40 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
                 # If no version found, log a warning and skip
                 self.logger.warning(f"No version found in ref {latest_ref} for record {id}, skipping version increment")
                 return None
-    
-        formatted_record = {
-            'ref': ref,
-            'hash': record_md5,
-            'id': str(id),
-            'ext': '{}',
-            'tag': []
-        }
-        # merge formatted_record with result of self.build_metadata_fields(value)
-        formatted_record.update(self.build_metadata_fields(value))
+        
+        #add hash and ref to record
+        formatted_record['ref'] = ref
+        formatted_record['hash'] = record_md5
 
         return [formatted_record]
     
     def build_metadata_fields(self, value: dict) -> dict:
-        """Override in child class to extract additional fields from value"""
-        return {}
+        """Grabs values from column defs. Override in child class to extract additional fields from value"""
+        value_data = value.get('data', {})
+
+        #load values from data
+        formatted_record = {}
+        for field in self.column_defs:
+            if not field[2] or field[0] in ['id', 'ref', 'hash']:
+                continue
+            formatted_record[field[0]] = value_data.get(field[0], None)
+
+        # handle ext
+        if formatted_record['ext'] is None:
+            formatted_record['ext'] = '{}'
+        elif isinstance(formatted_record['ext'], dict):
+            formatted_record['ext'] = orjson.dumps(formatted_record['ext']).decode('utf-8')
+        
+        #set tags default if none
+        if formatted_record['tag'] is None:
+            formatted_record['tag'] = []
+        elif isinstance(formatted_record['tag'], str):
+            try:
+                formatted_record['tag'] = orjson.loads(formatted_record['tag'])
+            except orjson.JSONDecodeError:
+                formatted_record['tag'] = []
+
+        return formatted_record
 
 class BaseDataProcessor(BaseClickHouseProcessor):
     def __init__(self, pipeline):

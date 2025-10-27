@@ -298,11 +298,19 @@ class TestBaseMetadataProcessorBuildMessage(unittest.TestCase):
             }
         }
         
-        # Mock existing record with same hash
+        # Mock existing record with same hash - calculate hash same way as current code
         import hashlib
         import orjson
-        value_json = orjson.dumps(input_data, option=orjson.OPT_SORT_KEYS).decode('utf-8')
-        record_hash = hashlib.md5(value_json.encode('utf-8')).hexdigest()
+        
+        # Build record the same way the current code does to get correct hash
+        # Only include fields that are actually in the column_defs
+        formatted_record = {
+            "id": "test_id",
+            "ext": "{}",
+            "tag": []
+        }
+        record_json = orjson.dumps(formatted_record, option=orjson.OPT_SORT_KEYS).decode('utf-8')
+        record_hash = hashlib.md5(record_json.encode('utf-8')).hexdigest()
         
         mock_existing = {'hash': record_hash, 'ref': 'test_id__v1'}
         self.mock_pipeline.cacher.return_value.lookup.return_value = mock_existing

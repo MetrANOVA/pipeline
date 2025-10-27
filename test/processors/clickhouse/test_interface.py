@@ -115,11 +115,11 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
                 "peer_as_id": "65001",
                 "peer_interface_ipv4": "192.168.1.2",
                 "peer_interface_ipv6": "2001:db8::2",
-                "lag_members": '["member1", "member2"]',
+                "lag_member_interface_id": '["member1", "member2"]',
                 "port_interface_id": "port1",
                 "remote_interface_id": "remote1",
                 "remote_organization_id": "org1",
-                "tags": '["tag1", "tag2"]',
+                "tag": '["tag1", "tag2"]',
                 "ext": '{"custom": "data"}'
             }
         }
@@ -154,7 +154,7 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         self.assertEqual(result["remote_interface_ref"], "mock_lookup_result")
         self.assertEqual(result["remote_organization_id"], "org1")
         self.assertEqual(result["remote_organization_ref"], "mock_lookup_result")
-        self.assertEqual(result["tags"], ["tag1", "tag2"])
+        self.assertEqual(result["tag"], ["tag1", "tag2"])
         self.assertEqual(result["ext"], '{"custom": "data"}')
 
     def test_build_metadata_fields_boolean_conversion(self):
@@ -223,7 +223,7 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
                 "device_id": "device1", 
                 "name": "eth0",
                 "type": "ethernet"
-                # Missing circuit_id, lag_members, tags - should use defaults
+                # Missing circuit_id, lag_member_interface_id, tag - should use defaults
             }
         }
         
@@ -233,7 +233,7 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         self.assertEqual(result["circuit_ref"], [])
         self.assertEqual(result["lag_member_interface_id"], [])
         self.assertEqual(result["lag_member_interface_ref"], [])
-        self.assertEqual(result["tags"], [])
+        self.assertEqual(result["tag"], [])
 
     def test_build_metadata_fields_json_parsing_error(self):
         """Test that invalid JSON strings are handled gracefully."""
@@ -247,8 +247,8 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
                 "name": "eth0",
                 "type": "ethernet",
                 "circuit_id": "invalid_json_string",
-                "lag_members": "[malformed json",
-                "tags": "not_json_at_all"
+                "lag_member_interface_id": "[malformed json",
+                "tag": "not_json_at_all"
             }
         }
         
@@ -259,7 +259,7 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         self.assertEqual(result["circuit_ref"], [])
         self.assertEqual(result["lag_member_interface_id"], [])
         self.assertEqual(result["lag_member_interface_ref"], [])
-        self.assertEqual(result["tags"], [])
+        self.assertEqual(result["tag"], [])
 
     def test_build_metadata_fields_array_ref_lookup(self):
         """Test that array reference lookups work correctly."""
@@ -279,7 +279,7 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
                 "name": "eth0",
                 "type": "ethernet",
                 "circuit_id": '["circuit1", "circuit2"]',
-                "lag_members": '["lag1", "lag2", "lag3"]'
+                "lag_member_interface_id": '["lag1", "lag2", "lag3"]'
             }
         }
         
@@ -356,11 +356,11 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
                 "peer_as_id": "65001",
                 "peer_interface_ipv4": "192.168.1.2",
                 "peer_interface_ipv6": "2001:db8::2",
-                "lag_members": '["lag1", "lag2"]',
+                "lag_member_interface_id": '["lag1", "lag2"]',
                 "port_interface_id": "port1",
                 "remote_interface_id": "remote1",
                 "remote_organization_id": "org1",
-                "tags": '["production", "critical"]',
+                "tag": '["production", "critical"]',
                 "ext": {"vlan": 100, "mtu": 1500}
             }
         }
@@ -372,8 +372,8 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         self.assertEqual(result["circuit_ref"], ["Circuit 1 Ref", "Circuit 2 Ref"])
         self.assertEqual(result["lag_member_interface_id"], ["lag1", "lag2"])
         self.assertEqual(result["lag_member_interface_ref"], ["LAG Member 1 Ref", "LAG Member 2 Ref"])
-        self.assertEqual(result["tags"], ["production", "critical"])
-        
+        self.assertEqual(result["tag"], ["production", "critical"])
+
         # Verify ext conversion
         self.assertIsInstance(result["ext"], str)
         import orjson

@@ -40,38 +40,25 @@ class InterfaceMetadataProcessor(BaseMetadataProcessor):
         self.required_fields = [ ['data', 'id'], ['data', 'device_id'], ['data', 'name'], ['data', 'type'] ]
 
     def build_metadata_fields(self, value: dict) -> dict:
+        # Call parent to build initial record
+        formatted_record = super().build_metadata_fields(value)
         value_data = value.get('data', {})
-        formatted_record = {
-            "type": value_data.get('type', "interface"),
-            "device_id": value_data.get('device_id', None),
+
+        # lookup ref fields from redis cacher
+        formatted_record.update({
             "device_ref": self.pipeline.cacher("redis").lookup("meta_device", value_data.get('device_id', None)),
-            "description": value_data.get('description', None),
-            "edge": value_data.get('edge', None),
-            "flow_index": value_data.get('flow_index', None),
-            "ipv4": value_data.get('ipv4', None),
-            "ipv6": value_data.get('ipv6', None),
-            "name": value_data.get('name', None),
-            "speed": value_data.get('speed', None),
-            "circuit_id": value_data.get('circuit_id', '[]'),
-            "peer_as_id": value_data.get('peer_as_id', None),
             "peer_as_ref": self.pipeline.cacher("redis").lookup("meta_as", value_data.get('peer_as_id', None)),
-            "peer_interface_ipv4": value_data.get('peer_interface_ipv4', None),
-            "peer_interface_ipv6": value_data.get('peer_interface_ipv6', None),
-            "lag_member_interface_id": value_data.get('lag_members', '[]'),
-            "port_interface_id": value_data.get('port_interface_id', None),
             "port_interface_ref": self.pipeline.cacher("redis").lookup("meta_interface", value_data.get('port_interface_id', None)),
-            "remote_interface_id": value_data.get('remote_interface_id', None),
             "remote_interface_ref": self.pipeline.cacher("redis").lookup("meta_interface", value_data.get('remote_interface_id', None)),
-            "remote_organization_id": value_data.get('remote_organization_id', None),
-            "remote_organization_ref": self.pipeline.cacher("redis").lookup("meta_organization", value_data.get('remote_organization_id', None)),
-            "tags": value_data.get('tags', '[]'),
-            "ext": value_data.get('ext', '{}')
-        }
+            "remote_organization_ref": self.pipeline.cacher("redis").lookup("meta_organization", value_data.get('remote_organization_id', None))
+        })
 
         #format potential JSON strings from redis
-        json_array_fields = ['circuit_id', 'lag_member_interface_id', 'tags']
+        json_array_fields = ['circuit_id', 'lag_member_interface_id']
         for field in json_array_fields:
-            if isinstance(formatted_record[field], str):
+            if formatted_record[field] is None:
+                formatted_record[field] = []
+            elif isinstance(formatted_record[field], str):
                 try:
                     formatted_record[field] = orjson.loads(formatted_record[field])
                 except orjson.JSONDecodeError:
@@ -80,10 +67,6 @@ class InterfaceMetadataProcessor(BaseMetadataProcessor):
         array_refs = ['circuit', 'lag_member_interface']
         for field in array_refs:
             formatted_record[f"{field}_ref"] = [self.pipeline.cacher("redis").lookup("meta_interface", iid) for iid in formatted_record[f"{field}_id"]]
-
-        #format ext - if it is a dict, convert to JSON string
-        if isinstance(formatted_record['ext'], dict):
-            formatted_record['ext'] = orjson.dumps(formatted_record['ext']).decode('utf-8')
 
         #format boolean
         formatted_record['edge'] = formatted_record['edge'] in [True, 'true', 'True', 1, '1']

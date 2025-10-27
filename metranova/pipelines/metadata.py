@@ -2,6 +2,8 @@ import logging
 import os
 
 from metranova.cachers.clickhouse import ClickHouseCacher
+from metranova.cachers.ip import IPCacher
+from metranova.cachers.redis import RedisCacher
 from metranova.consumers.clickhouse import IPMetadataClickHouseConsumer, MetadataClickHouseConsumer
 from metranova.consumers.file import MetadataYAMLFileConsumer
 from metranova.consumers.redis import RedisHashConsumer
@@ -37,6 +39,8 @@ class RCMetadataPipeline(BasePipeline):
 
         # add clickerhouse cacher
         self.cachers["clickhouse"] = ClickHouseCacher()
+        self.cachers['redis'] = RedisCacher()
+        self.cachers['ip'] = IPCacher()
 
         # set processor to METADATA PROCESSORS
         ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')
@@ -59,6 +63,8 @@ class FCMetadataPipeline(BasePipeline):
 
         # add clickerhouse cacher
         self.cachers["clickhouse"] = ClickHouseCacher()
+        self.cachers['redis'] = RedisCacher()
+        self.cachers['ip'] = IPCacher()
 
         # set processor to METADATA PROCESSORS
         ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')
