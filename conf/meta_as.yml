@@ -1,0 +1,13 @@
+table: meta_as
+data:
+  - id: "67890"
+    name: "67890:UCLA"
+    city_name: "Los Angeles"
+    continent_name: "North America"
+    country_name: "United States"
+    country_code: "US"
+    country_sub_name: "California"
+    country_sub_code: "CA"
+    latitude: 34.0522
+    longitude: -118.2437
+    organization_id: "ucla"
