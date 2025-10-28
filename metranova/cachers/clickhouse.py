@@ -45,7 +45,7 @@ class ClickHouseCacher(BaseCacher):
             tmp_cache = {}
             for row in result.result_rows:
                 latest_id, latest_ref, latest_hash, max_insert_time = row
-                tmp_cache[latest_id] = {
+                tmp_cache[str(latest_id)] = {
                     'ref': latest_ref,
                     'hash': latest_hash,
                     'max_insert_time': max_insert_time

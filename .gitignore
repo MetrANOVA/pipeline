@@ -12,3 +12,6 @@ __pycache__/
 *.pyo
 *.pyd
 .coverage
+#anything in caches that isn't .placeholder
+caches/*
+!caches/.placeholder

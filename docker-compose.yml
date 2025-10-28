@@ -83,6 +83,22 @@ services:
       - .env
     restart: always
   
+  metadata_caida_org_as_pipeline:
+    image: metranova/pipeline:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PIPELINE_TYPE=metadata_caida_org_as
+      - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_ORGANIZATION_METADATA_TABLE},${CLICKHOUSE_AS_METADATA_TABLE}
+      - CLICKHOUSE_PROCESSORS=${PIPELINE_METADATA_CAIDA_ORG_AS_CLICKHOUSE_PROCESSORS}
+      - CLICKHOUSE_AS_METADATA_EXTENSIONS=peeringdb
+    env_file:
+      - .env
+    volumes:
+      - ./caches:/app/caches:ro
+    restart: always
+
   scireg_pipeline:
     image: metranova/pipeline:latest
     build:

@@ -262,7 +262,7 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         if formatted_record['ext'] is None:
             formatted_record['ext'] = '{}'
         elif isinstance(formatted_record['ext'], dict):
-            formatted_record['ext'] = orjson.dumps(formatted_record['ext']).decode('utf-8')
+            formatted_record['ext'] = orjson.dumps(formatted_record['ext'], option=orjson.OPT_SORT_KEYS).decode('utf-8')
         
         #set tags default if none
         if formatted_record['tag'] is None:

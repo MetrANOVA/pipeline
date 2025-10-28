@@ -62,19 +62,6 @@ class YAMLFileConsumer(BaseFileConsumer):
             self.logger.error(f"Error parsing YAML file: {e}")
             return None
 
-class MetadataYAMLFileConsumer(YAMLFileConsumer):
-    def handle_file_data(self, file_path, data):
-        if data is None:
-            return
-        # Process metadata
-        table = data.get('table', None)
-        if table is None:
-            self.logger.error(f"No table found in file: {file_path}")
-            return
-        metadata = data.get('data', [])
-        for record in metadata:
-            self.pipeline.process_message({'table': table, 'data': record})
-
 class JSONFileConsumer(BaseFileConsumer):
     """JSON File Consumer"""
     def load_file_data(self, file: str):

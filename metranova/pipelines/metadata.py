@@ -5,7 +5,7 @@ from metranova.cachers.clickhouse import ClickHouseCacher
 from metranova.cachers.ip import IPCacher
 from metranova.cachers.redis import RedisCacher
 from metranova.consumers.clickhouse import IPMetadataClickHouseConsumer, MetadataClickHouseConsumer
-from metranova.consumers.file import MetadataYAMLFileConsumer
+from metranova.consumers.metadata import YAMLFileConsumer,CAIDAOrgASConsumer
 from metranova.consumers.redis import RedisHashConsumer
 from metranova.pipelines.base import BasePipeline
 from metranova.processors.file.base import BaseFileProcessor
@@ -73,7 +73,29 @@ class FCMetadataPipeline(BasePipeline):
             raise ValueError("At least one processor must be provided for metadata pipeline")
 
         # Add Redis consumers
-        self.consumers.append(MetadataYAMLFileConsumer(pipeline=self))
+        self.consumers.append(YAMLFileConsumer(pipeline=self))
+
+        # Add ClickHouse writer
+        self.writers.append(ClickHouseWriter(processors=self.processors))
+
+class CAIDAOrgASMetadataPipeline(BasePipeline):
+    """Pipeline to load CAIDA AS to Organization metadata from File to Clickhouse"""
+    def __init__(self):
+        super().__init__()
+        # setup logger
+        self.logger = logger
+
+        # add clickerhouse cacher
+        self.cachers["clickhouse"] = ClickHouseCacher()
+
+        # set processor to METADATA PROCESSORS
+        ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')
+        self.processors = self.load_processors(ch_processors_str)
+        if not self.processors:
+            raise ValueError("At least one processor must be provided for metadata pipeline")
+
+        # Add CAIDA Org AS consumers
+        self.consumers.append(CAIDAOrgASConsumer(pipeline=self))
 
         # Add ClickHouse writer
         self.writers.append(ClickHouseWriter(processors=self.processors))
