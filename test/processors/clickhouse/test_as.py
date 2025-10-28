@@ -3,8 +3,6 @@
 import unittest
 import os
 from unittest.mock import patch, MagicMock
-import hashlib
-import orjson
 
 # Add the project root to Python path for imports
 import sys
@@ -53,9 +51,6 @@ class TestASMetadataProcessor(unittest.TestCase):
         # Test that required_fields is correctly set
         self.assertEqual(processor.required_fields, [['data', 'id'], ['data', 'name'], ['data', 'organization_id']])
         
-        # Test that float_fields are set
-        self.assertEqual(processor.float_fields, ['latitude', 'longitude'])
-        
         # Test that logger is set
         self.assertEqual(processor.logger, processor.logger)
         
@@ -63,9 +58,7 @@ class TestASMetadataProcessor(unittest.TestCase):
         column_names = [col[0] for col in processor.column_defs]
         expected_columns = [
             'id', 'ref', 'hash', 'insert_time', 'ext', 'tag',  # from base class
-            'name', 'city_name', 'continent_name', 'country_name', 'country_code',
-            'country_sub_name', 'country_sub_code', 'latitude', 'longitude',
-            'organization_id', 'organization_ref'
+            'name', 'organization_id', 'organization_ref'
         ]
         
         for expected_col in expected_columns:
@@ -100,9 +93,7 @@ class TestASMetadataProcessor(unittest.TestCase):
             
             # Check that AS-specific columns are included
             as_columns = [
-                'name', 'city_name', 'continent_name', 'country_name', 'country_code',
-                'country_sub_name', 'country_sub_code', 'latitude', 'longitude',
-                'organization_id', 'organization_ref'
+                'name', 'organization_id', 'organization_ref'
             ]
             for column in as_columns:
                 self.assertIn(f"`{column}`", result, f"Column {column} not found in CREATE TABLE command")
@@ -137,14 +128,6 @@ class TestASMetadataProcessor(unittest.TestCase):
         
         # Test specific column types
         self.assertEqual(column_types['name'], 'LowCardinality(String)')
-        self.assertEqual(column_types['city_name'], 'LowCardinality(Nullable(String))')
-        self.assertEqual(column_types['continent_name'], 'LowCardinality(Nullable(String))')
-        self.assertEqual(column_types['country_name'], 'LowCardinality(Nullable(String))')
-        self.assertEqual(column_types['country_code'], 'LowCardinality(Nullable(String))')
-        self.assertEqual(column_types['country_sub_name'], 'LowCardinality(Nullable(String))')
-        self.assertEqual(column_types['country_sub_code'], 'LowCardinality(Nullable(String))')
-        self.assertEqual(column_types['latitude'], 'Nullable(Float64)')
-        self.assertEqual(column_types['longitude'], 'Nullable(Float64)')
         self.assertEqual(column_types['organization_id'], 'String')
         self.assertEqual(column_types['organization_ref'], 'Nullable(String)')
 
@@ -155,14 +138,6 @@ class TestASMetadataProcessor(unittest.TestCase):
         value = {
             'data': {
                 'name': 'FICTITIOUS-AS',
-                'city_name': 'Los Angeles',
-                'continent_name': 'North America',
-                'country_name': 'United States',
-                'country_code': 'US',
-                'country_sub_name': 'California',
-                'country_sub_code': 'CA',
-                'latitude': 34.0522,
-                'longitude': -118.2437,
                 'organization_id': 'ucla'
             }
         }
@@ -171,14 +146,6 @@ class TestASMetadataProcessor(unittest.TestCase):
         
         # Check basic field mapping
         self.assertEqual(result['name'], 'FICTITIOUS-AS')
-        self.assertEqual(result['city_name'], 'Los Angeles')
-        self.assertEqual(result['continent_name'], 'North America')
-        self.assertEqual(result['country_name'], 'United States')
-        self.assertEqual(result['country_code'], 'US')
-        self.assertEqual(result['country_sub_name'], 'California')
-        self.assertEqual(result['country_sub_code'], 'CA')
-        self.assertEqual(result['latitude'], 34.0522)
-        self.assertEqual(result['longitude'], -118.2437)
         self.assertEqual(result['organization_id'], 'ucla')
         
         # Check that ClickHouse lookup was performed for organization reference
@@ -186,74 +153,6 @@ class TestASMetadataProcessor(unittest.TestCase):
         
         # Verify ClickHouse cacher was called
         self.mock_clickhouse_cacher.lookup.assert_called_once_with('meta_organization', 'ucla')
-
-    def test_build_metadata_fields_minimal_data(self):
-        """Test build_metadata_fields with minimal required data."""
-        processor = ASMetadataProcessor(self.mock_pipeline)
-        
-        value = {
-            'data': {
-                'name': 'TEST-AS',
-                'organization_id': 'test-org'
-            }
-        }
-        
-        result = processor.build_metadata_fields(value)
-        
-        # Check required fields are set
-        self.assertEqual(result['name'], 'TEST-AS')
-        self.assertEqual(result['organization_id'], 'test-org')
-        self.assertEqual(result['organization_ref'], 'mock_org_ref__v1')
-        
-        # Check that optional fields are None or default values
-        self.assertIsNone(result.get('city_name'))
-        self.assertIsNone(result.get('continent_name'))
-        self.assertIsNone(result.get('country_name'))
-        self.assertIsNone(result.get('country_code'))
-        self.assertIsNone(result.get('country_sub_name'))
-        self.assertIsNone(result.get('country_sub_code'))
-        self.assertIsNone(result.get('latitude'))
-        self.assertIsNone(result.get('longitude'))
-
-    def test_build_metadata_fields_float_conversion(self):
-        """Test that latitude and longitude are properly converted to floats."""
-        processor = ASMetadataProcessor(self.mock_pipeline)
-        
-        value = {
-            'data': {
-                'name': 'TEST-AS',
-                'organization_id': 'test-org',
-                'latitude': '34.0522',  # String that should be converted to float
-                'longitude': '-118.2437'  # String that should be converted to float
-            }
-        }
-        
-        result = processor.build_metadata_fields(value)
-        
-        # Check that float conversion happened
-        self.assertIsInstance(result['latitude'], float)
-        self.assertIsInstance(result['longitude'], float)
-        self.assertEqual(result['latitude'], 34.0522)
-        self.assertEqual(result['longitude'], -118.2437)
-
-    def test_build_metadata_fields_invalid_float_values(self):
-        """Test that invalid float values are handled gracefully."""
-        processor = ASMetadataProcessor(self.mock_pipeline)
-        
-        value = {
-            'data': {
-                'name': 'TEST-AS',
-                'organization_id': 'test-org',
-                'latitude': 'invalid',  # Invalid float value
-                'longitude': 'also_invalid'  # Invalid float value
-            }
-        }
-        
-        result = processor.build_metadata_fields(value)
-        
-        # Check that invalid values are converted to None
-        self.assertIsNone(result['latitude'])
-        self.assertIsNone(result['longitude'])
 
     def test_build_message_missing_required_fields(self):
         """Test build_message with missing required fields."""
@@ -287,14 +186,6 @@ class TestASMetadataProcessor(unittest.TestCase):
             'data': {
                 'id': '67890',
                 'name': 'FICTITIOUS-AS',
-                'city_name': 'Los Angeles',
-                'continent_name': 'North America',
-                'country_name': 'United States',
-                'country_code': 'US',
-                'country_sub_name': 'California',
-                'country_sub_code': 'CA',
-                'latitude': 34.0522,
-                'longitude': -118.2437,
                 'organization_id': 'ucla'
             }
         }
@@ -307,14 +198,6 @@ class TestASMetadataProcessor(unittest.TestCase):
         record = result[0]
         self.assertEqual(record['id'], '67890')
         self.assertEqual(record['name'], 'FICTITIOUS-AS')
-        self.assertEqual(record['city_name'], 'Los Angeles')
-        self.assertEqual(record['continent_name'], 'North America')
-        self.assertEqual(record['country_name'], 'United States')
-        self.assertEqual(record['country_code'], 'US')
-        self.assertEqual(record['country_sub_name'], 'California')
-        self.assertEqual(record['country_sub_code'], 'CA')
-        self.assertEqual(record['latitude'], 34.0522)
-        self.assertEqual(record['longitude'], -118.2437)
         self.assertEqual(record['organization_id'], 'ucla')
         self.assertEqual(record['organization_ref'], 'mock_org_ref__v1')
         
@@ -347,14 +230,6 @@ class TestASMetadataProcessor(unittest.TestCase):
         self.assertEqual(record['organization_ref'], 'mock_org_ref__v1')
         
         # Other fields should be None or default values
-        self.assertIsNone(record['city_name'])
-        self.assertIsNone(record['continent_name'])
-        self.assertIsNone(record['country_name'])
-        self.assertIsNone(record['country_code'])
-        self.assertIsNone(record['country_sub_name'])
-        self.assertIsNone(record['country_sub_code'])
-        self.assertIsNone(record['latitude'])
-        self.assertIsNone(record['longitude'])
         self.assertEqual(record['ext'], '{}')
         self.assertEqual(record['tag'], [])
 
@@ -408,8 +283,7 @@ class TestASMetadataProcessor(unittest.TestCase):
             'data': {
                 'id': '67890',
                 'name': 'UPDATED-AS',  # Changed value
-                'organization_id': 'test-org',
-                'city_name': 'San Francisco'  # New field
+                'organization_id': 'test-org'
             }
         }
         
@@ -425,62 +299,7 @@ class TestASMetadataProcessor(unittest.TestCase):
         record = result[0]
         self.assertEqual(record['id'], '67890')
         self.assertEqual(record['name'], 'UPDATED-AS')
-        self.assertEqual(record['city_name'], 'San Francisco')
         self.assertEqual(record['ref'], '67890__v2')  # Should increment version
-
-    def test_build_message_geographic_coordinates_edge_cases(self):
-        """Test build_message with various geographic coordinate formats."""
-        processor = ASMetadataProcessor(self.mock_pipeline)
-        
-        test_cases = [
-            # Valid coordinates
-            {'latitude': 34.0522, 'longitude': -118.2437},
-            # String coordinates that should convert
-            {'latitude': '40.7128', 'longitude': '-74.0060'},
-            # Zero coordinates (valid)
-            {'latitude': 0.0, 'longitude': 0.0},
-            # Extreme valid coordinates
-            {'latitude': 90.0, 'longitude': -180.0},
-            # Invalid coordinates that should become None
-            {'latitude': 'invalid', 'longitude': 'also_invalid'},
-            # Missing coordinates (should be None)
-            {},
-        ]
-        
-        for i, coords in enumerate(test_cases):
-            with self.subTest(case=i):
-                # Reset cacher mock for each test case
-                self.mock_clickhouse_cacher.lookup.return_value = None
-                
-                input_data = {
-                    'data': {
-                        'id': f'test-as-{i}',
-                        'name': f'TEST-AS-{i}',
-                        'organization_id': 'test-org',
-                        **coords
-                    }
-                }
-                
-                result = processor.build_message(input_data, {})
-                
-                self.assertIsInstance(result, list)
-                self.assertEqual(len(result), 1)
-                
-                record = result[0]
-                
-                # Check coordinate handling based on test case
-                if i in [0, 1, 2, 3]:  # Valid coordinate cases
-                    if 'latitude' in coords and 'longitude' in coords:
-                        self.assertIsNotNone(record['latitude'])
-                        self.assertIsNotNone(record['longitude'])
-                        self.assertIsInstance(record['latitude'], float)
-                        self.assertIsInstance(record['longitude'], float)
-                elif i == 4:  # Invalid coordinates
-                    self.assertIsNone(record['latitude'])
-                    self.assertIsNone(record['longitude'])
-                else:  # Missing coordinates
-                    self.assertIsNone(record['latitude'])
-                    self.assertIsNone(record['longitude'])
 
     def test_build_message_comprehensive_scenario(self):
         """Test build_message with a comprehensive real-world scenario."""
@@ -490,14 +309,6 @@ class TestASMetadataProcessor(unittest.TestCase):
             'data': {
                 'id': '67890',
                 'name': 'FICTITIOUS-AS',
-                'city_name': 'Los Angeles',
-                'continent_name': 'North America',
-                'country_name': 'United States',
-                'country_code': 'US',
-                'country_sub_name': 'California',
-                'country_sub_code': 'CA',
-                'latitude': 34.0522,
-                'longitude': -118.2437,
                 'organization_id': 'ucla',
                 'ext': '{"type": "research", "established": "2020"}',
                 'tag': ['research', 'academic', 'west-coast']
@@ -514,14 +325,6 @@ class TestASMetadataProcessor(unittest.TestCase):
         # Verify all fields are properly processed
         self.assertEqual(record['id'], '67890')
         self.assertEqual(record['name'], 'FICTITIOUS-AS')
-        self.assertEqual(record['city_name'], 'Los Angeles')
-        self.assertEqual(record['continent_name'], 'North America')
-        self.assertEqual(record['country_name'], 'United States')
-        self.assertEqual(record['country_code'], 'US')
-        self.assertEqual(record['country_sub_name'], 'California')
-        self.assertEqual(record['country_sub_code'], 'CA')
-        self.assertEqual(record['latitude'], 34.0522)
-        self.assertEqual(record['longitude'], -118.2437)
         self.assertEqual(record['organization_id'], 'ucla')
         self.assertEqual(record['organization_ref'], 'mock_org_ref__v1')
         
