@@ -20,19 +20,24 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         # Create a mock pipeline
         self.mock_pipeline = MagicMock()
         
-        # Mock redis cacher
-        self.mock_redis_cacher = MagicMock()
-        self.mock_redis_cacher.lookup.return_value = "mock_circuit_ref"
-        
-        # Mock clickhouse cacher
+        # Mock clickhouse cacher for circuit lookups
         self.mock_clickhouse_cacher = MagicMock()
-        self.mock_clickhouse_cacher.lookup.return_value = None  # No cached record by default
+        
+        # Set up side effect to handle None values properly
+        def mock_lookup(table, lookup_id):
+            if lookup_id is None:
+                return None
+            return {
+                'ref': 'mock_circuit_ref__v1',
+                'hash': 'mock_hash',
+                'max_insert_time': '2023-01-01 00:00:00'
+            }
+        
+        self.mock_clickhouse_cacher.lookup.side_effect = mock_lookup
         
         # Set up cacher method to return the appropriate mock based on the type
         def mock_cacher(cache_type):
-            if cache_type == "redis":
-                return self.mock_redis_cacher
-            elif cache_type == "clickhouse":
+            if cache_type == "clickhouse":
                 return self.mock_clickhouse_cacher
             else:
                 return MagicMock()
@@ -53,7 +58,7 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         self.assertEqual(processor.required_fields, [['data', 'id'], ['data', 'endpoint_id'], ['data', 'endpoint_type']])
         
         # Test that array_fields are set
-        self.assertEqual(processor.array_fields, ['endpoint_type', 'endpoint_id', 'child_circuit_id', 'parent_circuit_id'])
+        self.assertEqual(processor.array_fields, ['endpoint_type', 'endpoint_id'])
         
         # Test that logger is set
         self.assertEqual(processor.logger, processor.logger)
@@ -63,7 +68,7 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         expected_columns = [
             'id', 'ref', 'hash', 'insert_time', 'ext', 'tag',  # from base class
             'type', 'description', 'state', 'endpoint_type', 'endpoint_id',
-            'child_circuit_id', 'child_circuit_ref', 'parent_circuit_id', 'parent_circuit_ref'
+            'parent_circuit_id', 'parent_circuit_ref'
         ]
         
         for expected_col in expected_columns:
@@ -99,7 +104,7 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
             # Check that circuit-specific columns are included
             circuit_columns = [
                 'type', 'description', 'state', 'endpoint_type', 'endpoint_id',
-                'child_circuit_id', 'child_circuit_ref', 'parent_circuit_id', 'parent_circuit_ref'
+                'parent_circuit_id', 'parent_circuit_ref'
             ]
             for column in circuit_columns:
                 self.assertIn(f"`{column}`", result, f"Column {column} not found in CREATE TABLE command")
@@ -138,10 +143,8 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         self.assertEqual(column_types['state'], 'LowCardinality(Nullable(String))')
         self.assertEqual(column_types['endpoint_type'], 'Tuple(LowCardinality(String),LowCardinality(String))')
         self.assertEqual(column_types['endpoint_id'], 'Tuple(String,String)')
-        self.assertEqual(column_types['child_circuit_id'], 'Array(LowCardinality(String))')
-        self.assertEqual(column_types['child_circuit_ref'], 'Array(Nullable(String))')
-        self.assertEqual(column_types['parent_circuit_id'], 'Array(LowCardinality(String))')
-        self.assertEqual(column_types['parent_circuit_ref'], 'Array(Nullable(String))')
+        self.assertEqual(column_types['parent_circuit_id'], 'LowCardinality(Nullable(String))')
+        self.assertEqual(column_types['parent_circuit_ref'], 'Nullable(String)')
 
     def test_build_metadata_fields_basic(self):
         """Test that build_metadata_fields returns correctly formatted data."""
@@ -154,8 +157,7 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
                 'state': 'active',
                 'endpoint_type': ['interface', 'interface'],
                 'endpoint_id': ['losa-cr6::pwave-losa_se-1553', 'sfo-cr1::pwave-sfo_se-1553'],
-                'child_circuit_id': ['child-circuit-1', 'child-circuit-2'],
-                'parent_circuit_id': ['parent-circuit-1']
+                'parent_circuit_id': 'parent-circuit-1'
             }
         }
         
@@ -167,44 +169,16 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         self.assertEqual(result['state'], 'active')
         self.assertEqual(result['endpoint_type'], ['interface', 'interface'])
         self.assertEqual(result['endpoint_id'], ['losa-cr6::pwave-losa_se-1553', 'sfo-cr1::pwave-sfo_se-1553'])
-        self.assertEqual(result['child_circuit_id'], ['child-circuit-1', 'child-circuit-2'])
-        self.assertEqual(result['parent_circuit_id'], ['parent-circuit-1'])
+        self.assertEqual(result['parent_circuit_id'], 'parent-circuit-1')
         
-        # Check that Redis lookups were performed for references
-        self.assertEqual(result['child_circuit_ref'], ['mock_circuit_ref', 'mock_circuit_ref'])
-        self.assertEqual(result['parent_circuit_ref'], ['mock_circuit_ref'])
+        # Check that lookups were performed for references
+        self.assertEqual(result['parent_circuit_ref'], 'mock_circuit_ref__v1')
         
-        # Verify Redis cacher was called
+        # Verify cacher was called
         expected_calls = [
-            (('meta_circuit', 'child-circuit-1'), {}),
-            (('meta_circuit', 'child-circuit-2'), {}),
             (('meta_circuit', 'parent-circuit-1'), {})
         ]
-        self.mock_redis_cacher.lookup.assert_has_calls([unittest.mock.call(*args, **kwargs) for args, kwargs in expected_calls])
-
-    def test_build_metadata_fields_empty_arrays(self):
-        """Test build_metadata_fields with empty child and parent arrays."""
-        processor = CircuitMetadataProcessor(self.mock_pipeline)
-        
-        value = {
-            'data': {
-                'type': 'backbone',
-                'description': 'Standalone Circuit',
-                'state': 'active',
-                'endpoint_type': ['device', 'device'],
-                'endpoint_id': ['device1', 'device2'],
-                'child_circuit_id': [],
-                'parent_circuit_id': []
-            }
-        }
-        
-        result = processor.build_metadata_fields(value)
-        
-        # Check that empty arrays result in empty reference arrays
-        self.assertEqual(result['child_circuit_id'], [])
-        self.assertEqual(result['parent_circuit_id'], [])
-        self.assertEqual(result['child_circuit_ref'], [])
-        self.assertEqual(result['parent_circuit_ref'], [])
+        self.mock_clickhouse_cacher.lookup.assert_has_calls([unittest.mock.call(*args, **kwargs) for args, kwargs in expected_calls])
 
     def test_build_metadata_fields_none_values(self):
         """Test build_metadata_fields with None values for array fields."""
@@ -217,7 +191,6 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
                 'state': 'provisioning',
                 'endpoint_type': ['port', 'port'],
                 'endpoint_id': ['port1', 'port2'],
-                'child_circuit_id': None,
                 'parent_circuit_id': None
             }
         }
@@ -225,10 +198,8 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         result = processor.build_metadata_fields(value)
         
         # Check that None values are converted to empty arrays by format_array_fields
-        self.assertEqual(result['child_circuit_id'], [])  # None converted to [] by format_array_fields
-        self.assertEqual(result['parent_circuit_id'], [])  # None converted to [] by format_array_fields
-        self.assertEqual(result['child_circuit_ref'], [])  # Should handle None gracefully
-        self.assertEqual(result['parent_circuit_ref'], [])
+        self.assertEqual(result['parent_circuit_id'], None)  
+        self.assertEqual(result['parent_circuit_ref'], None)
 
     def test_build_message_missing_required_fields(self):
         """Test build_message with missing required fields."""
@@ -266,8 +237,7 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
                 'state': 'active',
                 'endpoint_type': ['interface', 'interface'],
                 'endpoint_id': ['losa-cr6::pwave-losa_se-1553', 'sfo-cr1::pwave-sfo_se-1553'],
-                'child_circuit_id': ['losa-sfo-transport-1553'],
-                'parent_circuit_id': ['losa-sfo-backbone-01']
+                'parent_circuit_id': 'losa-sfo-backbone-01'
             }
         }
         
@@ -283,10 +253,8 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         self.assertEqual(record['state'], 'active')
         self.assertEqual(record['endpoint_type'], ['interface', 'interface'])
         self.assertEqual(record['endpoint_id'], ['losa-cr6::pwave-losa_se-1553', 'sfo-cr1::pwave-sfo_se-1553'])
-        self.assertEqual(record['child_circuit_id'], ['losa-sfo-transport-1553'])
-        self.assertEqual(record['parent_circuit_id'], ['losa-sfo-backbone-01'])
-        self.assertEqual(record['child_circuit_ref'], ['mock_circuit_ref'])
-        self.assertEqual(record['parent_circuit_ref'], ['mock_circuit_ref'])
+        self.assertEqual(record['parent_circuit_id'], 'losa-sfo-backbone-01')
+        self.assertEqual(record['parent_circuit_ref'], 'mock_circuit_ref__v1')
         
         # Check that ref and hash are set
         self.assertIn('ref', record)
@@ -335,13 +303,32 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
             }
         }
         
-        # First, build the record to see what hash is actually generated
-        result = processor.build_message(input_data, {})
-        actual_hash = result[0]['hash'] if result else None
+        # Create a side effect function to handle the mock calls
+        def side_effect_func(table, id_value):
+            if table == 'meta_circuit' and id_value == 'test-circuit':
+                # Calculate the hash the same way the processor does
+                formatted_record = {"id": id_value}
+                formatted_record.update(processor.build_metadata_fields(input_data))
+                
+                # Calculate hash
+                import orjson
+                import hashlib
+                record_json = orjson.dumps(formatted_record, option=orjson.OPT_SORT_KEYS).decode('utf-8')
+                record_md5 = hashlib.md5(record_json.encode('utf-8')).hexdigest()
+                
+                # Return existing record with the actual hash (same hash means no change)
+                return {'hash': record_md5, 'ref': 'test-circuit__v1'}
+            elif table == 'meta_circuit' and id_value is None:
+                return None
+            elif table == 'meta_circuit':
+                return {
+                    'ref': 'mock_circuit_ref__v1',
+                    'hash': 'mock_hash',
+                    'max_insert_time': '2023-01-01 00:00:00'
+                }
+            return None
         
-        # Now mock existing record with the actual hash
-        mock_existing = {'hash': actual_hash, 'ref': 'test-circuit__v1'}
-        self.mock_clickhouse_cacher.lookup.return_value = mock_existing
+        self.mock_clickhouse_cacher.lookup.side_effect = side_effect_func
         
         # Now test that it skips unchanged records
         result = processor.build_message(input_data, {})
@@ -389,8 +376,7 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
                 'state': 'active',
                 'endpoint_type': ['device', 'device'],
                 'endpoint_id': ['losa-cr6', 'sfo-cr1'],
-                'child_circuit_id': ['losa-sfo-pwave-1553', 'losa-sfo-backup-1554'],
-                'parent_circuit_id': [],
+                'parent_circuit_id': None,
                 'ext': '{"vendor": "Cisco", "capacity": "100G"}',
                 'tag': ['backbone', 'high-priority', 'production']
             }
@@ -410,11 +396,9 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         self.assertEqual(record['state'], 'active')
         self.assertEqual(record['endpoint_type'], ['device', 'device'])
         self.assertEqual(record['endpoint_id'], ['losa-cr6', 'sfo-cr1'])
-        self.assertEqual(record['child_circuit_id'], ['losa-sfo-pwave-1553', 'losa-sfo-backup-1554'])
-        self.assertEqual(record['parent_circuit_id'], [])
-        self.assertEqual(record['child_circuit_ref'], ['mock_circuit_ref', 'mock_circuit_ref'])
-        self.assertEqual(record['parent_circuit_ref'], [])
-        
+        self.assertEqual(record['parent_circuit_id'], None)
+        self.assertEqual(record['parent_circuit_ref'], None)
+
         # Verify ext and tag from base class processing
         self.assertEqual(record['ext'], '{"vendor": "Cisco", "capacity": "100G"}')
         self.assertEqual(record['tag'], ['backbone', 'high-priority', 'production'])
@@ -424,8 +408,8 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         self.assertIn('hash', record)
         self.assertTrue(record['ref'].startswith('losa-sfo-backbone-01__v'))
 
-    def test_redis_cacher_lookup_called(self):
-        """Test that Redis cacher lookup is called for circuit references."""
+    def test_clickhouse_cacher_lookup_called(self):
+        """Test that ClickHouse cacher lookup is called for circuit references."""
         processor = CircuitMetadataProcessor(self.mock_pipeline)
         
         input_data = {
@@ -433,29 +417,20 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
                 'id': 'test-circuit',
                 'endpoint_type': ['interface', 'interface'],
                 'endpoint_id': ['int1', 'int2'],
-                'child_circuit_id': ['child1', 'child2'],
-                'parent_circuit_id': ['parent1']
+                'parent_circuit_id': 'parent1'
             }
         }
         
         result = processor.build_message(input_data, {})
         
-        # Verify both cachers were called - clickhouse for base record lookup and redis for circuit lookups
-        expected_calls = [
-            (("clickhouse",), {}),
-            (("redis",), {}),
-            (("redis",), {}),
-            (("redis",), {})
-        ]
-        self.mock_pipeline.cacher.assert_has_calls(expected_calls, any_order=True)
+        # Verify clickhouse cacher was called for base record lookup and circuit lookups
+        self.mock_pipeline.cacher.assert_called_with("clickhouse")
         
-        # Verify Redis lookups for circuit references
-        redis_lookup_calls = [
-            (('meta_circuit', 'child1'), {}),
-            (('meta_circuit', 'child2'), {}),
+        # Verify ClickHouse lookups for circuit references
+        clickhouse_lookup_calls = [
             (('meta_circuit', 'parent1'), {})
         ]
-        self.mock_redis_cacher.lookup.assert_has_calls([unittest.mock.call(*args, **kwargs) for args, kwargs in redis_lookup_calls])
+        self.mock_clickhouse_cacher.lookup.assert_has_calls([unittest.mock.call(*args, **kwargs) for args, kwargs in clickhouse_lookup_calls], any_order=True)
 
     def test_endpoint_tuple_handling(self):
         """Test that endpoint tuples are properly handled."""

@@ -44,9 +44,11 @@ class IPMetadataProcessor(BaseMetadataProcessor):
                     self.logger.warning(f"Invalid ip_subnet item: {item}")
         formatted_record['ip_subnet'] = ip_subnets
 
-        # lookup ref fields from redis cacher
-        formatted_record.update({
-            "as_ref": self.pipeline.cacher("redis").lookup("meta_as", formatted_record.get('as_id', None))
-        })
+        # lookup ref fields from cacher
+        cached_as_info = self.pipeline.cacher("clickhouse").lookup("meta_as", formatted_record.get('as_id', None))
+        if cached_as_info:
+            formatted_record["as_ref"] = cached_as_info.get(self.db_ref_field, None)
+        else:
+            formatted_record["as_ref"] = None
 
         return formatted_record

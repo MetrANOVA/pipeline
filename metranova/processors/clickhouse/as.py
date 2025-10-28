@@ -52,5 +52,7 @@ class ASMetadataProcessor(BaseMetadataProcessor):
         cached_org_info = self.pipeline.cacher("clickhouse").lookup("meta_organization", formatted_record.get('organization_id', None))
         if cached_org_info:
             formatted_record["organization_ref"] = cached_org_info.get(self.db_ref_field, None)
+        else:
+            formatted_record["organization_ref"] = None
 
         return formatted_record

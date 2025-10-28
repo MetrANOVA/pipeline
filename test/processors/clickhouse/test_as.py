@@ -23,19 +23,17 @@ class TestASMetadataProcessor(unittest.TestCase):
         # Create a mock pipeline
         self.mock_pipeline = MagicMock()
         
-        # Mock redis cacher
-        self.mock_redis_cacher = MagicMock()
-        self.mock_redis_cacher.lookup.return_value = "mock_org_ref"
-        
-        # Mock clickhouse cacher
+        # Mock clickhouse cacher for organization lookups
         self.mock_clickhouse_cacher = MagicMock()
-        self.mock_clickhouse_cacher.lookup.return_value = None  # No cached record by default
+        self.mock_clickhouse_cacher.lookup.return_value = {
+            'ref': 'mock_org_ref__v1',
+            'hash': 'mock_hash',
+            'max_insert_time': '2023-01-01 00:00:00'
+        }
         
         # Set up cacher method to return the appropriate mock based on the type
         def mock_cacher(cache_type):
-            if cache_type == "redis":
-                return self.mock_redis_cacher
-            elif cache_type == "clickhouse":
+            if cache_type == "clickhouse":
                 return self.mock_clickhouse_cacher
             else:
                 return MagicMock()
@@ -183,11 +181,11 @@ class TestASMetadataProcessor(unittest.TestCase):
         self.assertEqual(result['longitude'], -118.2437)
         self.assertEqual(result['organization_id'], 'ucla')
         
-        # Check that Redis lookup was performed for organization reference
-        self.assertEqual(result['organization_ref'], 'mock_org_ref')
+        # Check that ClickHouse lookup was performed for organization reference
+        self.assertEqual(result['organization_ref'], 'mock_org_ref__v1')
         
-        # Verify Redis cacher was called
-        self.mock_redis_cacher.lookup.assert_called_once_with('meta_organization', 'ucla')
+        # Verify ClickHouse cacher was called
+        self.mock_clickhouse_cacher.lookup.assert_called_once_with('meta_organization', 'ucla')
 
     def test_build_metadata_fields_minimal_data(self):
         """Test build_metadata_fields with minimal required data."""
@@ -205,7 +203,7 @@ class TestASMetadataProcessor(unittest.TestCase):
         # Check required fields are set
         self.assertEqual(result['name'], 'TEST-AS')
         self.assertEqual(result['organization_id'], 'test-org')
-        self.assertEqual(result['organization_ref'], 'mock_org_ref')
+        self.assertEqual(result['organization_ref'], 'mock_org_ref__v1')
         
         # Check that optional fields are None or default values
         self.assertIsNone(result.get('city_name'))
@@ -318,7 +316,7 @@ class TestASMetadataProcessor(unittest.TestCase):
         self.assertEqual(record['latitude'], 34.0522)
         self.assertEqual(record['longitude'], -118.2437)
         self.assertEqual(record['organization_id'], 'ucla')
-        self.assertEqual(record['organization_ref'], 'mock_org_ref')
+        self.assertEqual(record['organization_ref'], 'mock_org_ref__v1')
         
         # Check that ref and hash are set
         self.assertIn('ref', record)
@@ -346,7 +344,7 @@ class TestASMetadataProcessor(unittest.TestCase):
         self.assertEqual(record['id'], '12345')
         self.assertEqual(record['name'], 'MINIMAL-AS')
         self.assertEqual(record['organization_id'], 'test-org')
-        self.assertEqual(record['organization_ref'], 'mock_org_ref')
+        self.assertEqual(record['organization_ref'], 'mock_org_ref__v1')
         
         # Other fields should be None or default values
         self.assertIsNone(record['city_name'])
@@ -372,13 +370,30 @@ class TestASMetadataProcessor(unittest.TestCase):
             }
         }
         
-        # First, build the record to see what hash is actually generated
-        result = processor.build_message(input_data, {})
-        actual_hash = result[0]['hash'] if result else None
+        # Create a side effect function to handle the mock calls
+        def side_effect_func(table, id_value):
+            if table == 'meta_as' and id_value == '67890':
+                # Calculate the hash the same way the processor does
+                formatted_record = {"id": id_value}
+                formatted_record.update(processor.build_metadata_fields(input_data))
+                
+                # Calculate hash
+                import orjson
+                import hashlib
+                record_json = orjson.dumps(formatted_record, option=orjson.OPT_SORT_KEYS).decode('utf-8')
+                record_md5 = hashlib.md5(record_json.encode('utf-8')).hexdigest()
+                
+                # Return existing record with the actual hash (same hash means no change)
+                return {'hash': record_md5, 'ref': '67890__v1'}
+            elif table == 'meta_organization' and id_value == 'test-org':
+                return {
+                    'ref': 'mock_org_ref__v1',
+                    'hash': 'mock_hash',
+                    'max_insert_time': '2023-01-01 00:00:00'
+                }
+            return None
         
-        # Now mock existing record with the actual hash
-        mock_existing = {'hash': actual_hash, 'ref': '67890__v1'}
-        self.mock_clickhouse_cacher.lookup.return_value = mock_existing
+        self.mock_clickhouse_cacher.lookup.side_effect = side_effect_func
         
         # Now test that it skips unchanged records
         result = processor.build_message(input_data, {})
@@ -508,7 +523,7 @@ class TestASMetadataProcessor(unittest.TestCase):
         self.assertEqual(record['latitude'], 34.0522)
         self.assertEqual(record['longitude'], -118.2437)
         self.assertEqual(record['organization_id'], 'ucla')
-        self.assertEqual(record['organization_ref'], 'mock_org_ref')
+        self.assertEqual(record['organization_ref'], 'mock_org_ref__v1')
         
         # Verify ext and tag from base class processing
         self.assertEqual(record['ext'], '{"type": "research", "established": "2020"}')
@@ -519,8 +534,8 @@ class TestASMetadataProcessor(unittest.TestCase):
         self.assertIn('hash', record)
         self.assertTrue(record['ref'].startswith('67890__v'))
 
-    def test_redis_cacher_lookup_called(self):
-        """Test that Redis cacher lookup is called for organization reference."""
+    def test_clickhouse_cacher_lookup_called(self):
+        """Test that ClickHouse cacher lookup is called for organization reference."""
         processor = ASMetadataProcessor(self.mock_pipeline)
         
         input_data = {
@@ -533,15 +548,11 @@ class TestASMetadataProcessor(unittest.TestCase):
         
         result = processor.build_message(input_data, {})
         
-        # Verify both cachers were called - clickhouse for base record lookup and redis for organization lookup
-        expected_calls = [
-            (("clickhouse",), {}),
-            (("redis",), {})
-        ]
-        self.mock_pipeline.cacher.assert_has_calls(expected_calls, any_order=True)
+        # Verify clickhouse cacher was called for both base record lookup and organization lookup
+        self.mock_pipeline.cacher.assert_called_with("clickhouse")
         
-        # Verify Redis lookup for organization reference
-        self.mock_redis_cacher.lookup.assert_called_with('meta_organization', 'ucla')
+        # Verify ClickHouse lookup for organization reference was among the calls
+        self.mock_clickhouse_cacher.lookup.assert_any_call('meta_organization', 'ucla')
 
 
 if __name__ == '__main__':

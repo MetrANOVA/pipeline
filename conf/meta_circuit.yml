@@ -11,8 +11,6 @@ data:
     endpoint_id:
       - losa-cr6
       - sfo-cr1
-    child_circuit_id:
-      - losa-sfo-1553
 
   # Main circuit connecting interfaces
   - id: losa-sfo-1553
@@ -25,10 +23,7 @@ data:
     endpoint_id:
       - losa-cr6::losa_se-1553
       - sfo-cr1::sfo_se-1553
-    child_circuit_id:
-      - losa-sfo-transport-1553
-    parent_circuit_id:
-      - losa-sfo-backbone-01
+    parent_circuit_id: losa-sfo-backbone-01
 
   # Child circuit - physical transport layer
   - id: losa-sfo-transport-1553
@@ -41,5 +36,4 @@ data:
     endpoint_id:
       - losa-cr6::ae1553
       - sfo-cr1::ae1553
-    parent_circuit_id:
-      - losa-sfo-1553
+    parent_circuit_id: losa-sfo-1553

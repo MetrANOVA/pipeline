@@ -31,7 +31,7 @@ class InterfaceMetadataProcessor(BaseMetadataProcessor):
             ['peer_interface_ipv4', 'Nullable(IPv4)', True],
             ['peer_interface_ipv6', 'Nullable(IPv6)', True],
             ['lag_member_interface_id', 'Array(LowCardinality(String))', True],
-            ['lag_member_interface_ref', 'Array(String)', True],
+            ['lag_member_interface_ref', 'Array(Nullable(String))', True],
             ['port_interface_id', 'LowCardinality(Nullable(String))', True],
             ['port_interface_ref', 'Nullable(String)', True],
             ['remote_interface_id', 'LowCardinality(Nullable(String))', True],
@@ -48,17 +48,36 @@ class InterfaceMetadataProcessor(BaseMetadataProcessor):
         value_data = value.get('data', {})
 
         # lookup ref fields from redis cacher
-        formatted_record.update({
-            "device_ref": self.pipeline.cacher("redis").lookup("meta_device", value_data.get('device_id', None)),
-            "peer_as_ref": self.pipeline.cacher("redis").lookup("meta_as", value_data.get('peer_as_id', None)),
-            "port_interface_ref": self.pipeline.cacher("redis").lookup("meta_interface", value_data.get('port_interface_id', None)),
-            "remote_interface_ref": self.pipeline.cacher("redis").lookup("meta_interface", value_data.get('remote_interface_id', None)),
-            "remote_organization_ref": self.pipeline.cacher("redis").lookup("meta_organization", value_data.get('remote_organization_id', None))
-        })
+        ref_fields = [
+            ('device', 'device'), 
+            ('peer_as', 'as'), 
+            ('port_interface', 'interface'), 
+            ('remote_interface', 'interface'), 
+            ('remote_organization', 'organization')
+        ]
+        for ref_field, cacher_table in ref_fields:
+            ref_id = value_data.get(f'{ref_field}_id', None)
+            cached_info = self.pipeline.cacher("clickhouse").lookup(f"meta_{cacher_table}", ref_id)
+            if cached_info:
+                formatted_record[f"{ref_field}_ref"] = cached_info.get(self.db_ref_field, None)
+            else:
+                formatted_record[f"{ref_field}_ref"] = None
 
         #now lookup refs for json_array_fields
-        formatted_record[f"circuit_ref"] = [self.pipeline.cacher("redis").lookup("meta_circuit", iid) for iid in formatted_record[f"circuit_id"]]
-        formatted_record[f"lag_member_interface_ref"] = [self.pipeline.cacher("redis").lookup("meta_interface", iid) for iid in formatted_record[f"lag_member_interface_id"]]
+        formatted_record["circuit_ref"] = []
+        for cid in formatted_record["circuit_id"]:
+            cached_child_info = self.pipeline.cacher("clickhouse").lookup("meta_circuit", cid)
+            if not cached_child_info:
+                formatted_record["circuit_ref"].append(None)
+            else:
+                formatted_record["circuit_ref"].append(cached_child_info.get(self.db_ref_field, None))
+        formatted_record["lag_member_interface_ref"] = []
+        for lid in formatted_record["lag_member_interface_id"]:
+            cached_parent_info = self.pipeline.cacher("clickhouse").lookup("meta_interface", lid)
+            if not cached_parent_info:
+                formatted_record["lag_member_interface_ref"].append(None)
+            else:
+                formatted_record["lag_member_interface_ref"].append(cached_parent_info.get(self.db_ref_field, None))
 
         #build a hash with all the keys and values from value['data']
         return formatted_record

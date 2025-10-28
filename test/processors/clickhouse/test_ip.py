@@ -20,19 +20,18 @@ class TestIPMetadataProcessor(unittest.TestCase):
         # Create a mock pipeline
         self.mock_pipeline = MagicMock()
         
-        # Mock redis cacher
-        self.mock_redis_cacher = MagicMock()
-        self.mock_redis_cacher.lookup.return_value = "mock_as_ref"
-        
-        # Mock clickhouse cacher
+        # Mock clickhouse cacher for AS lookups
         self.mock_clickhouse_cacher = MagicMock()
-        self.mock_clickhouse_cacher.lookup.return_value = None  # No cached record by default
+        # For build_metadata_fields tests - return AS ref
+        self.mock_clickhouse_cacher.lookup.return_value = {
+            'ref': 'mock_as_ref__v1',
+            'hash': 'mock_hash',
+            'max_insert_time': '2023-01-01 00:00:00'
+        }
         
         # Set up cacher method to return the appropriate mock based on the type
         def mock_cacher(cache_type):
-            if cache_type == "redis":
-                return self.mock_redis_cacher
-            elif cache_type == "clickhouse":
+            if cache_type == "clickhouse":
                 return self.mock_clickhouse_cacher
             else:
                 return MagicMock()
@@ -182,11 +181,11 @@ class TestIPMetadataProcessor(unittest.TestCase):
         self.assertEqual(result['longitude'], -118.2437)
         self.assertEqual(result['as_id'], 67890)
         
-        # Check that Redis lookup was performed for AS reference
-        self.assertEqual(result['as_ref'], 'mock_as_ref')
+        # Check that ClickHouse lookup was performed for AS reference
+        self.assertEqual(result['as_ref'], 'mock_as_ref__v1')
         
-        # Verify Redis cacher was called
-        self.mock_redis_cacher.lookup.assert_called_once_with('meta_as', 67890)
+        # Verify ClickHouse cacher was called
+        self.mock_clickhouse_cacher.lookup.assert_called_with('meta_as', 67890)
 
     def test_build_metadata_fields_ipv6_subnets(self):
         """Test build_metadata_fields with IPv6 subnets."""
@@ -204,7 +203,7 @@ class TestIPMetadataProcessor(unittest.TestCase):
         
         # Check that IPv6 subnets are properly converted to tuples
         self.assertEqual(result['ip_subnet'], [('2607:f010::', 32), ('2001:db8::', 48)])
-        self.assertEqual(result['as_ref'], 'mock_as_ref')
+        self.assertEqual(result['as_ref'], 'mock_as_ref__v1')
 
     def test_build_metadata_fields_mixed_ip_versions(self):
         """Test build_metadata_fields with mixed IPv4 and IPv6 subnets."""
@@ -267,7 +266,7 @@ class TestIPMetadataProcessor(unittest.TestCase):
         
         # Check that empty array is handled correctly
         self.assertEqual(result['ip_subnet'], [])
-        self.assertEqual(result['as_ref'], 'mock_as_ref')
+        self.assertEqual(result['as_ref'], 'mock_as_ref__v1')
 
     def test_build_metadata_fields_minimal_data(self):
         """Test build_metadata_fields with minimal required data."""
@@ -396,7 +395,7 @@ class TestIPMetadataProcessor(unittest.TestCase):
         self.assertEqual(record['latitude'], 34.0522)
         self.assertEqual(record['longitude'], -118.2437)
         self.assertEqual(record['as_id'], 67890)
-        self.assertEqual(record['as_ref'], 'mock_as_ref')
+        self.assertEqual(record['as_ref'], 'mock_as_ref__v1')
         
         # Check that ref and hash are set
         self.assertIn('ref', record)
@@ -452,9 +451,18 @@ class TestIPMetadataProcessor(unittest.TestCase):
         result = processor.build_message(input_data, {})
         actual_hash = result[0]['hash'] if result else None
         
-        # Now mock existing record with the actual hash
+        # Now mock existing record with the actual hash and set up lookup side effects
         mock_existing = {'hash': actual_hash, 'ref': 'test-ip-block__v1'}
-        self.mock_clickhouse_cacher.lookup.return_value = mock_existing
+        mock_as_ref = {'ref': 'mock_as_ref__v1', 'hash': 'mock_hash', 'max_insert_time': '2023-01-01 00:00:00'}
+        
+        def lookup_side_effect(table, key):
+            if table == 'meta_ip' and key == 'test-ip-block':
+                return mock_existing
+            elif table == 'meta_as' and key == 67890:
+                return mock_as_ref
+            return None
+        
+        self.mock_clickhouse_cacher.lookup.side_effect = lookup_side_effect
         
         # Now test that it skips unchanged records
         result = processor.build_message(input_data, {})
@@ -530,7 +538,7 @@ class TestIPMetadataProcessor(unittest.TestCase):
         self.assertEqual(record['latitude'], 34.0522)
         self.assertEqual(record['longitude'], -118.2437)
         self.assertEqual(record['as_id'], 67890)
-        self.assertEqual(record['as_ref'], 'mock_as_ref')
+        self.assertEqual(record['as_ref'], 'mock_as_ref__v1')
         
         # Verify ext and tag from base class processing
         self.assertEqual(record['ext'], '{"registry": "ARIN", "purpose": "research"}')
@@ -541,8 +549,8 @@ class TestIPMetadataProcessor(unittest.TestCase):
         self.assertIn('hash', record)
         self.assertTrue(record['ref'].startswith('ucla-mixed-blocks__v'))
 
-    def test_redis_cacher_lookup_called(self):
-        """Test that Redis cacher lookup is called for AS reference."""
+    def test_clickhouse_cacher_lookup_called(self):
+        """Test that Clickhouse cacher lookup is called for AS reference."""
         processor = IPMetadataProcessor(self.mock_pipeline)
         
         input_data = {
@@ -555,15 +563,16 @@ class TestIPMetadataProcessor(unittest.TestCase):
         
         result = processor.build_message(input_data, {})
         
-        # Verify both cachers were called - clickhouse for base record lookup and redis for AS lookup
+        # Verify clickhouse cacher was called
+        self.mock_pipeline.cacher.assert_called_with("clickhouse")
+
+        # Verify ClickHouse lookups for both base record and AS reference
+        # Check that both calls were made
         expected_calls = [
-            (("clickhouse",), {}),
-            (("redis",), {})
+            unittest.mock.call('meta_ip', 'test-ip-block'),
+            unittest.mock.call('meta_as', 67890)
         ]
-        self.mock_pipeline.cacher.assert_has_calls(expected_calls, any_order=True)
-        
-        # Verify Redis lookup for AS reference
-        self.mock_redis_cacher.lookup.assert_called_with('meta_as', 67890)
+        self.mock_clickhouse_cacher.lookup.assert_has_calls(expected_calls, any_order=True)
 
     def test_ip_subnet_tuple_conversion(self):
         """Test that IP subnet conversion handles various formats correctly."""

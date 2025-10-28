@@ -59,4 +59,4 @@ class ClickHouseCacher(BaseCacher):
         #lookup in local cache
         if key is None or table is None:
             return None
-        return self.local_cache.get(table, {}).get(key, None)
+        return self.local_cache.get(table, {}).get(str(key), None)

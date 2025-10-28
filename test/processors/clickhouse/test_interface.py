@@ -17,7 +17,12 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         """Set up test fixtures before each test method."""
         # Create a mock pipeline
         self.mock_pipeline = MagicMock()
-        self.mock_pipeline.cacher.return_value.lookup.return_value = "mock_lookup_result"
+        # Mock ClickHouse cacher returns dict with ref, hash, and max_insert_time
+        self.mock_pipeline.cacher.return_value.lookup.return_value = {
+            'ref': 'mock_lookup_result__v1',
+            'hash': 'mock_hash',
+            'max_insert_time': '2023-01-01 00:00:00'
+        }
         
     def test_create_table_command_basic(self):
         """Test the create_table_command method with default settings."""
@@ -64,7 +69,7 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         self.assertIn("`peer_interface_ipv4` Nullable(IPv4)", result)
         self.assertIn("`peer_interface_ipv6` Nullable(IPv6)", result)
         self.assertIn("`lag_member_interface_id` Array(LowCardinality(String))", result)
-        self.assertIn("`lag_member_interface_ref` Array(String)", result)
+        self.assertIn("`lag_member_interface_ref` Array(Nullable(String))", result)
         self.assertIn("`port_interface_id` LowCardinality(Nullable(String))", result)
         self.assertIn("`port_interface_ref` Nullable(String)", result)
         self.assertIn("`remote_interface_id` LowCardinality(Nullable(String))", result)
@@ -132,7 +137,7 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         # Verify field mappings
         self.assertEqual(result["type"], "ethernet")
         self.assertEqual(result["device_id"], "device1")
-        self.assertEqual(result["device_ref"], "mock_lookup_result")
+        self.assertEqual(result["device_ref"], "mock_lookup_result__v1")
         self.assertEqual(result["description"], "Main interface")
         self.assertEqual(result["edge"], True)  # Should be converted to boolean
         self.assertEqual(result["flow_index"], 100)  # Should be converted to int
@@ -141,19 +146,19 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         self.assertEqual(result["name"], "eth0")
         self.assertEqual(result["speed"], 1000000000)  # Should be converted to int
         self.assertEqual(result["circuit_id"], ["circuit1", "circuit2"])  # Should be parsed JSON
-        self.assertEqual(result["circuit_ref"], ["mock_lookup_result", "mock_lookup_result"])
+        self.assertEqual(result["circuit_ref"], ["mock_lookup_result__v1", "mock_lookup_result__v1"])
         self.assertEqual(result["peer_as_id"], 65001)  # Should be converted to int
-        self.assertEqual(result["peer_as_ref"], "mock_lookup_result")
+        self.assertEqual(result["peer_as_ref"], "mock_lookup_result__v1")
         self.assertEqual(result["peer_interface_ipv4"], "192.168.1.2")
         self.assertEqual(result["peer_interface_ipv6"], "2001:db8::2")
         self.assertEqual(result["lag_member_interface_id"], ["member1", "member2"])
-        self.assertEqual(result["lag_member_interface_ref"], ["mock_lookup_result", "mock_lookup_result"])
+        self.assertEqual(result["lag_member_interface_ref"], ["mock_lookup_result__v1", "mock_lookup_result__v1"])
         self.assertEqual(result["port_interface_id"], "port1")
-        self.assertEqual(result["port_interface_ref"], "mock_lookup_result")
+        self.assertEqual(result["port_interface_ref"], "mock_lookup_result__v1")
         self.assertEqual(result["remote_interface_id"], "remote1")
-        self.assertEqual(result["remote_interface_ref"], "mock_lookup_result")
+        self.assertEqual(result["remote_interface_ref"], "mock_lookup_result__v1")
         self.assertEqual(result["remote_organization_id"], "org1")
-        self.assertEqual(result["remote_organization_ref"], "mock_lookup_result")
+        self.assertEqual(result["remote_organization_ref"], "mock_lookup_result__v1")
         self.assertEqual(result["tag"], ["tag1", "tag2"])
         self.assertEqual(result["ext"], '{"custom": "data"}')
 
@@ -266,7 +271,13 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         
         # Configure mock to return different values for different lookups
         def mock_lookup(table, key):
-            return f"ref_for_{key}" if key else None
+            if key:
+                return {
+                    'ref': f"ref_for_{key}",
+                    'hash': 'mock_hash',
+                    'max_insert_time': '2023-01-01 00:00:00'
+                }
+            return None
         
         self.mock_pipeline.cacher.return_value.lookup.side_effect = mock_lookup
         
@@ -324,15 +335,51 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         # Configure mock lookup to simulate different ref resolutions
         def mock_lookup(table, key):
             lookup_map = {
-                ("meta_device", "device1"): "Device Reference 1",
-                ("meta_as", "65001"): "AS Reference 65001",
-                ("meta_interface", "port1"): "Port Interface Ref",
-                ("meta_interface", "remote1"): "Remote Interface Ref",
-                ("meta_circuit", "circuit1"): "Circuit 1 Ref",
-                ("meta_circuit", "circuit2"): "Circuit 2 Ref", 
-                ("meta_interface", "lag1"): "LAG Member 1 Ref",
-                ("meta_interface", "lag2"): "LAG Member 2 Ref",
-                ("meta_organization", "org1"): "Organization Ref"
+                ("meta_device", "device1"): {
+                    'ref': "Device Reference 1",
+                    'hash': 'mock_hash',
+                    'max_insert_time': '2023-01-01 00:00:00'
+                },
+                ("meta_as", "65001"): {
+                    'ref': "AS Reference 65001",
+                    'hash': 'mock_hash',
+                    'max_insert_time': '2023-01-01 00:00:00'
+                },
+                ("meta_interface", "port1"): {
+                    'ref': "Port Interface Ref",
+                    'hash': 'mock_hash',
+                    'max_insert_time': '2023-01-01 00:00:00'
+                },
+                ("meta_interface", "remote1"): {
+                    'ref': "Remote Interface Ref",
+                    'hash': 'mock_hash',
+                    'max_insert_time': '2023-01-01 00:00:00'
+                },
+                ("meta_circuit", "circuit1"): {
+                    'ref': "Circuit 1 Ref",
+                    'hash': 'mock_hash',
+                    'max_insert_time': '2023-01-01 00:00:00'
+                },
+                ("meta_circuit", "circuit2"): {
+                    'ref': "Circuit 2 Ref",
+                    'hash': 'mock_hash',
+                    'max_insert_time': '2023-01-01 00:00:00'
+                },
+                ("meta_interface", "lag1"): {
+                    'ref': "LAG Member 1 Ref",
+                    'hash': 'mock_hash',
+                    'max_insert_time': '2023-01-01 00:00:00'
+                },
+                ("meta_interface", "lag2"): {
+                    'ref': "LAG Member 2 Ref",
+                    'hash': 'mock_hash',
+                    'max_insert_time': '2023-01-01 00:00:00'
+                },
+                ("meta_organization", "org1"): {
+                    'ref': "Organization Ref",
+                    'hash': 'mock_hash',
+                    'max_insert_time': '2023-01-01 00:00:00'
+                }
             }
             return lookup_map.get((table, key), None)
         
