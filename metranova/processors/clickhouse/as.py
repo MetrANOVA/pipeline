@@ -12,6 +12,9 @@ class ASMetadataProcessor(BaseMetadataProcessor):
         self.logger = logger
         self.table = os.getenv('CLICKHOUSE_AS_METADATA_TABLE', 'meta_as')
         self.float_fields = ['latitude', 'longitude']
+        #AS id is a UInt32
+        self.int_fields = ['id']
+        self.column_defs[0] = ['id', 'UInt32', True]
         self.column_defs.extend([
             ['name', 'LowCardinality(String)', True],
             ['city_name', 'LowCardinality(Nullable(String))', True],
