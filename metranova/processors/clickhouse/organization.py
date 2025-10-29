@@ -10,11 +10,10 @@ class OrganizationMetadataProcessor(BaseMetadataProcessor):
         super().__init__(pipeline)
         self.table = os.getenv('CLICKHOUSE_ORGANIZATION_METADATA_TABLE', 'meta_organization')
         self.float_fields = ['latitude', 'longitude']
-        self.array_fields = ['type', 'funding_agency']
+        self.array_fields = ['type']
         self.column_defs.extend([
             ['name', 'LowCardinality(String)', True],
             ['type', 'Array(LowCardinality(String))', True],
-            ['funding_agency', 'Array(LowCardinality(String))', True],
             ['city_name', 'LowCardinality(Nullable(String))', True],
             ['continent_name', 'LowCardinality(Nullable(String))', True],
             ['country_name', 'LowCardinality(Nullable(String))', True],

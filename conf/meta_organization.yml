@@ -6,10 +6,6 @@ data:
       - university
       - research
       - education
-    funding_agency:
-      - NSF
-      - NIH
-      - DOE
     city_name: Los Angeles
     continent_name: North America
     country_name: United States

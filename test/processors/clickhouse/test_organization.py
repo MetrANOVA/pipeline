@@ -48,13 +48,13 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
 
         # Test that float_fields and array_fields are set
         self.assertEqual(processor.float_fields, ['latitude', 'longitude'])
-        self.assertEqual(processor.array_fields, ['type', 'funding_agency'])
+        self.assertEqual(processor.array_fields, ['type'])
         
         # Test that additional column definitions were added
         column_names = [col[0] for col in processor.column_defs]
         expected_columns = [
             'id', 'ref', 'hash', 'insert_time', 'ext', 'tag',  # from base class
-            'name', 'type', 'funding_agency', 'city_name', 'continent_name',
+            'name', 'type', 'city_name', 'continent_name',
             'country_name', 'country_code', 'country_sub_name', 'country_sub_code',
             'latitude', 'longitude'
         ]
@@ -91,7 +91,7 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
             
             # Check that organization-specific columns are included
             organization_columns = [
-                'name', 'type', 'funding_agency', 'city_name', 'continent_name',
+                'name', 'type', 'city_name', 'continent_name',
                 'country_name', 'country_code', 'latitude', 'longitude'
             ]
             for column in organization_columns:
@@ -128,7 +128,6 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
         # Test specific column types
         self.assertEqual(column_types['name'], 'LowCardinality(String)')
         self.assertEqual(column_types['type'], 'Array(LowCardinality(String))')
-        self.assertEqual(column_types['funding_agency'], 'Array(LowCardinality(String))')
         self.assertEqual(column_types['latitude'], 'Nullable(Float64)')
         self.assertEqual(column_types['longitude'], 'Nullable(Float64)')
         self.assertEqual(column_types['city_name'], 'LowCardinality(Nullable(String))')
@@ -162,7 +161,6 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
                 'id': 'ucla',
                 'name': 'University of California, Los Angeles',
                 'type': ['university', 'research', 'education'],
-                'funding_agency': ['NSF', 'NIH', 'DOE'],
                 'city_name': 'Los Angeles',
                 'continent_name': 'North America',
                 'country_name': 'United States',
@@ -183,7 +181,6 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
         self.assertEqual(record['id'], 'ucla')
         self.assertEqual(record['name'], 'University of California, Los Angeles')
         self.assertEqual(record['type'], ['university', 'research', 'education'])
-        self.assertEqual(record['funding_agency'], ['NSF', 'NIH', 'DOE'])
         self.assertEqual(record['city_name'], 'Los Angeles')
         self.assertEqual(record['continent_name'], 'North America')
         self.assertEqual(record['country_name'], 'United States')
@@ -235,8 +232,7 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
                 'data': [{
                     'id': 'org1',
                     'name': 'Organization 1',
-                    'type': ['university', 'research'],
-                    'funding_agency': ['NSF', 'NIH']
+                    'type': ['university', 'research']
                 }]
             },
             # Single values (should be handled by base class)
@@ -244,8 +240,7 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
                 'data': [{
                     'id': 'org2',
                     'name': 'Organization 2',
-                    'type': 'university',
-                    'funding_agency': 'NSF'
+                    'type': 'university'
                 }]
             }
         ]
@@ -283,7 +278,6 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
             "ext": "{}",
             "tag": [],
             "type": [],  # Arrays default to empty arrays, not None
-            "funding_agency": [],  # Arrays default to empty arrays, not None
             "continent_name": None,
             "country_name": None,
             "country_code": None,
@@ -338,7 +332,6 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
                 'id': 'caltech',
                 'name': 'California Institute of Technology',
                 'type': ['university', 'research', 'technology'],
-                'funding_agency': ['NSF', 'NASA', 'DOE', 'DARPA'],
                 'city_name': 'Pasadena',
                 'continent_name': 'North America',
                 'country_name': 'United States',
@@ -363,7 +356,6 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
         self.assertEqual(record['id'], 'caltech')
         self.assertEqual(record['name'], 'California Institute of Technology')
         self.assertEqual(record['type'], ['university', 'research', 'technology'])
-        self.assertEqual(record['funding_agency'], ['NSF', 'NASA', 'DOE', 'DARPA'])
         self.assertEqual(record['city_name'], 'Pasadena')
         self.assertEqual(record['continent_name'], 'North America')
         self.assertEqual(record['country_name'], 'United States')
