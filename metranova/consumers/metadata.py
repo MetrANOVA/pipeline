@@ -343,8 +343,8 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
             return None
         return (parts[0], int(parts[1]))
 
-    def consume_messages(self):
-        #Open the asn files for reading
+    def _load_asn_data(self):
+        """Load ASN data from CSV files into a PyTricia trie"""
         ip_to_asn_trie = pytricia.PyTricia(128)
         for asn_file in self.asn_files:
             try:
@@ -359,8 +359,11 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
                 self.logger.error(f"ASN file not found: {asn_file}. Error: {e}")
             except Exception as e:
                 self.logger.error(f"Error processing ASN file {asn_file}: {e}")
-        #open location files for reading and build location code mapping
-        #CSV columns: geoname_id,locale_code,continent_code,continent_name,country_iso_code,country_name,subdivision_1_iso_code,subdivision_1_name,subdivision_2_iso_code,subdivision_2_name,city_name,metro_code,time_zone,is_in_european_union
+        return ip_to_asn_trie
+
+    def _load_location_data(self):
+        """Load location data from CSV files and build location code mapping"""
+        # CSV columns: geoname_id,locale_code,continent_code,continent_name,country_iso_code,country_name,subdivision_1_iso_code,subdivision_1_name,subdivision_2_iso_code,subdivision_2_name,city_name,metro_code,time_zone,is_in_european_union
         location_code_map = {}
         for location_file in self.location_files:
             try:
@@ -382,14 +385,16 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
                 self.logger.error(f"Location file not found: {location_file}. Error: {e}")
             except Exception as e:
                 self.logger.error(f"Error processing Location file {location_file}: {e}")
+        return location_code_map
 
-        # Load custom ip additions from YAML file
+    def _load_custom_ip_data(self):
+        """Load custom IP additions from YAML file"""
         custom_ip_data = defaultdict(dict)
         if self.custom_ip_file:
             try:
                 with open(self.custom_ip_file, 'r') as f:
-                    custom_ip_data = yaml.safe_load(f)
-                    for record in custom_ip_data.get('data', []):
+                    yaml_data = yaml.safe_load(f)
+                    for record in yaml_data.get('data', []):
                         record_id = record.get('id', None)
                         if record_id is None:
                             continue
@@ -398,46 +403,77 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
                 self.logger.error(f"Custom IP file not found: {self.custom_ip_file}. Error: {e}")
             except Exception as e:
                 self.logger.error(f"Error processing custom IP file {self.custom_ip_file}: {e}")
+        return custom_ip_data
 
-        # Open ip_block files for reading and build ip objects
+    def _build_ip_object(self, row, ip_to_asn_trie, location_code_map, custom_ip_data):
+        """Build an IP object from CSV row data and lookup tables"""
+        network = row.get('network', None)
+        if not network:
+            return None, custom_ip_data
+        
+        ip_obj = {'id': network}
+        
+        # Set ip_subnet - need to format as list of tuple for database
+        ip_subnet_tuple = self.ip_subnet_to_tuple(network)
+        ip_obj['ip_subnet'] = [ip_subnet_tuple]
+        
+        # Lookup ASN info in trie
+        asn = ip_to_asn_trie.get(network, None)
+        if asn:
+            ip_obj['as_id'] = asn
+        
+        # Lookup location info
+        geo_id = row.get('geoname_id', None)
+        if geo_id and geo_id in location_code_map:
+            ip_obj.update(location_code_map[geo_id])
+        
+        # Add remaining fields directly from ip block file
+        ip_obj.update({
+            'latitude': row.get('latitude', None),
+            'longitude': row.get('longitude', None)
+        })
+        
+        # Merge with any custom data
+        if custom_ip_data.get(network, None):
+            ip_obj.update(custom_ip_data[network])
+            del custom_ip_data[network]  # remove from custom data so we can add any remaining later
+        
+        return ip_obj, custom_ip_data
+
+    def _process_ip_block_files(self, ip_to_asn_trie, location_code_map, custom_ip_data):
+        """Process IP block files and emit IP objects to pipeline"""
         # CSV Column names: network,geoname_id,registered_country_geoname_id,represented_country_geoname_id,is_anonymous_proxy,is_satellite_provider,postal_code,latitude,longitude,accuracy_radius,is_anycast
         for ip_block_file in self.ip_block_files:
-            ip_obj = {}
             try:
                 with open(ip_block_file, 'r') as f:
                     reader = csv.DictReader(f)
                     for row in reader:
-                        #set ip_subnet - ned to format as list of tuple for database
-                        network = row.get('network', None)
-                        if not network:
-                            continue
-                        ip_obj['id'] = network  # ensure entry exists
-                        ip_subnet_tuple = self.ip_subnet_to_tuple(network)
-                        ip_obj['ip_subnet'] = [ip_subnet_tuple]
-                        #lookup asn info in trie
-                        asn = ip_to_asn_trie.get(network, None)
-                        if asn:
-                            ip_obj['as_id'] = asn
-                        #lookup location info
-                        geo_id = row.get('geoname_id', None)
-                        if geo_id and geo_id in location_code_map:
-                            ip_obj.update(location_code_map[geo_id])
-                        # add remaining fields directly from ip block file
-                        ip_obj.update({
-                            'latitude': row.get('latitude', None),
-                            'longitude': row.get('longitude', None)
-                        })
-                        #merge with any custom data
-                        if custom_ip_data.get(network, None):
-                            ip_obj.update(custom_ip_data[network])
-                            del custom_ip_data[network]  # remove from custom data so we can add any remaining later
-                        #now process the record - do this here to avoid memory issues with large files
-                        #TODO: Possibly speed up imports by batching records instead of one at a time
-                        self.pipeline.process_message({'table': self.table, 'data': [ip_obj]})
+                        ip_obj, custom_ip_data = self._build_ip_object(row, ip_to_asn_trie, location_code_map, custom_ip_data)
+                        if ip_obj:
+                            # Process the record - do this here to avoid memory issues with large files
+                            # TODO: Possibly speed up imports by batching records instead of one at a time
+                            self.pipeline.process_message({'table': self.table, 'data': [ip_obj]})
             except FileNotFoundError as e:
                 self.logger.error(f"IP Block file not found: {ip_block_file}. Error: {e}")
             except Exception as e:
                 self.logger.error(f"Error processing IP Block file {ip_block_file}: {e}")
         
+        return custom_ip_data
+
+    def consume_messages(self):
+        """Main method to consume and process IP geolocation data from CSV files"""
+        # Load ASN data
+        ip_to_asn_trie = self._load_asn_data()
+        
+        # Load location data
+        location_code_map = self._load_location_data()
+        
+        # Load custom IP data
+        custom_ip_data = self._load_custom_ip_data()
+        
+        # Process IP block files
+        remaining_custom_data = self._process_ip_block_files(ip_to_asn_trie, location_code_map, custom_ip_data)
+        
         # Process any remaining custom IP records that were not in the ip block files
-        self.pipeline.process_message({'table': self.table, 'data': list(custom_ip_data.values())})
+        if remaining_custom_data:
+            self.pipeline.process_message({'table': self.table, 'data': list(remaining_custom_data.values())})
