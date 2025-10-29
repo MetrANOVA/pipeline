@@ -1,6 +1,5 @@
 import logging
 import os
-import time
 from metranova.connectors.http import HTTPConnector
 from metranova.consumers.base import TimedIntervalConsumer
 from metranova.pipelines.base import BasePipeline

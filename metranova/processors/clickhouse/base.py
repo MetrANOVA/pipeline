@@ -154,7 +154,7 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         return False
 
     def build_message(self, value: dict, msg_metadata: dict) -> list:
-         # Get a JSON list so need to iterate and then call super().build_message for each record
+        # Get a JSON list so need to iterate and then call super().build_message for each record
         if not value or not value.get("data", None):
             return []
         
@@ -170,11 +170,10 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
             if formatted_record:
                 formatted_records.append(formatted_record)
 
-        #build a map of ids to refs from formatted records
-        id_to_ref = {rec['id']: rec['ref'] for rec in formatted_records}
-
         #update any self references in formatted records
         if self.self_ref_fields:
+            #build a map of ids to refs from formatted records
+            id_to_ref = {rec['id']: rec['ref'] for rec in formatted_records}
             # Update all the refs that point to same resource type
             new_formatted_records = []
             for rec in formatted_records:

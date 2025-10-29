@@ -29,6 +29,10 @@ class ScienceRegistryProcessor(BaseMetadataProcessor):
             ["scireg_id"],
             ["addresses"]
         ]
+    
+    def match_message(self, value):
+        #override base since don't set table in url
+        return self.has_match_field(value)
 
     def build_metadata_fields(self, value: dict) -> dict | None:
         #iterate over strings in value['addresses'] and build a new list of tuples where first element is IP address and second is prefix length.
@@ -59,7 +63,9 @@ class ScienceRegistryProcessor(BaseMetadataProcessor):
             'longitude': value.get('longitude', None),
             'resource_name': value.get('resource_name', None),
             'project_name': value.get('project_name', None),
-            'contact_email': value.get('contact_email', None)
+            'contact_email': value.get('contact_email', None),
+            'ext': '{}',
+            'tag': []
         }
 
         #format scireg_update_time if equals "unknown"
