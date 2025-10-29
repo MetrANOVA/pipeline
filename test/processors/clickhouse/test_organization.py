@@ -41,11 +41,11 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
         self.assertEqual(processor.table, 'meta_organization')
         
         # Test that val_id_field is correctly set
-        self.assertEqual(processor.val_id_field, ['data', 'id'])
+        self.assertEqual(processor.val_id_field, ['id'])
         
         # Test that required_fields is correctly set
-        self.assertEqual(processor.required_fields, [['data', 'id'], ['data', 'name']])
-        
+        self.assertEqual(processor.required_fields, [['id'], ['name']])
+
         # Test that float_fields and array_fields are set
         self.assertEqual(processor.float_fields, ['latitude', 'longitude'])
         self.assertEqual(processor.array_fields, ['type', 'funding_agency'])
@@ -141,24 +141,24 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
         # Missing 'data' field entirely
         input_data_1 = {'other': 'value'}
         result_1 = processor.build_message(input_data_1, {})
-        self.assertIsNone(result_1)
+        self.assertEqual(result_1, [])
         
         # Missing 'id' field in data
-        input_data_2 = {'data': {'name': 'Test University', 'city_name': 'Los Angeles'}}
+        input_data_2 = {'data': [{'name': 'Test University', 'city_name': 'Los Angeles'}]}
         result_2 = processor.build_message(input_data_2, {})
-        self.assertIsNone(result_2)
+        self.assertEqual(result_2, [])
         
         # Missing 'name' field in data
-        input_data_3 = {'data': {'id': 'test-org', 'city_name': 'Los Angeles'}}
+        input_data_3 = {'data': [{'id': 'test-org', 'city_name': 'Los Angeles'}]}
         result_3 = processor.build_message(input_data_3, {})
-        self.assertIsNone(result_3)
+        self.assertEqual(result_3, [])
 
     def test_build_message_valid_single_record(self):
         """Test build_message with a single valid record."""
         processor = OrganizationMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'ucla',
                 'name': 'University of California, Los Angeles',
                 'type': ['university', 'research', 'education'],
@@ -171,7 +171,7 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
                 'country_sub_code': 'CA',
                 'latitude': 34.0689,
                 'longitude': -118.4452
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -203,10 +203,10 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
         processor = OrganizationMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test-org',
                 'name': 'Test Organization'
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -232,21 +232,21 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
         test_cases = [
             # Arrays as lists
             {
-                'data': {
+                'data': [{
                     'id': 'org1',
                     'name': 'Organization 1',
                     'type': ['university', 'research'],
                     'funding_agency': ['NSF', 'NIH']
-                }
+                }]
             },
             # Single values (should be handled by base class)
             {
-                'data': {
+                'data': [{
                     'id': 'org2',
                     'name': 'Organization 2',
                     'type': 'university',
                     'funding_agency': 'NSF'
-                }
+                }]
             }
         ]
         
@@ -268,11 +268,11 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
         processor = OrganizationMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test-org',
                 'name': 'Test Organization',
                 'city_name': 'Los Angeles'
-            }
+            }]
         }
         
         # Calculate the expected hash based on how the processor builds the record
@@ -301,18 +301,18 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
         
         result = processor.build_message(input_data, {})
         
-        self.assertIsNone(result)
+        self.assertEqual(result, [])
 
     def test_build_message_existing_record_changed(self):
         """Test build_message creates new version for changed records."""
         processor = OrganizationMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test-org',
                 'name': 'Test Organization Updated',  # Changed value
                 'city_name': 'Los Angeles'
-            }
+            }]
         }
         
         # Mock existing record with different hash
@@ -334,7 +334,7 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
         processor = OrganizationMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'caltech',
                 'name': 'California Institute of Technology',
                 'type': ['university', 'research', 'technology'],
@@ -349,7 +349,7 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
                 'longitude': -118.1253,
                 'ext': '{"website": "https://www.caltech.edu", "established": 1891}',
                 'tag': ['tier1', 'research-intensive', 'stem']
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -403,11 +403,11 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
                 self.mock_clickhouse_cacher.lookup.return_value = None
                 
                 input_data = {
-                    'data': {
+                    'data': [{
                         'id': f'org-{i}',
                         'name': f'Test Organization {i}',
                         **coords
-                    }
+                    }]
                 }
                 
                 result = processor.build_message(input_data, {})

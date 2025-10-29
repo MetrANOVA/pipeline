@@ -3,8 +3,8 @@
 import unittest
 import os
 from unittest.mock import patch, MagicMock
+import hashlib
 import orjson
-
 # Add the project root to Python path for imports
 import sys
 import os
@@ -40,11 +40,11 @@ class TestDeviceMetadataProcessor(unittest.TestCase):
         self.assertEqual(processor.table, 'meta_device')
         
         # Test that val_id_field is correctly set
-        self.assertEqual(processor.val_id_field, ['data', 'id'])
+        self.assertEqual(processor.val_id_field, ['id'])
         
         # Test that required_fields is correctly set
-        self.assertEqual(processor.required_fields, [['data', 'id'], ['data', 'type']])
-        
+        self.assertEqual(processor.required_fields, [['id'], ['type']])
+
         # Test that additional column definitions were added
         column_names = [col[0] for col in processor.column_defs]
         expected_columns = [
@@ -119,22 +119,21 @@ class TestDeviceMetadataProcessor(unittest.TestCase):
         processor = DeviceMetadataProcessor(self.mock_pipeline)
         
         value = {
-            'data': {
-                'type': 'router',
-                'hostname': 'test-device',
-                'latitude': '34.0522',
-                'longitude': '-118.2437',
-                'loopback_ip': '["10.1.1.1", "10.1.1.2"]',  # JSON string
-                'management_ip': ['192.168.1.1'],  # Already array
-                'location_type': '["datacenter", "core"]',  # JSON string
-                'manufacturer': 'Cisco',
-                'model': 'ASR9000',
-                'network': 'backbone',
-                'os': 'IOS-XR',
-                'role': 'core',
-                'state': 'active'
-            }
+            'type': 'router',
+            'hostname': 'test-device',
+            'latitude': '34.0522',
+            'longitude': '-118.2437',
+            'loopback_ip': '["10.1.1.1", "10.1.1.2"]',  # JSON string
+            'management_ip': ['192.168.1.1'],  # Already array
+            'location_type': '["datacenter", "core"]',  # JSON string
+            'manufacturer': 'Cisco',
+            'model': 'ASR9000',
+            'network': 'backbone',
+            'os': 'IOS-XR',
+            'role': 'core',
+            'state': 'active'
         }
+    
         
         result = processor.build_metadata_fields(value)
         
@@ -164,13 +163,13 @@ class TestDeviceMetadataProcessor(unittest.TestCase):
         # Test cases for JSON array fields
         test_cases = [
             # None values should become empty arrays
-            {'data': {'loopback_ip': None, 'management_ip': None, 'location_type': None}},
+            {'loopback_ip': None, 'management_ip': None, 'location_type': None},
             # Valid JSON strings should be parsed
-            {'data': {'loopback_ip': '["10.1.1.1"]', 'management_ip': '["192.168.1.1", "192.168.1.2"]', 'location_type': '["edge"]'}},
+            {'loopback_ip': '["10.1.1.1"]', 'management_ip': '["192.168.1.1", "192.168.1.2"]', 'location_type': '["edge"]'},
             # Invalid JSON strings should become empty arrays
-            {'data': {'loopback_ip': 'invalid-json', 'management_ip': '[invalid}', 'location_type': 'not-json'}},
+            {'loopback_ip': 'invalid-json', 'management_ip': '[invalid}', 'location_type': 'not-json'},
             # Already arrays should remain arrays
-            {'data': {'loopback_ip': ['10.1.1.1'], 'management_ip': ['192.168.1.1'], 'location_type': ['edge']}}
+            {'loopback_ip': ['10.1.1.1'], 'management_ip': ['192.168.1.1'], 'location_type': ['edge']}
         ]
         
         for i, value in enumerate(test_cases):
@@ -200,15 +199,15 @@ class TestDeviceMetadataProcessor(unittest.TestCase):
         
         test_cases = [
             # Valid string numbers
-            {'data': {'latitude': '34.0522', 'longitude': '-118.2437'}},
+            {'latitude': '34.0522', 'longitude': '-118.2437'},
             # Valid float numbers
-            {'data': {'latitude': 40.7128, 'longitude': -74.0060}},
+            {'latitude': 40.7128, 'longitude': -74.0060},
             # Valid integer numbers
-            {'data': {'latitude': 51, 'longitude': 0}},
+            {'latitude': 51, 'longitude': 0},
             # Invalid values should become None
-            {'data': {'latitude': 'invalid', 'longitude': 'not-a-number'}},
-            {'data': {'latitude': None, 'longitude': None}},
-            {'data': {'latitude': '', 'longitude': ''}},
+            {'latitude': 'invalid', 'longitude': 'not-a-number'},
+            {'latitude': None, 'longitude': None},
+            {'latitude': '', 'longitude': ''}
         ]
         
         expected_results = [
@@ -231,30 +230,28 @@ class TestDeviceMetadataProcessor(unittest.TestCase):
         processor = DeviceMetadataProcessor(self.mock_pipeline)
         
         value = {
-            'data': {
-                'type': 'router',
-                'loopback_ip': '["10.1.1.1", "10.1.1.2", "2001:db8::1"]',
-                'management_ip': '["192.168.100.1", "2001:db8:mgmt::1"]',
-                'hostname': 'losa-cr6.example.com',
-                'location_name': 'Los Angeles Core 6',
-                'location_type': '["datacenter", "core"]',
-                'city_name': 'Los Angeles',
-                'continent_name': 'North America',
-                'country_name': 'United States',
-                'country_code': 'US',
-                'country_sub_name': 'California',
-                'country_sub_code': 'CA',
-                'latitude': '34.0522',
-                'longitude': '-118.2437',
-                'manufacturer': 'Cisco',
-                'model': 'ASR 9922',
-                'network': 'backbone',
-                'os': 'IOS XR 7.10.2',
-                'role': 'core',
-                'state': 'active',
-                'ext': '{"snmp_community": "public", "bgp_asn": 65001}',
-                'tag': ['production', 'core', 'ipv6-enabled']
-            }
+            'type': 'router',
+            'loopback_ip': '["10.1.1.1", "10.1.1.2", "2001:db8::1"]',
+            'management_ip': '["192.168.100.1", "2001:db8:mgmt::1"]',
+            'hostname': 'losa-cr6.example.com',
+            'location_name': 'Los Angeles Core 6',
+            'location_type': '["datacenter", "core"]',
+            'city_name': 'Los Angeles',
+            'continent_name': 'North America',
+            'country_name': 'United States',
+            'country_code': 'US',
+            'country_sub_name': 'California',
+            'country_sub_code': 'CA',
+            'latitude': '34.0522',
+            'longitude': '-118.2437',
+            'manufacturer': 'Cisco',
+            'model': 'ASR 9922',
+            'network': 'backbone',
+            'os': 'IOS XR 7.10.2',
+            'role': 'core',
+            'state': 'active',
+            'ext': '{"snmp_community": "public", "bgp_asn": 65001}',
+            'tag': ['production', 'core', 'ipv6-enabled']
         }
         
         result = processor.build_metadata_fields(value)
@@ -292,24 +289,24 @@ class TestDeviceMetadataProcessor(unittest.TestCase):
         # Missing 'data' field entirely
         input_data_1 = {'other': 'value'}
         result_1 = processor.build_message(input_data_1, {})
-        self.assertIsNone(result_1)
+        self.assertEqual(result_1, [])
         
         # Missing 'id' field in data
-        input_data_2 = {'data': {'type': 'router', 'hostname': 'test'}}
+        input_data_2 = {'data': [{'type': 'router', 'hostname': 'test'}]}
         result_2 = processor.build_message(input_data_2, {})
-        self.assertIsNone(result_2)
+        self.assertEqual(result_2, [])
         
         # Missing 'type' field in data
-        input_data_3 = {'data': {'id': 'test-device', 'hostname': 'test'}}
+        input_data_3 = {'data': [{'id': 'test-device', 'hostname': 'test'}]}
         result_3 = processor.build_message(input_data_3, {})
-        self.assertIsNone(result_3)
+        self.assertEqual(result_3, [])
 
     def test_build_message_valid_single_record(self):
         """Test build_message with a single valid record."""
         processor = DeviceMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'losa-cr6',
                 'type': 'router',
                 'hostname': 'losa-cr6.example.com',
@@ -318,7 +315,7 @@ class TestDeviceMetadataProcessor(unittest.TestCase):
                 'loopback_ip': '["10.1.1.1"]',
                 'manufacturer': 'Cisco',
                 'model': 'ASR 9922'
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -346,17 +343,12 @@ class TestDeviceMetadataProcessor(unittest.TestCase):
         processor = DeviceMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
-                'id': 'test-device',
-                'type': 'router',
-                'hostname': 'test.example.com'
-            }
+            'id': 'test-device',
+            'type': 'router',
+            'hostname': 'test.example.com'
         }
         
         # Calculate the expected hash based on how the processor builds the record
-        import hashlib
-        import orjson
-        
         formatted_record = {
             "id": "test-device",
             "type": "router",
@@ -391,18 +383,18 @@ class TestDeviceMetadataProcessor(unittest.TestCase):
         
         result = processor.build_message(input_data, {})
         
-        self.assertIsNone(result)
+        self.assertEqual(result, [])
 
     def test_build_message_existing_record_changed(self):
         """Test build_message creates new version for changed records."""
         processor = DeviceMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test-device',
                 'type': 'router',
                 'hostname': 'test-updated.example.com'  # Changed value
-            }
+            }]
         }
         
         # Mock existing record with different hash

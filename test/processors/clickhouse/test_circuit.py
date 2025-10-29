@@ -52,10 +52,10 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         self.assertEqual(processor.table, 'meta_circuit')
         
         # Test that val_id_field is correctly set
-        self.assertEqual(processor.val_id_field, ['data', 'id'])
+        self.assertEqual(processor.val_id_field, ['id'])
         
         # Test that required_fields is correctly set
-        self.assertEqual(processor.required_fields, [['data', 'id'], ['data', 'endpoint_id'], ['data', 'endpoint_type']])
+        self.assertEqual(processor.required_fields, [['id'], ['endpoint_id'], ['endpoint_type']])
         
         # Test that array_fields are set
         self.assertEqual(processor.array_fields, ['endpoint_type', 'endpoint_id'])
@@ -151,14 +151,12 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         processor = CircuitMetadataProcessor(self.mock_pipeline)
         
         value = {
-            'data': {
-                'type': 'pwave',
-                'description': 'Test Circuit Description',
-                'state': 'active',
-                'endpoint_type': ['interface', 'interface'],
-                'endpoint_id': ['losa-cr6::pwave-losa_se-1553', 'sfo-cr1::pwave-sfo_se-1553'],
-                'parent_circuit_id': 'parent-circuit-1'
-            }
+            'type': 'pwave',
+            'description': 'Test Circuit Description',
+            'state': 'active',
+            'endpoint_type': ['interface', 'interface'],
+            'endpoint_id': ['losa-cr6::pwave-losa_se-1553', 'sfo-cr1::pwave-sfo_se-1553'],
+            'parent_circuit_id': 'parent-circuit-1'
         }
         
         result = processor.build_metadata_fields(value)
@@ -208,29 +206,29 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         # Missing 'data' field entirely
         input_data_1 = {'other': 'value'}
         result_1 = processor.build_message(input_data_1, {})
-        self.assertIsNone(result_1)
+        self.assertEqual(result_1, [])
         
         # Missing 'id' field in data
-        input_data_2 = {'data': {'endpoint_type': ['interface', 'interface'], 'endpoint_id': ['int1', 'int2']}}
+        input_data_2 = {'data': [{'endpoint_type': ['interface', 'interface'], 'endpoint_id': ['int1', 'int2']}]}
         result_2 = processor.build_message(input_data_2, {})
-        self.assertIsNone(result_2)
+        self.assertEqual(result_2, [])
         
         # Missing 'endpoint_type' field in data
-        input_data_3 = {'data': {'id': 'test-circuit', 'endpoint_id': ['int1', 'int2']}}
+        input_data_3 = {'data': [{'id': 'test-circuit', 'endpoint_id': ['int1', 'int2']}]}
         result_3 = processor.build_message(input_data_3, {})
-        self.assertIsNone(result_3)
+        self.assertEqual(result_3, [])
         
         # Missing 'endpoint_id' field in data
-        input_data_4 = {'data': {'id': 'test-circuit', 'endpoint_type': ['interface', 'interface']}}
+        input_data_4 = {'data': [{'id': 'test-circuit', 'endpoint_type': ['interface', 'interface']}]}
         result_4 = processor.build_message(input_data_4, {})
-        self.assertIsNone(result_4)
+        self.assertEqual(result_4, [])
 
     def test_build_message_valid_single_record(self):
         """Test build_message with a single valid record."""
         processor = CircuitMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'losa-sfo-pwave-1553',
                 'type': 'pwave',
                 'description': 'PWAVE Circuit Los Angeles to San Francisco',
@@ -238,7 +236,7 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
                 'endpoint_type': ['interface', 'interface'],
                 'endpoint_id': ['losa-cr6::pwave-losa_se-1553', 'sfo-cr1::pwave-sfo_se-1553'],
                 'parent_circuit_id': 'losa-sfo-backbone-01'
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -266,11 +264,11 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         processor = CircuitMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test-circuit',
                 'endpoint_type': ['device', 'device'],
                 'endpoint_id': ['device1', 'device2']
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -295,12 +293,12 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         processor = CircuitMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test-circuit',
                 'endpoint_type': ['interface', 'interface'],
                 'endpoint_id': ['int1', 'int2'],
                 'type': 'test'
-            }
+            }]
         }
         
         # Create a side effect function to handle the mock calls
@@ -308,7 +306,7 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
             if table == 'meta_circuit' and id_value == 'test-circuit':
                 # Calculate the hash the same way the processor does
                 formatted_record = {"id": id_value}
-                formatted_record.update(processor.build_metadata_fields(input_data))
+                formatted_record.update(processor.build_metadata_fields(input_data['data'][0]))
                 
                 # Calculate hash
                 import orjson
@@ -333,20 +331,20 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         # Now test that it skips unchanged records
         result = processor.build_message(input_data, {})
         
-        self.assertIsNone(result)
+        self.assertEqual(result, [])
 
     def test_build_message_existing_record_changed(self):
         """Test build_message creates new version for changed records."""
         processor = CircuitMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test-circuit',
                 'endpoint_type': ['interface', 'interface'],
                 'endpoint_id': ['int1', 'int2'],
                 'type': 'test-updated',  # Changed value
                 'description': 'Updated description'
-            }
+            }]
         }
         
         # Mock existing record with different hash
@@ -369,7 +367,7 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         processor = CircuitMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'losa-sfo-backbone-01',
                 'type': 'backbone',
                 'description': 'Los Angeles to San Francisco Backbone Circuit',
@@ -379,7 +377,7 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
                 'parent_circuit_id': None,
                 'ext': '{"vendor": "Cisco", "capacity": "100G"}',
                 'tag': ['backbone', 'high-priority', 'production']
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -413,12 +411,12 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
         processor = CircuitMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test-circuit',
                 'endpoint_type': ['interface', 'interface'],
                 'endpoint_id': ['int1', 'int2'],
                 'parent_circuit_id': 'parent1'
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -465,10 +463,10 @@ class TestCircuitMetadataProcessor(unittest.TestCase):
                 self.mock_clickhouse_cacher.lookup.return_value = None
                 
                 input_data = {
-                    'data': {
+                    'data': [{
                         'id': f'test-circuit-{i}',
                         **endpoints
-                    }
+                    }]
                 }
                 
                 result = processor.build_message(input_data, {})

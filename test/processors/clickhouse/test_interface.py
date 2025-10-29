@@ -105,28 +105,26 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         
         # Sample input data
         input_data = {
-            "data": {
-                "id": "interface1",
-                "device_id": "device1", 
-                "name": "eth0",
-                "type": "ethernet",
-                "description": "Main interface",
-                "edge": "true",
-                "flow_index": "100",
-                "ipv4": "192.168.1.1",
-                "ipv6": "2001:db8::1",
-                "speed": "1000000000",
-                "circuit_id": '["circuit1", "circuit2"]',
-                "peer_as_id": "65001",
-                "peer_interface_ipv4": "192.168.1.2",
-                "peer_interface_ipv6": "2001:db8::2",
-                "lag_member_interface_id": '["member1", "member2"]',
-                "port_interface_id": "port1",
-                "remote_interface_id": "remote1",
-                "remote_organization_id": "org1",
-                "tag": '["tag1", "tag2"]',
-                "ext": '{"custom": "data"}'
-            }
+            "id": "interface1",
+            "device_id": "device1", 
+            "name": "eth0",
+            "type": "ethernet",
+            "description": "Main interface",
+            "edge": "true",
+            "flow_index": "100",
+            "ipv4": "192.168.1.1",
+            "ipv6": "2001:db8::1",
+            "speed": "1000000000",
+            "circuit_id": '["circuit1", "circuit2"]',
+            "peer_as_id": "65001",
+            "peer_interface_ipv4": "192.168.1.2",
+            "peer_interface_ipv6": "2001:db8::2",
+            "lag_member_interface_id": '["member1", "member2"]',
+            "port_interface_id": "port1",
+            "remote_interface_id": "remote1",
+            "remote_organization_id": "org1",
+            "tag": '["tag1", "tag2"]',
+            "ext": '{"custom": "data"}'
         }
         
         result = processor.build_metadata_fields(input_data)
@@ -182,13 +180,11 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         
         for input_value, expected in test_cases:
             input_data = {
-                "data": {
-                    "id": "interface1",
-                    "device_id": "device1", 
-                    "name": "eth0",
-                    "type": "ethernet",
-                    "edge": input_value
-                }
+                "id": "interface1",
+                "device_id": "device1", 
+                "name": "eth0",
+                "type": "ethernet",
+                "edge": input_value
             }
             
             result = processor.build_metadata_fields(input_data)
@@ -200,15 +196,13 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         processor = InterfaceMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            "data": {
-                "id": "interface1",
-                "device_id": "device1", 
-                "name": "eth0",
-                "type": "ethernet",
-                "flow_index": "invalid",  # Should become None
-                "speed": "1000",  # Should become 1000
-                "peer_as_id": "not_a_number"  # Should become None
-            }
+            "id": "interface1",
+            "device_id": "device1", 
+            "name": "eth0",
+            "type": "ethernet",
+            "flow_index": "invalid",  # Should become None
+            "speed": "1000",  # Should become 1000
+            "peer_as_id": "not_a_number"  # Should become None
         }
         
         result = processor.build_metadata_fields(input_data)
@@ -284,14 +278,12 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         processor = InterfaceMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            "data": {
-                "id": "interface1",
-                "device_id": "device1", 
-                "name": "eth0",
-                "type": "ethernet",
-                "circuit_id": '["circuit1", "circuit2"]',
-                "lag_member_interface_id": '["lag1", "lag2", "lag3"]'
-            }
+            "id": "interface1",
+            "device_id": "device1", 
+            "name": "eth0",
+            "type": "ethernet",
+            "circuit_id": '["circuit1", "circuit2"]',
+            "lag_member_interface_id": '["lag1", "lag2", "lag3"]'
         }
         
         result = processor.build_metadata_fields(input_data)
@@ -310,13 +302,11 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         processor = InterfaceMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            "data": {
-                "id": "interface1",
-                "device_id": "device1", 
-                "name": "eth0",
-                "type": "ethernet",
-                "ext": {"custom_field": "value", "number": 42}
-            }
+            "id": "interface1",
+            "device_id": "device1", 
+            "name": "eth0",
+            "type": "ethernet",
+            "ext": {"custom_field": "value", "number": 42}
         }
         
         result = processor.build_metadata_fields(input_data)
@@ -341,6 +331,11 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
                     'max_insert_time': '2023-01-01 00:00:00'
                 },
                 ("meta_as", "65001"): {
+                    'ref': "AS Reference 65001",
+                    'hash': 'mock_hash',
+                    'max_insert_time': '2023-01-01 00:00:00'
+                },
+                ("meta_as", 65001): {
                     'ref': "AS Reference 65001",
                     'hash': 'mock_hash',
                     'max_insert_time': '2023-01-01 00:00:00'
@@ -388,28 +383,26 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         processor = InterfaceMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            "data": {
-                "id": "interface1",
-                "device_id": "device1", 
-                "name": "eth0",
-                "type": "ethernet",
-                "description": "Main interface",
-                "edge": "true",
-                "flow_index": "100",
-                "ipv4": "192.168.1.1",
-                "ipv6": "2001:db8::1",
-                "speed": "1000000000",
-                "circuit_id": '["circuit1", "circuit2"]',
-                "peer_as_id": "65001",
-                "peer_interface_ipv4": "192.168.1.2",
-                "peer_interface_ipv6": "2001:db8::2",
-                "lag_member_interface_id": '["lag1", "lag2"]',
-                "port_interface_id": "port1",
-                "remote_interface_id": "remote1",
-                "remote_organization_id": "org1",
-                "tag": '["production", "critical"]',
-                "ext": {"vlan": 100, "mtu": 1500}
-            }
+            "id": "interface1",
+            "device_id": "device1", 
+            "name": "eth0",
+            "type": "ethernet",
+            "description": "Main interface",
+            "edge": "true",
+            "flow_index": "100",
+            "ipv4": "192.168.1.1",
+            "ipv6": "2001:db8::1",
+            "speed": "1000000000",
+            "circuit_id": '["circuit1", "circuit2"]',
+            "peer_as_id": "65001",
+            "peer_interface_ipv4": "192.168.1.2",
+            "peer_interface_ipv6": "2001:db8::2",
+            "lag_member_interface_id": '["lag1", "lag2"]',
+            "port_interface_id": "port1",
+            "remote_interface_id": "remote1",
+            "remote_organization_id": "org1",
+            "tag": '["production", "critical"]',
+            "ext": {"vlan": 100, "mtu": 1500}
         }
         
         result = processor.build_metadata_fields(input_data)

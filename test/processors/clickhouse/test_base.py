@@ -262,18 +262,18 @@ class TestBaseMetadataProcessorBuildMessage(unittest.TestCase):
         # Create processor
         self.processor = BaseMetadataProcessor(self.mock_pipeline)
         self.processor.table = "test_table"
-        self.processor.val_id_field = ['data', 'id']
-        self.processor.required_fields = [['data', 'id'], ['data', 'name']]
+        self.processor.val_id_field = ['id']
+        self.processor.required_fields = [['id'], ['name']]
 
     def test_build_message_new_record(self):
         """Test build_message creates new record with v1 ref."""
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test_id',
                 'name': 'test_name',
                 'description': 'test_desc'
-            }
+            }]
         }
         
         result = self.processor.build_message(input_data, {})
@@ -292,10 +292,10 @@ class TestBaseMetadataProcessorBuildMessage(unittest.TestCase):
         """Test build_message skips unchanged records."""
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test_id',
                 'name': 'test_name'
-            }
+            }]
         }
         
         # Mock existing record with same hash - calculate hash same way as current code
@@ -317,16 +317,16 @@ class TestBaseMetadataProcessorBuildMessage(unittest.TestCase):
         
         result = self.processor.build_message(input_data, {})
         
-        self.assertIsNone(result)
+        self.assertEqual(result, [])
 
     def test_build_message_existing_record_changed(self):
         """Test build_message creates new version for changed records."""
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test_id',
                 'name': 'test_name_updated'
-            }
+            }]
         }
         
         # Mock existing record with different hash
@@ -340,30 +340,30 @@ class TestBaseMetadataProcessorBuildMessage(unittest.TestCase):
         self.assertEqual(record['ref'], 'test_id__v3')  # Should increment version
 
     def test_build_message_missing_required_fields(self):
-        """Test build_message returns None for missing required fields."""
+        """Test build_message returns empty list for missing required fields."""
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test_id'
                 # Missing 'name' field
-            }
+            }]
         }
         
         result = self.processor.build_message(input_data, {})
-        self.assertIsNone(result)
+        self.assertEqual(result, [])
 
     def test_build_message_missing_id_field(self):
-        """Test build_message returns None when id field is missing."""
+        """Test build_message returns empty list when id field is missing."""
         
         input_data = {
-            'data': {
+            'data': [{
                 'name': 'test_name'
                 # Missing 'id' field
-            }
+            }]
         }
         
         result = self.processor.build_message(input_data, {})
-        self.assertIsNone(result)
+        self.assertEqual(result, [])
 
     @patch.dict(os.environ, {'CLICKHOUSE_METADATA_FORCE_UPDATE': 'true'})
     def test_build_message_force_update(self):
@@ -372,14 +372,14 @@ class TestBaseMetadataProcessorBuildMessage(unittest.TestCase):
         # Create a new processor instance with force_update enabled
         force_processor = BaseMetadataProcessor(self.mock_pipeline)
         force_processor.table = "test_table"
-        force_processor.val_id_field = ['data', 'id']
-        force_processor.required_fields = [['data', 'id'], ['data', 'name']]
+        force_processor.val_id_field = ['id']
+        force_processor.required_fields = [['id'], ['name']]
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test_id',
                 'name': 'test_name'
-            }
+            }]
         }
         
         # Mock existing record with same hash

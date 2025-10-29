@@ -46,10 +46,10 @@ class TestASMetadataProcessor(unittest.TestCase):
         self.assertEqual(processor.table, 'meta_as')
         
         # Test that val_id_field is correctly set
-        self.assertEqual(processor.val_id_field, ['data', 'id'])
+        self.assertEqual(processor.val_id_field, ['id'])
         
         # Test that required_fields is correctly set
-        self.assertEqual(processor.required_fields, [['data', 'id'], ['data', 'name'], ['data', 'organization_id']])
+        self.assertEqual(processor.required_fields, [['id'], ['name'], ['organization_id']])
         
         # Test that logger is set
         self.assertEqual(processor.logger, processor.logger)
@@ -136,10 +136,8 @@ class TestASMetadataProcessor(unittest.TestCase):
         processor = ASMetadataProcessor(self.mock_pipeline)
         
         value = {
-            'data': {
-                'name': 'FICTITIOUS-AS',
-                'organization_id': 'ucla'
-            }
+            'name': 'FICTITIOUS-AS',
+            'organization_id': 'ucla'
         }
         
         result = processor.build_metadata_fields(value)
@@ -161,33 +159,33 @@ class TestASMetadataProcessor(unittest.TestCase):
         # Missing 'data' field entirely
         input_data_1 = {'other': 'value'}
         result_1 = processor.build_message(input_data_1, {})
-        self.assertIsNone(result_1)
+        self.assertEqual(result_1, [])
         
         # Missing 'id' field in data
-        input_data_2 = {'data': {'name': 'TEST-AS', 'organization_id': 'test-org'}}
+        input_data_2 = {'data': [{'name': 'TEST-AS', 'organization_id': 'test-org'}]}
         result_2 = processor.build_message(input_data_2, {})
-        self.assertIsNone(result_2)
+        self.assertEqual(result_2, [])
         
         # Missing 'name' field in data
-        input_data_3 = {'data': {'id': '67890', 'organization_id': 'test-org'}}
+        input_data_3 = {'data': [{'id': '67890', 'organization_id': 'test-org'}]}
         result_3 = processor.build_message(input_data_3, {})
-        self.assertIsNone(result_3)
+        self.assertEqual(result_3, [])
         
         # Missing 'organization_id' field in data
-        input_data_4 = {'data': {'id': '67890', 'name': 'TEST-AS'}}
+        input_data_4 = {'data': [{'id': '67890', 'name': 'TEST-AS'}]}
         result_4 = processor.build_message(input_data_4, {})
-        self.assertIsNone(result_4)
+        self.assertEqual(result_4, [])
 
     def test_build_message_valid_single_record(self):
         """Test build_message with a single valid record."""
         processor = ASMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': '67890',
                 'name': 'FICTITIOUS-AS',
                 'organization_id': 'ucla'
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -211,11 +209,11 @@ class TestASMetadataProcessor(unittest.TestCase):
         processor = ASMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': '12345',
                 'name': 'MINIMAL-AS',
                 'organization_id': 'test-org'
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -238,11 +236,11 @@ class TestASMetadataProcessor(unittest.TestCase):
         processor = ASMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': '67890',
                 'name': 'TEST-AS',
                 'organization_id': 'test-org'
-            }
+            }]
         }
         
         # Create a side effect function to handle the mock calls
@@ -250,7 +248,7 @@ class TestASMetadataProcessor(unittest.TestCase):
             if table == 'meta_as' and id_value == '67890':
                 # Calculate the hash the same way the processor does
                 formatted_record = {"id": id_value}
-                formatted_record.update(processor.build_metadata_fields(input_data))
+                formatted_record.update(processor.build_metadata_fields(input_data['data'][0]))
                 
                 # Calculate hash
                 import orjson
@@ -273,18 +271,18 @@ class TestASMetadataProcessor(unittest.TestCase):
         # Now test that it skips unchanged records
         result = processor.build_message(input_data, {})
         
-        self.assertIsNone(result)
+        self.assertEqual(result, [])
 
     def test_build_message_existing_record_changed(self):
         """Test build_message creates new version for changed records."""
         processor = ASMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': '67890',
                 'name': 'UPDATED-AS',  # Changed value
                 'organization_id': 'test-org'
-            }
+            }]
         }
         
         # Mock existing record with different hash
@@ -306,13 +304,13 @@ class TestASMetadataProcessor(unittest.TestCase):
         processor = ASMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': '67890',
                 'name': 'FICTITIOUS-AS',
                 'organization_id': 'ucla',
                 'ext': '{"type": "research", "established": "2020"}',
                 'tag': ['research', 'academic', 'west-coast']
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -342,11 +340,11 @@ class TestASMetadataProcessor(unittest.TestCase):
         processor = ASMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': '67890',
                 'name': 'TEST-AS',
                 'organization_id': 'ucla'
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})

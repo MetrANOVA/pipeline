@@ -46,10 +46,10 @@ class TestIPMetadataProcessor(unittest.TestCase):
         self.assertEqual(processor.table, 'meta_ip')
         
         # Test that val_id_field is correctly set
-        self.assertEqual(processor.val_id_field, ['data', 'id'])
+        self.assertEqual(processor.val_id_field, ['id'])
         
         # Test that required_fields is correctly set
-        self.assertEqual(processor.required_fields, [['data', 'id'], ['data', 'ip_subnet']])
+        self.assertEqual(processor.required_fields, [['id'], ['ip_subnet']])
         
         # Test that field types are set
         self.assertEqual(processor.float_fields, ['latitude', 'longitude'])
@@ -153,18 +153,16 @@ class TestIPMetadataProcessor(unittest.TestCase):
         processor = IPMetadataProcessor(self.mock_pipeline)
         
         value = {
-            'data': {
-                'ip_subnet': [['164.67.0.0', 16], ['128.97.0.0', 16]],
-                'city_name': 'Los Angeles',
-                'continent_name': 'North America',
-                'country_name': 'United States',
-                'country_code': 'US',
-                'country_sub_name': 'California',
-                'country_sub_code': 'CA',
-                'latitude': 34.0522,
-                'longitude': -118.2437,
-                'as_id': 67890
-            }
+            'ip_subnet': [['164.67.0.0', 16], ['128.97.0.0', 16]],
+            'city_name': 'Los Angeles',
+            'continent_name': 'North America',
+            'country_name': 'United States',
+            'country_code': 'US',
+            'country_sub_name': 'California',
+            'country_sub_code': 'CA',
+            'latitude': 34.0522,
+            'longitude': -118.2437,
+            'as_id': 67890
         }
         
         result = processor.build_metadata_fields(value)
@@ -192,12 +190,11 @@ class TestIPMetadataProcessor(unittest.TestCase):
         processor = IPMetadataProcessor(self.mock_pipeline)
         
         value = {
-            'data': {
-                'ip_subnet': [['2607:f010::', 32], ['2001:db8::', 48]],
-                'city_name': 'Los Angeles',
-                'as_id': 67890
-            }
+            'ip_subnet': [['2607:f010::', 32], ['2001:db8::', 48]],
+            'city_name': 'Los Angeles',
+            'as_id': 67890
         }
+
         
         result = processor.build_metadata_fields(value)
         
@@ -210,11 +207,10 @@ class TestIPMetadataProcessor(unittest.TestCase):
         processor = IPMetadataProcessor(self.mock_pipeline)
         
         value = {
-            'data': {
+                'id': 'test-ip-block',
                 'ip_subnet': [['164.67.0.0', 16], ['2607:f010::', 32], ['10.0.0.0', 8]],
                 'as_id': 67890
             }
-        }
         
         result = processor.build_metadata_fields(value)
         
@@ -227,7 +223,6 @@ class TestIPMetadataProcessor(unittest.TestCase):
         processor = IPMetadataProcessor(self.mock_pipeline)
         
         value = {
-            'data': {
                 'ip_subnet': [
                     ['164.67.0.0', 16],  # Valid
                     ['invalid'],  # Invalid - only one element
@@ -238,7 +233,6 @@ class TestIPMetadataProcessor(unittest.TestCase):
                 ],
                 'as_id': 67890
             }
-        }
         
         with patch.object(processor.logger, 'warning') as mock_warning:
             result = processor.build_metadata_fields(value)
@@ -273,9 +267,7 @@ class TestIPMetadataProcessor(unittest.TestCase):
         processor = IPMetadataProcessor(self.mock_pipeline)
         
         value = {
-            'data': {
-                'ip_subnet': [['192.168.1.0', 24]]
-            }
+            'ip_subnet': [['192.168.1.0', 24]]
         }
         
         result = processor.build_metadata_fields(value)
@@ -299,12 +291,10 @@ class TestIPMetadataProcessor(unittest.TestCase):
         processor = IPMetadataProcessor(self.mock_pipeline)
         
         value = {
-            'data': {
-                'ip_subnet': [['164.67.0.0', 16]],
-                'latitude': '34.0522',  # String that should be converted to float
-                'longitude': '-118.2437',  # String that should be converted to float
-                'as_id': '67890'  # String that should be converted to int
-            }
+            'ip_subnet': [['164.67.0.0', 16]],
+            'latitude': '34.0522',  # String that should be converted to float
+            'longitude': '-118.2437',  # String that should be converted to float
+            'as_id': '67890'  # String that should be converted to int
         }
         
         result = processor.build_metadata_fields(value)
@@ -346,24 +336,24 @@ class TestIPMetadataProcessor(unittest.TestCase):
         # Missing 'data' field entirely
         input_data_1 = {'other': 'value'}
         result_1 = processor.build_message(input_data_1, {})
-        self.assertIsNone(result_1)
+        self.assertEqual(result_1, [])
         
         # Missing 'id' field in data
-        input_data_2 = {'data': {'ip_subnet': [['192.168.1.0', 24]]}}
+        input_data_2 = {'data': [{'ip_subnet': [['192.168.1.0', 24]]}]}
         result_2 = processor.build_message(input_data_2, {})
-        self.assertIsNone(result_2)
+        self.assertEqual(result_2, [])
         
         # Missing 'ip_subnet' field in data
-        input_data_3 = {'data': {'id': 'test-ip-block'}}
+        input_data_3 = {'data': [{'id': 'test-ip-block'}]}
         result_3 = processor.build_message(input_data_3, {})
-        self.assertIsNone(result_3)
+        self.assertEqual(result_3, [])
 
     def test_build_message_valid_single_record(self):
         """Test build_message with a single valid record."""
         processor = IPMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'ucla-ipv4-block-1',
                 'ip_subnet': [['164.67.0.0', 16], ['128.97.0.0', 16]],
                 'city_name': 'Los Angeles',
@@ -375,7 +365,7 @@ class TestIPMetadataProcessor(unittest.TestCase):
                 'latitude': 34.0522,
                 'longitude': -118.2437,
                 'as_id': 67890
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -405,12 +395,12 @@ class TestIPMetadataProcessor(unittest.TestCase):
     def test_build_message_minimal_required_fields(self):
         """Test build_message with only required fields."""
         processor = IPMetadataProcessor(self.mock_pipeline)
-        
-        input_data = {
-            'data': {
+
+        input_data = { 
+            'data': [{
                 'id': 'minimal-ip-block',
                 'ip_subnet': [['10.0.0.0', 8]]
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -466,20 +456,20 @@ class TestIPMetadataProcessor(unittest.TestCase):
         
         # Now test that it skips unchanged records
         result = processor.build_message(input_data, {})
-        
-        self.assertIsNone(result)
+
+        self.assertEqual(result, [])
 
     def test_build_message_existing_record_changed(self):
         """Test build_message creates new version for changed records."""
         processor = IPMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test-ip-block',
                 'ip_subnet': [['192.168.1.0', 24], ['10.0.0.0', 8]],  # Changed - added subnet
                 'city_name': 'San Francisco',  # New field
                 'as_id': 67890
-            }
+            }]
         }
         
         # Mock existing record with different hash
@@ -502,7 +492,7 @@ class TestIPMetadataProcessor(unittest.TestCase):
         processor = IPMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'ucla-mixed-blocks',
                 'ip_subnet': [['164.67.0.0', 16], ['2607:f010::', 32]],
                 'city_name': 'Los Angeles',
@@ -516,7 +506,7 @@ class TestIPMetadataProcessor(unittest.TestCase):
                 'as_id': 67890,
                 'ext': '{"registry": "ARIN", "purpose": "research"}',
                 'tag': ['education', 'research', 'mixed-ip']
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -554,11 +544,11 @@ class TestIPMetadataProcessor(unittest.TestCase):
         processor = IPMetadataProcessor(self.mock_pipeline)
         
         input_data = {
-            'data': {
+            'data': [{
                 'id': 'test-ip-block',
                 'ip_subnet': [['192.168.1.0', 24]],
                 'as_id': 67890
-            }
+            }]
         }
         
         result = processor.build_message(input_data, {})
@@ -612,10 +602,10 @@ class TestIPMetadataProcessor(unittest.TestCase):
                 self.mock_clickhouse_cacher.lookup.return_value = None
                 
                 input_data = {
-                    'data': {
+                    'data': [{
                         'id': f'test-ip-block-{i}',
                         'ip_subnet': case['input']
-                    }
+                    }]
                 }
                 
                 result = processor.build_message(input_data, {})

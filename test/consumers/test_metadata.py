@@ -26,13 +26,11 @@ class TestYAMLFileConsumer(unittest.TestCase):
         
         consumer.handle_file_data('/path/to/file.yml', data)
         
-        # Should process each record
-        self.assertEqual(self.mock_pipeline.process_message.call_count, 2)
+        # Records are handles all at once
+        self.assertEqual(self.mock_pipeline.process_message.call_count, 1)
         
         calls = self.mock_pipeline.process_message.call_args_list
-        self.assertEqual(calls[0][0][0], {'table': 'test_table', 'data': {'id': 'record1', 'name': 'Test Record 1'}})
-        self.assertEqual(calls[1][0][0], {'table': 'test_table', 'data': {'id': 'record2', 'name': 'Test Record 2'}})
-
+        self.assertEqual(calls[0][0][0], {'table': 'test_table', 'data': [{'id': 'record1', 'name': 'Test Record 1'},{'id': 'record2', 'name': 'Test Record 2'}]})
     def test_handle_file_data_no_table(self):
         """Test handle_file_data when table field is missing."""
         
@@ -56,12 +54,7 @@ class TestYAMLFileConsumer(unittest.TestCase):
         
         consumer = YAMLFileConsumer(self.mock_pipeline)
         
-        data = {
-            'table': 'test_table',
-            'data': []
-        }
-        
-        consumer.handle_file_data('/path/to/file.yml', data)
+        consumer.handle_file_data('/path/to/file.yml', None)
         
         # Should not process any messages
         self.mock_pipeline.process_message.assert_not_called()
@@ -71,11 +64,7 @@ class TestYAMLFileConsumer(unittest.TestCase):
         
         consumer = YAMLFileConsumer(self.mock_pipeline)
         
-        data = {
-            'table': 'test_table'
-        }
-        
-        consumer.handle_file_data('/path/to/file.yml', data)
+        consumer.handle_file_data('/path/to/file.yml', None)
         
         # Should not process any messages (empty list default)
         self.mock_pipeline.process_message.assert_not_called()
@@ -111,12 +100,12 @@ class TestYAMLFileConsumer(unittest.TestCase):
         
         self.mock_pipeline.process_message.assert_called_once_with({
             'table': 'interface_table',
-            'data': {
+            'data': [{
                 'id': 'intf-001',
                 'name': 'eth0',
                 'type': 'ethernet',
                 'description': 'Management interface'
-            }
+            }]
         })
 
     def test_handle_file_data_complex_records(self):
@@ -145,7 +134,7 @@ class TestYAMLFileConsumer(unittest.TestCase):
         
         expected_call = {
             'table': 'complex_table',
-            'data': {
+            'data': [{
                 'id': 'complex-001',
                 'metadata': {
                     'tags': ['production', 'critical'],
@@ -155,7 +144,7 @@ class TestYAMLFileConsumer(unittest.TestCase):
                     }
                 },
                 'array_field': [1, 2, 3, 4]
-            }
+            }]
         }
         
         self.mock_pipeline.process_message.assert_called_once_with(expected_call)
@@ -199,7 +188,7 @@ data:
             consumer.consume_messages()
             
             # Should process each record in the data array
-            self.assertEqual(self.mock_pipeline.process_message.call_count, 2)
+            self.assertEqual(self.mock_pipeline.process_message.call_count, 1)
             
         finally:
             # Clean up temporary file
