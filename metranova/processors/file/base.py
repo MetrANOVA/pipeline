@@ -30,8 +30,21 @@ class IPTriePickleFileProcessor(BaseFileProcessor):
             if not isinstance(ip_subnet, list):
                 self.logger.warning(f"Expected 'ip_subnet' to be a list, got {type(ip_subnet)}")
                 continue
-            for addr in ip_subnet:
-                ip_trie["{}/{}".format(addr[0], addr[1])] = ref
+            for ip_subnet_tuple in ip_subnet:
+                if not ip_subnet_tuple or not isinstance(ip_subnet_tuple, (list, tuple)) or len(ip_subnet_tuple) != 2:
+                    self.logger.warning(f"Invalid subnet format: {ip_subnet_tuple}")
+                    continue
+                address, prefix = ip_subnet_tuple
+                if address is None or prefix is None:
+                    self.logger.debug(f"Skipping invalid subnet with null values: {ip_subnet_tuple}")
+                    continue
+                #Might be an IP type object so convert to string
+                address = str(address)
+                if address.startswith('::ffff:'):
+                    # Convert IPv4-mapped IPv6 address to IPv4
+                    address = address.split('::ffff:')[1]
+                #Clickhouse makes IPv4 addresses look like IPv6 so convert back
+                ip_trie["{}/{}".format(address, prefix)] = ref
 
         #freeze the trie to make it read-only
         ip_trie.freeze()
