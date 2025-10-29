@@ -344,9 +344,6 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
         return (parts[0], int(parts[1]))
 
     def consume_messages(self):
-        # Initialize data containers
-        ip_objs = defaultdict(dict)
-
         #Open the asn files for reading
         ip_to_asn_trie = pytricia.PyTricia(128)
         for asn_file in self.asn_files:
@@ -386,10 +383,26 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
             except Exception as e:
                 self.logger.error(f"Error processing Location file {location_file}: {e}")
 
+        # Load custom ip additions from YAML file
+        custom_ip_data = defaultdict(dict)
+        if self.custom_ip_file:
+            try:
+                with open(self.custom_ip_file, 'r') as f:
+                    custom_ip_data = yaml.safe_load(f)
+                    for record in custom_ip_data.get('data', []):
+                        record_id = record.get('id', None)
+                        if record_id is None:
+                            continue
+                        custom_ip_data[record_id] = record
+            except FileNotFoundError as e:
+                self.logger.error(f"Custom IP file not found: {self.custom_ip_file}. Error: {e}")
+            except Exception as e:
+                self.logger.error(f"Error processing custom IP file {self.custom_ip_file}: {e}")
+
         # Open ip_block files for reading and build ip objects
         # CSV Column names: network,geoname_id,registered_country_geoname_id,represented_country_geoname_id,is_anonymous_proxy,is_satellite_provider,postal_code,latitude,longitude,accuracy_radius,is_anycast
-        ip_objs = defaultdict(dict)
         for ip_block_file in self.ip_block_files:
+            ip_obj = {}
             try:
                 with open(ip_block_file, 'r') as f:
                     reader = csv.DictReader(f)
@@ -398,52 +411,33 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
                         network = row.get('network', None)
                         if not network:
                             continue
-                        ip_objs[network]['id'] = network# ensure entry exists
+                        ip_obj['id'] = network  # ensure entry exists
                         ip_subnet_tuple = self.ip_subnet_to_tuple(network)
-                        ip_objs[network]['ip_subnet'] = [ip_subnet_tuple]
+                        ip_obj['ip_subnet'] = [ip_subnet_tuple]
                         #lookup asn info in trie
                         asn = ip_to_asn_trie.get(network, None)
                         if asn:
-                            ip_objs[network]['as_id'] = asn
+                            ip_obj['as_id'] = asn
                         #lookup location info
                         geo_id = row.get('geoname_id', None)
                         if geo_id and geo_id in location_code_map:
-                            ip_objs[network].update(location_code_map[geo_id])
+                            ip_obj.update(location_code_map[geo_id])
                         # add remaining fields directly from ip block file
-                        ip_objs[network].update({
+                        ip_obj.update({
                             'latitude': row.get('latitude', None),
                             'longitude': row.get('longitude', None)
                         })
+                        #merge with any custom data
+                        if custom_ip_data.get(network, None):
+                            ip_obj.update(custom_ip_data[network])
+                            del custom_ip_data[network]  # remove from custom data so we can add any remaining later
+                        #now process the record - do this here to avoid memory issues with large files
+                        #TODO: Possibly speed up imports by batching records instead of one at a time
+                        self.pipeline.process_message({'table': self.table, 'data': [ip_obj]})
             except FileNotFoundError as e:
                 self.logger.error(f"IP Block file not found: {ip_block_file}. Error: {e}")
             except Exception as e:
                 self.logger.error(f"Error processing IP Block file {ip_block_file}: {e}")
-        # Load custom ip additions from YAML file
-        if self.custom_ip_file:
-            try:
-                with open(self.custom_ip_file, 'r') as f:
-                    custom_ip_data = yaml.safe_load(f)
-                    for record in custom_ip_data.get('data', []):
-                        ip_subnets = record.get('ip_subnet', None)
-                        if ip_subnets is None:
-                            continue
-                        # make sure ip_subnet is a list
-                        if not isinstance(ip_subnets, list):
-                            self.logger.error("IP subnet must be a list of lists where second list is in form (prefix, length)")
-                            continue
-                        for ip_subnet in ip_subnets:
-                            if not isinstance(ip_subnet, list) or len(ip_subnet) != 2:
-                                self.logger.error("Each IP subnet must be a list of [prefix, length]")
-                                continue
-                            ip_subnet_str = self.ip_subnet_to_str(ip_subnet)
-                            if ip_subnet_str is None:
-                                continue
-                            ip_objs[ip_subnet_str].update(record)
-            except FileNotFoundError as e:
-                self.logger.error(f"Custom IP file not found: {self.custom_ip_file}. Error: {e}")
-            except Exception as e:
-                self.logger.error(f"Error processing custom IP file {self.custom_ip_file}: {e}")
-
-        # Now we're ready to pass the records along
-        self.pipeline.process_message({'table': self.table, 'data': list(ip_objs.values())})
-
+        
+        # Process any remaining custom IP records that were not in the ip block files
+        self.pipeline.process_message({'table': self.table, 'data': list(custom_ip_data.values())})
