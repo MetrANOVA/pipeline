@@ -1,10 +1,12 @@
 
 from collections import defaultdict
+import csv
 import logging
 import time
 import orjson
 import pycountry
 import pycountry_convert
+import pytricia
 import os
 
 import yaml
@@ -301,3 +303,177 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
         
         # Emit messages to pipeline
         self._emit_messages(as_objs, org_objs)
+
+class IPGeolocationCSVConsumer(TimedIntervalConsumer):
+    """Consumer to load geolocation data from a series of CSV files and store in ClickHouse meta_ip table"""
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        # Initial values
+        self.logger = logger
+        self.datasource = None  # No external datasource needed for file reading
+        self.update_interval = int(os.getenv(f'IP_GEO_CSV_CONSUMER_UPDATE_INTERVAL', -1))
+        #load table name from env
+        self.table = os.getenv('IP_GEO_CSV_CONSUMER_TABLE', 'meta_ip')
+        #load files from env
+        self.asn_files = self.parse_file_list(os.getenv('IP_GEO_CSV_CONSUMER_ASN_FILES', '/app/caches/ip_geo_asn.csv'))
+        self.location_files = self.parse_file_list(os.getenv('IP_GEO_CSV_CONSUMER_LOCATION_FILES', '/app/caches/ip_geo_location.csv'))
+        self.ip_block_files = self.parse_file_list(os.getenv('IP_GEO_CSV_CONSUMER_IP_BLOCK_FILES', '/app/caches/ip_geo_ip_blocks.csv'))
+        self.custom_ip_file = os.getenv('IP_GEO_CSV_CONSUMER_CUSTOM_IP_FILE', None)  # Optional custom additions
+
+    def parse_file_list(self, file_list_str: str):
+        """Parse a comma-separated string of file paths into a list."""
+        if not file_list_str:
+            return []
+        return [file_path.strip() for file_path in file_list_str.split(',') if file_path.strip()]
+
+    def ip_subnet_to_str(self, ip_subnet: list):
+        if not ip_subnet:
+            return None
+        if not isinstance(ip_subnet, (list, tuple)) or len(ip_subnet) != 2:
+            self.logger.error("IP subnet must be a list of [prefix, length]")
+            return None
+        return f"{ip_subnet[0]}/{ip_subnet[1]}"
+
+    def ip_subnet_to_tuple(self, ip_subnet: str):
+        if not ip_subnet:
+            return None
+        parts = ip_subnet.split('/')
+        if len(parts) != 2:
+            self.logger.error("IP subnet must be in the format 'prefix/length'")
+            return None
+        return (parts[0], int(parts[1]))
+
+    def _load_asn_data(self):
+        """Load ASN data from CSV files into a PyTricia trie"""
+        ip_to_asn_trie = pytricia.PyTricia(128)
+        for asn_file in self.asn_files:
+            try:
+                with open(asn_file, 'r') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        net = row.get('network', None)
+                        asn = row.get('autonomous_system_number', None)
+                        if net and asn:
+                            ip_to_asn_trie[net] = int(asn)
+            except FileNotFoundError as e:
+                self.logger.error(f"ASN file not found: {asn_file}. Error: {e}")
+            except Exception as e:
+                self.logger.error(f"Error processing ASN file {asn_file}: {e}")
+        return ip_to_asn_trie
+
+    def _load_location_data(self):
+        """Load location data from CSV files and build location code mapping"""
+        # CSV columns: geoname_id,locale_code,continent_code,continent_name,country_iso_code,country_name,subdivision_1_iso_code,subdivision_1_name,subdivision_2_iso_code,subdivision_2_name,city_name,metro_code,time_zone,is_in_european_union
+        location_code_map = {}
+        for location_file in self.location_files:
+            try:
+                with open(location_file, 'r') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        geo_id = row.get('geoname_id', None)
+                        if not geo_id:
+                            continue
+                        location_code_map[geo_id] = {
+                            'continent_name': row.get('continent_name', None),
+                            'country_code': row.get('country_iso_code', None),
+                            'country_name': row.get('country_name', None),
+                            'country_sub_code': row.get('subdivision_1_iso_code', None),
+                            'country_sub_name': row.get('subdivision_1_name', None),
+                            'city_name': row.get('city_name', None)
+                        }
+            except FileNotFoundError as e:
+                self.logger.error(f"Location file not found: {location_file}. Error: {e}")
+            except Exception as e:
+                self.logger.error(f"Error processing Location file {location_file}: {e}")
+        return location_code_map
+
+    def _load_custom_ip_data(self):
+        """Load custom IP additions from YAML file"""
+        custom_ip_data = defaultdict(dict)
+        if self.custom_ip_file:
+            try:
+                with open(self.custom_ip_file, 'r') as f:
+                    yaml_data = yaml.safe_load(f)
+                    for record in yaml_data.get('data', []):
+                        record_id = record.get('id', None)
+                        if record_id is None:
+                            continue
+                        custom_ip_data[record_id] = record
+            except FileNotFoundError as e:
+                self.logger.error(f"Custom IP file not found: {self.custom_ip_file}. Error: {e}")
+            except Exception as e:
+                self.logger.error(f"Error processing custom IP file {self.custom_ip_file}: {e}")
+        return custom_ip_data
+
+    def _build_ip_object(self, row, ip_to_asn_trie, location_code_map, custom_ip_data):
+        """Build an IP object from CSV row data and lookup tables"""
+        network = row.get('network', None)
+        if not network:
+            return None, custom_ip_data
+        
+        ip_obj = {'id': network}
+        
+        # Set ip_subnet - need to format as list of tuple for database
+        ip_subnet_tuple = self.ip_subnet_to_tuple(network)
+        ip_obj['ip_subnet'] = [ip_subnet_tuple]
+        
+        # Lookup ASN info in trie
+        asn = ip_to_asn_trie.get(network, None)
+        if asn:
+            ip_obj['as_id'] = asn
+        
+        # Lookup location info
+        geo_id = row.get('geoname_id', None)
+        if geo_id and geo_id in location_code_map:
+            ip_obj.update(location_code_map[geo_id])
+        
+        # Add remaining fields directly from ip block file
+        ip_obj.update({
+            'latitude': row.get('latitude', None),
+            'longitude': row.get('longitude', None)
+        })
+        
+        # Merge with any custom data
+        if custom_ip_data.get(network, None):
+            ip_obj.update(custom_ip_data[network])
+            del custom_ip_data[network]  # remove from custom data so we can add any remaining later
+        
+        return ip_obj, custom_ip_data
+
+    def _process_ip_block_files(self, ip_to_asn_trie, location_code_map, custom_ip_data):
+        """Process IP block files and emit IP objects to pipeline"""
+        # CSV Column names: network,geoname_id,registered_country_geoname_id,represented_country_geoname_id,is_anonymous_proxy,is_satellite_provider,postal_code,latitude,longitude,accuracy_radius,is_anycast
+        for ip_block_file in self.ip_block_files:
+            try:
+                with open(ip_block_file, 'r') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        ip_obj, custom_ip_data = self._build_ip_object(row, ip_to_asn_trie, location_code_map, custom_ip_data)
+                        if ip_obj:
+                            # Process the record - do this here to avoid memory issues with large files
+                            # TODO: Possibly speed up imports by batching records instead of one at a time
+                            self.pipeline.process_message({'table': self.table, 'data': [ip_obj]})
+            except FileNotFoundError as e:
+                self.logger.error(f"IP Block file not found: {ip_block_file}. Error: {e}")
+            except Exception as e:
+                self.logger.error(f"Error processing IP Block file {ip_block_file}: {e}")
+        
+        return custom_ip_data
+
+    def consume_messages(self):
+        """Main method to consume and process IP geolocation data from CSV files"""
+        # Load ASN data
+        ip_to_asn_trie = self._load_asn_data()
+        
+        # Load location data
+        location_code_map = self._load_location_data()
+        
+        # Load custom IP data
+        custom_ip_data = self._load_custom_ip_data()
+        
+        # Process IP block files
+        remaining_custom_data = self._process_ip_block_files(ip_to_asn_trie, location_code_map, custom_ip_data)
+        
+        # Process any remaining custom IP records that were not in the ip block files
+        if remaining_custom_data:
+            self.pipeline.process_message({'table': self.table, 'data': list(remaining_custom_data.values())})

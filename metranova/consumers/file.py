@@ -23,11 +23,17 @@ class BaseFileConsumer(TimedIntervalConsumer):
         # Load file paths from environment variable
         file_str = os.getenv(f'{env_prefix}FILE_CONSUMER_PATHS', '')
         if file_str:
-            self.file_paths = [path.strip() for path in file_str.split(',') if path.strip()]
+            self.file_paths = self.parse_file_list(file_str)
             logger.info(f"Found {len(self.file_paths)} file paths: {self.file_paths}")
         else:
             logger.warning(f"{env_prefix}FILE_CONSUMER_FILE_PATHS environment variable is empty")
     
+    def parse_file_list(self, file_list_str: str):
+        """Parse a comma-separated string of file paths into a list."""
+        if not file_list_str:
+            return []
+        return [file_path.strip() for file_path in file_list_str.split(',') if file_path.strip()]
+
     def load_file_data(self, file: str):
         """Load data as text from file. Override in subclass for different formats."""
         return file.read()
