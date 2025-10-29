@@ -5,6 +5,8 @@ import time
 import orjson
 import pycountry
 import os
+
+import yaml
 from metranova.consumers.base import TimedIntervalConsumer
 from metranova.consumers.file import YAMLFileConsumer
 
@@ -39,6 +41,8 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
         #load files from env
         self.as2org_file = os.getenv('CAIDA_ORG_AS_CONSUMER_AS2ORG_FILE', '/app/caches/caida_as_org2info.jsonl')
         self.peeringdb_file = os.getenv('CAIDA_ORG_AS_CONSUMER_PEERINGDB_FILE', '/app/caches/caida_peeringdb.json')
+        self.custom_org_file = os.getenv('CAIDA_ORG_AS_CONSUMER_CUSTOM_ORG_FILE', None)  # Optional custom additions
+        self.custom_as_file = os.getenv('CAIDA_ORG_AS_CONSUMER_CUSTOM_AS_FILE', None)  # Optional custom additions  
     
     def consume_messages(self):
         # Load AS to Org mapping
@@ -192,14 +196,40 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
                     except Exception as e:
                         self.logger.error(f"Error looking up subdivision name for code {current_org['country_code']}-{current_org['state']}: {e}")
         
-        #TODO: Handle custom additions from YAML
-        #TODO: reorganize into smaller functions
-        #TODO: Add a way to flush writers and wait for completion instead of fixed sleep
+        #Handle org additions from YAML
+        if self.custom_org_file:
+            try:
+                with open(self.custom_org_file, 'r') as f:
+                    custom_org_data = yaml.safe_load(f)
+                    for record in custom_org_data.get('data', []):
+                        org_id = record.get('id', None)
+                        if org_id is None:
+                            continue
+                        org_objs[org_id].update(record)
+            except FileNotFoundError as e:
+                self.logger.error(f"Custom organization file not found: {self.custom_org_file}. Error: {e}")
+            except Exception as e:
+                self.logger.error(f"Error processing custom organization file {self.custom_org_file}: {e}")
+        #Handle as additions from YAML
+        if self.custom_as_file:
+            try:
+                with open(self.custom_as_file, 'r') as f:
+                    custom_as_data = yaml.safe_load(f)
+                    for record in custom_as_data.get('data', []):
+                        as_id = int(record.get('id', None))
+                        if as_id is None:
+                            continue
+                        as_objs[as_id].update(record)
+            except FileNotFoundError as e:
+                self.logger.error(f"Custom AS file not found: {self.custom_as_file}. Error: {e}")
+            except Exception as e:
+                self.logger.error(f"Error processing custom AS file {self.custom_as_file}: {e}")
 
         #now emit organization messages
         self.pipeline.process_message({'table': self.org_table, 'data': list(org_objs.values())})
         
         #wait to emit AS messages until after organization messages so that any foreign key references to organization_id will resolve
+        #TODO: Add a way to flush writers and wait for completion instead of fixed sleep
         self.logger.info("Waiting 10 seconds before emitting AS messages to allow organization metadata to be processed first...")
         time.sleep(10)
         #prime clickhouse cacher for organization metadata to avoid foreign key issues
