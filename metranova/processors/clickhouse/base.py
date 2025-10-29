@@ -134,7 +134,7 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         self.int_fields = []  # List of fields to format as integers
         self.boolean_fields = []  # List of fields to format as booleans
         self.array_fields = []  # List of fields to format as arrays
-
+        self.self_ref_fields = []  # List of fields that have self references to update
         # array of arrays in format [['col_name', 'col_definition', bool_include_in_insert], ...]
         # for extension columns, col_definition is ignored and can be set to None
         self.column_defs = [
@@ -154,6 +154,78 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         return False
 
     def build_message(self, value: dict, msg_metadata: dict) -> list:
+         # Get a JSON list so need to iterate and then call super().build_message for each record
+        if not value or not value.get("data", None):
+            return []
+        
+        # check if value["data"] is a list
+        if not isinstance(value["data"], list):
+            self.logger.warning("Expected 'data' to be a list, got %s", type(value["data"]))
+            return []
+        
+        #iterate over records in value["data"] and build formatted records
+        formatted_records = []
+        for record in value["data"]:
+            formatted_record = self.build_single_message(record, msg_metadata)
+            if formatted_record:
+                formatted_records.append(formatted_record)
+
+        #build a map of ids to refs from formatted records
+        id_to_ref = {rec['id']: rec['ref'] for rec in formatted_records}
+
+        #update any self references in formatted records
+        if self.self_ref_fields:
+            # Update all the refs that point to same resource type
+            new_formatted_records = []
+            for rec in formatted_records:
+                rec_updated = False
+                #for self reference field we'll update the refs
+                for field in self.self_ref_fields:
+                    #build id and ref field names
+                    id_field = f"{field}_id"
+                    ref_field = f"{field}_ref"
+                    # if we have a list of refs handle that case, otherwise single value
+                    if isinstance(rec.get(id_field, None), list):
+                        new_refs = []
+                        for rid in rec[id_field]:
+                            #Note: In this case we may have a mix of null and not null, but always add to keep indices aligned with id field
+                            new_ref = id_to_ref.get(rid, None)
+                            new_refs.append(new_ref)
+                        rec[ref_field] = new_refs
+                        rec_updated = True
+                    else:
+                        # Handle single value
+                        new_ref = id_to_ref.get(rec[id_field], None)
+                        if new_ref and id_field in rec:
+                            rec[ref_field] = new_ref
+                            rec_updated = True
+                if rec_updated:
+                    #recalculate hash since we changed the record
+                    rec['hash'] = self.calculate_hash(rec)
+                #now lookup in cache again and compare hash
+                cached_record = self.pipeline.cacher("clickhouse").lookup(self.table, rec['id'])
+                if self.force_update or not cached_record or cached_record['hash'] != rec['hash']:
+                    new_formatted_records.append(rec)
+                else:
+                    self.logger.debug(f"Record {rec['id']} unchanged after self-ref update, skipping")
+            # Finally set records - self-refs create a lot of work :) 
+            formatted_records = new_formatted_records
+
+        return formatted_records
+
+    def calculate_hash(self, record: dict) -> str:
+        #clear out existing hash if present
+        if 'hash' in record:
+            del record['hash']
+        if 'ref' in record:
+            #if already has ref, make a copy and remove to avoid modifying original
+            record = record.copy()
+            del record['ref']
+        #convert to json, sort keys, and get md5 hash
+        record_json = orjson.dumps(record, option=orjson.OPT_SORT_KEYS).decode('utf-8')
+        return hashlib.md5(record_json.encode('utf-8')).hexdigest()
+
+    def build_single_message(self, value: dict, msg_metadata: dict) -> dict | None:
         # check required fields
         if not self.has_required_fields(value):
             return None
@@ -182,17 +254,16 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         formatted_record.update(self.build_metadata_fields(value))
 
         # Calculate hash - do after building full record so any refs or other changes in hash
-        # convert record to json, sort keys, and get md5 hash
-        record_json = orjson.dumps(formatted_record, option=orjson.OPT_SORT_KEYS).decode('utf-8')
-        record_md5 = hashlib.md5(record_json.encode('utf-8')).hexdigest()
+        record_md5 = self.calculate_hash(formatted_record)
 
         #determine ref and if we need new record
         ref = "{}__v1".format(id)
         cached_record = self.pipeline.cacher("clickhouse").lookup(self.table, id)
-        if not self.force_update and cached_record and cached_record['hash'] == record_md5:
+        # if it has refs that point at itself, we need to build everything and then make decision later once we have updated all the refs
+        if not self.force_update and cached_record and cached_record['hash'] == record_md5 and not self.self_ref_fields:
             self.logger.debug(f"Record {id} unchanged, skipping")
             return None
-        elif cached_record:
+        elif (cached_record and cached_record['hash'] != record_md5) or self.force_update:
             #change so update
             self.logger.info(f"Record {id} changed, updating")
             #get latest version number from end of existing ref suffix ov __v{version_num} which may be multiple digits
@@ -206,12 +277,18 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
                 # If no version found, log a warning and skip
                 self.logger.warning(f"No version found in ref {latest_ref} for record {id}, skipping version increment")
                 return None
+        elif self.self_ref_fields and cached_record and cached_record['hash'] == record_md5:
+            # in this case we need to get the existing ref since we are not changing anything
+            # but we still need to process the record to update self refs
+            new_ref = cached_record.get(self.db_ref_field, '')
+            if new_ref:
+                ref = new_ref
         
         #add hash and ref to record
         formatted_record['ref'] = ref
         formatted_record['hash'] = record_md5
 
-        return [formatted_record]
+        return formatted_record
     
     def format_float_fields(self, formatted_record: dict) -> dict:
         """Format specified fields in formatted_record as floats if possible"""
@@ -249,14 +326,12 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
 
     def build_metadata_fields(self, value: dict) -> dict:
         """Grabs values from column defs. Override in child class to extract additional fields from value"""
-        value_data = value.get('data', {})
-
         #load values from data
         formatted_record = {}
         for field in self.column_defs:
             if not field[2] or field[0] in ['id', 'ref', 'hash']:
                 continue
-            formatted_record[field[0]] = value_data.get(field[0], None)
+            formatted_record[field[0]] = value.get(field[0], None)
 
         # handle ext
         if formatted_record['ext'] is None:

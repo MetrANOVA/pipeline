@@ -21,8 +21,9 @@ class CircuitMetadataProcessor(BaseMetadataProcessor):
             ['parent_circuit_id', 'LowCardinality(Nullable(String))', True],
             ['parent_circuit_ref', 'Nullable(String)', True]
         ])
-        self.val_id_field = ['data', 'id']
-        self.required_fields = [ ['data', 'id'], ['data', 'endpoint_id'], ['data', 'endpoint_type'] ]
+        self.val_id_field = ['id']
+        self.required_fields = [['id'], ['endpoint_id'], ['endpoint_type']]
+        self.self_ref_fields = ['parent_circuit']
 
     def build_metadata_fields(self, value: dict) -> dict:
         # Call parent to build initial record

@@ -30,26 +30,6 @@ class ScienceRegistryProcessor(BaseMetadataProcessor):
             ["addresses"]
         ]
 
-    def build_message(self, value: dict, msg_metadata: dict) -> list[dict]:
-        # Get a JSON list so need to iterate and then call super().build_message for each record
-        if not value or not value.get("data", None):
-            return []
-        
-        # check if value["data"] is a list
-        if not isinstance(value["data"], list):
-            self.logger.warning("Expected 'data' to be a list, got %s", type(value["data"]))
-            return []
-        
-        #iterate through each record in value["data"]
-        records = []
-        for record in value["data"]:
-            formatted_records = super().build_message(record, msg_metadata)
-            self.logger.debug(f"Formatted record: {formatted_records}")
-            if formatted_records:
-                records.extend(formatted_records)
-
-        return records
-
     def build_metadata_fields(self, value: dict) -> dict | None:
         #iterate over strings in value['addresses'] and build a new list of tuples where first element is IP address and second is prefix length.
         ip_subnets = []

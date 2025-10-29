@@ -27,8 +27,8 @@ class IPMetadataProcessor(BaseMetadataProcessor):
             ['as_id', 'Nullable(UInt32)', True],
             ['as_ref', 'Nullable(String)', True]
         ])
-        self.val_id_field = ['data', 'id']
-        self.required_fields = [ ['data', 'id'], ['data', 'ip_subnet'] ]
+        self.val_id_field = ['id']
+        self.required_fields = [['id'], ['ip_subnet']]
 
     def build_metadata_fields(self, value: dict) -> dict:
         # Call parent to build initial record

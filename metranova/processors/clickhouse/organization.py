@@ -24,5 +24,5 @@ class OrganizationMetadataProcessor(BaseMetadataProcessor):
             ['latitude', 'Nullable(Float64)', True],
             ['longitude', 'Nullable(Float64)', True]
         ])
-        self.val_id_field = ['data', 'id']
-        self.required_fields = [ ['data', 'id'], ['data', 'name'] ]
+        self.val_id_field = ['id']
+        self.required_fields = [['id'], ['name']]

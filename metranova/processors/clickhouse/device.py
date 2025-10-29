@@ -35,5 +35,5 @@ class DeviceMetadataProcessor(BaseMetadataProcessor):
             ['role', 'LowCardinality(Nullable(String))', True],
             ['state', 'LowCardinality(Nullable(String))', True]
         ])
-        self.val_id_field = ['data', 'id']
-        self.required_fields = [ ['data', 'id'], ['data', 'type'] ]
+        self.val_id_field = ['id']
+        self.required_fields = [['id'], ['type']]

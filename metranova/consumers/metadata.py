@@ -23,9 +23,7 @@ class YAMLFileConsumer(YAMLFileConsumer):
         if table is None:
             self.logger.error(f"No table found in file: {file_path}")
             return
-        metadata = data.get('data', [])
-        for record in metadata:
-            self.pipeline.process_message({'table': table, 'data': record})
+        self.pipeline.process_message({'table': table, 'data': data.get('data', [])})
 
 class CAIDAOrgASConsumer(TimedIntervalConsumer):
     """Consumer to load CAIDA AS to Org mapping and PeeringDB data from files and format as meta_organization metadata and meta_as data"""
@@ -194,17 +192,18 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
                     except Exception as e:
                         self.logger.error(f"Error looking up subdivision name for code {current_org['country_code']}-{current_org['state']}: {e}")
         
+        #TODO: Handle custom additions from YAML
+        #TODO: reorganize into smaller functions
+        #TODO: Add a way to flush writers and wait for completion instead of fixed sleep
+
         #now emit organization messages
-        for org_data in org_objs.values():
-            self.pipeline.process_message({'table': self.org_table, 'data': org_data})
+        self.pipeline.process_message({'table': self.org_table, 'data': list(org_objs.values())})
         
         #wait to emit AS messages until after organization messages so that any foreign key references to organization_id will resolve
-        #TODO: A better way to handle this would be to have the pipeline support dependencies between messages or tables
         self.logger.info("Waiting 10 seconds before emitting AS messages to allow organization metadata to be processed first...")
         time.sleep(10)
         #prime clickhouse cacher for organization metadata to avoid foreign key issues
         self.pipeline.cacher("clickhouse").prime()
 
         #now emit as messages
-        for as_data in as_objs.values():
-            self.pipeline.process_message({'table': self.as_table, 'data': as_data})
+        self.pipeline.process_message({'table': self.as_table, 'data': list(as_objs.values())})

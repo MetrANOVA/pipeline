@@ -39,13 +39,13 @@ class InterfaceMetadataProcessor(BaseMetadataProcessor):
             ['remote_organization_id', 'LowCardinality(Nullable(String))', True],
             ['remote_organization_ref', 'Nullable(String)', True]
         ])
-        self.val_id_field = ['data', 'id']
-        self.required_fields = [ ['data', 'id'], ['data', 'device_id'], ['data', 'name'], ['data', 'type'] ]
+        self.val_id_field = ['id']
+        self.required_fields = [['id'], ['device_id'], ['name'], ['type']]
+        self.self_ref_fields = ['port_interface', 'remote_interface', 'lag_member_interface']
 
     def build_metadata_fields(self, value: dict) -> dict:
         # Call parent to build initial record
         formatted_record = super().build_metadata_fields(value)
-        value_data = value.get('data', {})
 
         # lookup ref fields from redis cacher
         ref_fields = [
@@ -56,7 +56,7 @@ class InterfaceMetadataProcessor(BaseMetadataProcessor):
             ('remote_organization', 'organization')
         ]
         for ref_field, cacher_table in ref_fields:
-            ref_id = value_data.get(f'{ref_field}_id', None)
+            ref_id = formatted_record.get(f'{ref_field}_id', None)
             cached_info = self.pipeline.cacher("clickhouse").lookup(f"meta_{cacher_table}", ref_id)
             if cached_info:
                 formatted_record[f"{ref_field}_ref"] = cached_info.get(self.db_ref_field, None)

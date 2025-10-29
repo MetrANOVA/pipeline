@@ -15,7 +15,7 @@ data:
   # Main circuit connecting interfaces
   - id: losa-sfo-1553
     type: routed
-    description: Circuit Los Angeles SE-1553 to San Francisco
+    description: Circuit Los Angeles SE-1553 to San Francisco,CA
     state: active
     endpoint_type:
       - interface

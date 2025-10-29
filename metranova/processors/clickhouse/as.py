@@ -32,8 +32,8 @@ class ASMetadataProcessor(BaseMetadataProcessor):
         }
         # determine columns to use from environment
         self.extension_defs['ext'] = self.get_extension_defs('CLICKHOUSE_AS_METADATA_EXTENSIONS', extension_options)
-        self.val_id_field = ['data', 'id']
-        self.required_fields = [ ['data', 'id'], ['data', 'name'], ['data', 'organization_id'] ]
+        self.val_id_field = ['id']
+        self.required_fields = [['id'], ['name'], ['organization_id']]
 
     def build_metadata_fields(self, value: dict) -> dict:
         # Call parent to build initial record
