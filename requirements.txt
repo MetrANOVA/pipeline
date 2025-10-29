@@ -21,3 +21,6 @@ PyYAML==6.0.3
 
 #pycountry for country codes
 pycountry==24.6.1
+
+# pycountry-convert for continents
+pycountry-convert==0.7.2

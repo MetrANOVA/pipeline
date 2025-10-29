@@ -4,6 +4,7 @@ import logging
 import time
 import orjson
 import pycountry
+import pycountry_convert
 import os
 
 import yaml
@@ -46,12 +47,27 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
     
     def _lookup_country_name(self, country_code):
         """Helper function to lookup country name from country code"""
+        if not country_code:
+            return None
         try:
             country = pycountry.countries.get(alpha_2=country_code)
             return country.name if country else None
         except Exception as e:
-            self.logger.error(f"Error looking up country name for code {country_code}: {e}")
+            self.logger.debug(f"Error looking up country name for code {country_code}: {e}")
             return None
+
+    def _lookup_continent_name(self, country_code):
+        """Helper function to lookup continent name from country code"""
+        if not country_code:
+            return None
+        continent_name = None
+        try:
+            continent_code = pycountry_convert.country_alpha2_to_continent_code(country_code)
+            continent_name = pycountry_convert.convert_continent_code_to_continent_name(continent_code)
+        except Exception as e:
+            self.logger.debug(f"Error looking up continent name for country code {country_code}: {e}")
+        
+        return continent_name
 
     def _lookup_subdivision_name(self, country_code, subdivision_code):
         """Helper function to lookup subdivision name from country and subdivision codes"""
@@ -82,6 +98,9 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
                             country_name = self._lookup_country_name(line_json['country'])
                             if country_name:
                                 org_objs[org_id]['country_name'] = country_name
+                            continent_name = self._lookup_continent_name(line_json['country'])
+                            if continent_name:
+                                org_objs[org_id]['continent_name'] = continent_name
                     elif line_json.get('type') == 'ASN':
                         if line_json.get('asn', None) is None or line_json.get('organizationId', None) is None or line_json.get('name', None) is None:
                             continue
@@ -167,7 +186,10 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
                         country_name = self._lookup_country_name(peeringdb_org_objs[org_id]['country'])
                         if country_name:
                             org_objs[org_id]['country_name'] = country_name
-            
+                        continent_name = self._lookup_continent_name(peeringdb_org_objs[org_id]['country'])
+                        if continent_name:
+                            org_objs[org_id]['continent_name'] = continent_name
+
             # Update AS with PeeringDB data
             if "PeeringDB" not in as_objs[as_id]['ext']['data_source']:
                 as_objs[as_id]['ext']['data_source'].append("PeeringDB")
@@ -198,6 +220,9 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
                     country_name = self._lookup_country_name(peeringdb_org_objs[org_id]['country'])
                     if country_name:
                         current_org['country_name'] = country_name
+                    continent_name = self._lookup_continent_name(peeringdb_org_objs[org_id]['country'])
+                    if continent_name:
+                        current_org['continent_name'] = continent_name
                 if not current_org.get('latitude', None):
                     current_org['latitude'] = peeringdb_org_objs[org_id].get('latitude', None)
                 if not current_org.get('longitude', None):
