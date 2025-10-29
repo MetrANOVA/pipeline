@@ -99,6 +99,21 @@ services:
       - ./caches:/app/caches:ro
     restart: always
 
+  metadata_ip_geo_pipeline:
+    image: metranova/pipeline:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PIPELINE_TYPE=metadata_ip_geo
+      - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_AS_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}
+      - CLICKHOUSE_PROCESSORS=${PIPELINE_METADATA_IP_GEO_CLICKHOUSE_PROCESSORS}
+    env_file:
+      - .env
+    volumes:
+      - ./caches:/app/caches:ro
+    restart: always
+
   scireg_pipeline:
     image: metranova/pipeline:latest
     build:
