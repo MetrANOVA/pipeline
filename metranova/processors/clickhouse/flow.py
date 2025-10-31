@@ -11,7 +11,10 @@ class BaseFlowProcessor(BaseDataProcessor):
         self.table = os.getenv('CLICKHOUSE_FLOW_TABLE', 'data_flow')
         self.flow_type = os.getenv('CLICKHOUSE_FLOW_TYPE', 'unknown')
         self.policy_auto_scopes = os.getenv('CLICKHOUSE_FLOW_POLICY_AUTO_SCOPES', 'true').lower() in ('true', '1', 'yes')
-
+        #A comma separated list of key-value pairs in form key:value, mapping a community id (such as a l3vpn rd) to a scope string
+        policy_community_scope_map_str = os.getenv('CLICKHOUSE_FLOW_POLICY_COMMUNITY_SCOPE_MAP', None)
+        # Parse the community scope map into a dictionary
+        self.policy_community_scope_map = self.parse_env_map_list(policy_community_scope_map_str)
         # add time fields to front of column names
         self.column_defs.insert(0, ["start_time", "DateTime64(3, 'UTC')", True])
         self.column_defs.insert(1, ["end_time", "DateTime64(3, 'UTC')", True])
@@ -75,3 +78,13 @@ class BaseFlowProcessor(BaseDataProcessor):
         # set additional table settings
         self.partition_by = "toYYYYMMDD(start_time)"
         self.order_by = ["src_as_id", "dst_as_id", "src_ip", "dst_ip", "start_time"]
+
+    def parse_env_map_list(self, map_list_str: str | None) -> Dict[str, str]:
+        result = {}
+        if map_list_str:
+            pairs = map_list_str.split(',')
+            for pair in pairs:
+                if ':' in pair:
+                    key, value = pair.split(':', 1)
+                    result[key.strip()] = value.strip()
+        return result

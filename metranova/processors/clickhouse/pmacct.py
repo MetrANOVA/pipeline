@@ -132,25 +132,27 @@ class NFAcctdFlowProcessor(BaseFlowProcessor):
         if not self.has_required_fields(value):
             return None
 
-        # todo: map to device id
-        device_id = value.get("peer_ip_src", None)  
-        
-        #todo: map to in and out interface ids as strings
-        interface_in_id = str(value.get("iface_in"))
-        interface_out_id = str(value.get("iface_out"))
-        #todo : uncomment this when we have reliable device_id mapping
-        # interface_in_index = str(value.get("iface_in"))
-        # interface_in_id = self.pipeline.cacher("redis").lookup("meta_interface__device_id__flow_index", "{}:{}".format(device_id, interface_in_index))
-        # interface_out_index = str(value.get("iface_out"))
-        # interface_out_id = self.pipeline.cacher("redis").lookup("meta_interface__device_id__flow_index", "{}:{}".format(device_id, interface_out_index))
-        
+        # Lookup device id based on IP address
+        device_id = self.pipeline.cacher("redis").lookup("meta_device__@loopback_ip", value.get("peer_ip_src", None))
+        if not device_id:
+            device_id = value.get("peer_ip_src", "unknown")
+
+        #map to in and out interface ids as strings
+        interface_in_id = None
+        interface_out_id = None
+        if value.get("iface_in", None):
+            interface_in_id = self.pipeline.cacher("redis").lookup("meta_interface__device_id__flow_index", "{}:{}".format(device_id, str(value["iface_in"])))
+        if value.get("iface_out", None):
+            interface_out_id = self.pipeline.cacher("redis").lookup("meta_interface__device_id__flow_index", "{}:{}".format(device_id, str(value["iface_out"])))
+
         # todo: determine application port - use dst port if available, else src port
         application_port = value.get("port_dst", None)
         if application_port is None:
             application_port = value.get("port_src", None)
 
-        # todo: all the ref lookups
-        
+        # todo: for any asns that are 0 but have an ip, lookup the asn from the ip
+        # todo: enable extensions like scireg based on env var
+
         # determine ip version - use quick method based on presence of ':' in ip address
         ip_version = 4
         if ':' in value["ip_src"]:
@@ -229,7 +231,11 @@ class NFAcctdFlowProcessor(BaseFlowProcessor):
                 scopes.add(f"as:{formatted_record['src_as_id']}")
             if formatted_record["dst_as_id"]:
                 scopes.add(f"as:{formatted_record['dst_as_id']}")
-            #todo: handle community based scopes when we have vrtr_name
+            if ext.get("mpls_vpn_rd", None) and ":" in ext["mpls_vpn_rd"]:
+                #split rd into parts by colon and grab the last part
+                rd_key = ext["mpls_vpn_rd"].split(":")[-1]
+                if rd_key in self.policy_community_scope_map:
+                    scopes.add(f"comm:{self.policy_community_scope_map[rd_key]}")
         formatted_record["policy_scope"].extend(list(scopes))
 
         # expects a list returned (there are cases that aren;t this where you produce multiple records)

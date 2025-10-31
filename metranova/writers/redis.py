@@ -1,5 +1,7 @@
+
 import logging
 import time
+from ipaddress import IPv6Address
 from typing import List, Optional, Dict
 from metranova.connectors.redis import RedisConnector
 from metranova.processors.base import BaseProcessor
@@ -91,6 +93,9 @@ class RedisMetadataRefWriter(BaseRedisWriter):
                     for latest_field in row[2:]:
                         if latest_field is None:
                             continue
+                        #if latest field is an IPv6Address, make it is not a mapped IPv4 address (i.e. starts with ::ffff:)
+                        if isinstance(latest_field, IPv6Address) and latest_field.ipv4_mapped:
+                            latest_field = str(latest_field.ipv4_mapped)
                         redis_key += f":{latest_field}"
                     pipe.set(redis_key, latest_id)
                 else:

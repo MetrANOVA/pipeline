@@ -47,17 +47,38 @@ class MetadataClickHouseConsumer(BaseClickHouseConsumer):
             logger.warning("CLICKHOUSE_CONSUMER_TABLES environment variable is empty")
 
     def build_query(self, table: str) -> str:
-        """Build the metadata query for a specific table"""
+        """Build the metadata query for a specific table
+        Example table formats:
+        - meta_device - Grabs id and ref only
+        - meta_interface:device_id:flow_index - Grabs id, ref, device_id and flow_index
+        - meta_interface:@loopback_ip - Grabs the array field loopback_ip and expands it via ARRAY JOIN
+        """
         (table_name, *fields) = table.split(':') if ':' in table else (table, None)
         query = "SELECT argMax(id, insert_time) as latest_id,argMax(ref, insert_time) as latest_ref"
+        array_joins = []
+        latest_fields = ["latest_id", "latest_ref"]
+        for field in fields:
+            if field is None:
+                continue
+            if field.startswith('@'):
+                array_field = field[1:]
+                latest_field = f"latest_{array_field}"
+                latest_fields.append(latest_field)
+                array_joins.append(latest_field)
+                query += f", argMax({array_field}, insert_time) as {latest_field}"
+            else:
+                latest_field = f"latest_{field}"
+                latest_fields.append(latest_field)
+                query += f", argMax({field}, insert_time) as {latest_field}"
+        query += f" FROM {table_name} "
+        query += "WHERE id IS NOT NULL AND ref IS NOT NULL"
         for field in fields:
             if field is not None:
-                query += f", argMax({field}, insert_time) as latest_{field}"
-        query += f" FROM {table_name} WHERE id IS NOT NULL AND ref IS NOT NULL"
-        for field in fields:
-            if field is not None:
-                query += f" AND {field} IS NOT NULL"
+                query += f" AND {field.lstrip('@')} IS NOT NULL"
         query += " GROUP BY id ORDER BY id"
+        if len(array_joins) > 0:
+            query = "SELECT " + ", ".join(latest_fields) + f" FROM ({query}) ARRAY JOIN " + ", ".join(array_joins)
+
         return query
 
     def query_table(self, table: str) -> dict:
