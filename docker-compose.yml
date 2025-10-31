@@ -116,7 +116,7 @@ services:
       - .env
     restart: always
 
-  cache_pipeline_clickhouse:
+  cache_pipeline_redis:
     image: metranova/pipeline:latest
     build:
       context: .
@@ -124,6 +124,7 @@ services:
     environment:
       - PIPELINE_TYPE=metadata_import
       - CLICKHOUSE_CONSUMER_TABLES=${METADATA_IMPORT_CLICKHOUSE_CONSUMER_TABLES}
+      - CLICKHOUSE_CONSUMER_UPDATE_INTERVAL=${REDIS_CACHE_CLICKHOUSE_CONSUMER_UPDATE_INTERVAL}
     env_file:
       - .env
     restart: always
@@ -137,6 +138,7 @@ services:
       - PIPELINE_TYPE=ip_metadata_import
       - CLICKHOUSE_CONSUMER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}:as_id
       - FILE_PROCESSORS=metranova.processors.file.base.IPTriePickleFileProcessor
+      - CLICKHOUSE_CONSUMER_UPDATE_INTERVAL=${IP_TRIE_CACHE_CLICKHOUSE_CONSUMER_UPDATE_INTERVAL}
     env_file:
       - .env
     volumes:
