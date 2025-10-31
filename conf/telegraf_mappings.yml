@@ -4,6 +4,7 @@ snmp_if:
     - name: ifindex_to_ifname
       key:
         - type: field
+          format: short_hostname
           path:
             - tags
             - device
@@ -23,6 +24,7 @@ snmp_timetra_vrtr:
     - name: vrtrifindex_to_ifname
       key:
         - type: field
+          format: short_hostname
           path:
             - tags
             - device
@@ -38,6 +40,7 @@ snmp_timetra_vrtr:
     - name: sapindex_to_ifname
       key:
         - type: field
+          format: short_hostname
           path:
             - tags
             - device
@@ -65,6 +68,7 @@ snmp_timetra_sap:
     - name: sapindex_to_sapname
       key:
         - type: field
+          format: short_hostname
           path:
             - tags
             - device
@@ -85,6 +89,7 @@ snmp_timetra_lag:
     - name: lagindex_to_ifindex
       key:
         - type: field
+          format: short_hostname
           path:
             - tags
             - device

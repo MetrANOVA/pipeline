@@ -80,6 +80,15 @@ class LookupTableProcessor(BaseRedisProcessor):
                 
         return False
     
+    def format_value(self, value: str, format_type: str | None) -> str:
+        """Format value based on specified format type."""
+        if format_type is None:
+            return value
+        if format_type == 'short_hostname':
+            return value.split('.')[0]
+        # Future: implement more formats as needed
+        return value
+
     def build_message(self, value: dict, msg_metadata: dict) -> list[dict]:
         """Build lookup table entries from the message."""
         if not self.has_required_fields(value):
@@ -106,7 +115,7 @@ class LookupTableProcessor(BaseRedisProcessor):
                     path = key_config.get('path', [])
                     field_value = self._get_field_value(value, path)
                     if field_value is not None:
-                        key_parts.append(str(field_value))
+                        key_parts.append(self.format_value(str(field_value), key_config.get('format', None)))
                     else:
                         # If any key part is missing, skip this builder
                         break
@@ -118,18 +127,12 @@ class LookupTableProcessor(BaseRedisProcessor):
                     path = value_config.get('path', [])
                     lookup_value = self._get_field_value(value, path)
                     
-                    # Handle format if specified (placeholder for future functionality)
-                    # format_type = value_config.get('format')
-                    # if format_type and lookup_value is not None:
-                    #     # Future: implement format handling here
-                    #     pass
-                
                 if lookup_value is not None:
                     # Create the lookup table entry
                     formatted_record = {
                         "table": table_name,
                         "key": "::".join(key_parts),
-                        "value": str(lookup_value),
+                        "value": self.format_value(str(lookup_value), value_config.get('format', None)),
                         "expires": getattr(self, 'expires', None)
                     }
                     results.append(formatted_record)

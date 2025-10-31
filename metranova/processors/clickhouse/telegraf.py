@@ -11,6 +11,7 @@ class IFMIBInterfaceTrafficProcessor(BaseInterfaceTrafficProcessor):
         self.logger = logger
         self.telegraf_name = os.getenv('TELEGRAF_IFMIB_NAME', 'snmp_if')
         self.ifname_lookup_table = os.getenv('TELEGRAF_IFMIB_IFNAME_LOOKUP_TABLE', 'ifindex_to_ifname')
+        self.use_short_device_name = os.getenv('TELEGRAF_IFMIB_USE_SHORT_DEVICE_NAME', 'true').lower() in ('true', '1', 'yes')
         self.match_fields = [
             ["name"], 
             ["timestamp"],
@@ -74,6 +75,8 @@ class IFMIBInterfaceTrafficProcessor(BaseInterfaceTrafficProcessor):
         if device is None or oid_index is None:
             self.logger.warning("Missing device or oidIndex in tags")
             return None
+        if self.use_short_device_name:
+            device = str(device).split('.')[0]
         interface_name = self.pipeline.cacher("redis").lookup(self.ifname_lookup_table, f"{device}::{oid_index}")
         if interface_name is None:
             self.logger.debug(f"Interface name not found for device {device} and oidIndex {oid_index}")
