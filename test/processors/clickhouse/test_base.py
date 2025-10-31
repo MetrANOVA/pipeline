@@ -142,6 +142,90 @@ class TestBaseMetadataProcessor(unittest.TestCase):
         # Check for partition clause
         self.assertIn("PARTITION BY toYYYYMM(insert_time)", result)
 
+    def test_create_table_command_with_ttl(self):
+        """Test create_table_command with TTL defined."""
+        
+        # Set TTL
+        self.processor.table_ttl = "30 DAY"
+        self.processor.table_ttl_column = "insert_time"
+        
+        # Call the method
+        result = self.processor.create_table_command()
+        
+        # Print the result for inspection
+        print("\n" + "="*80)
+        print("CREATE TABLE COMMAND OUTPUT (With TTL):")
+        print("="*80)
+        print(result)
+        print("="*80)
+        
+        # Check for TTL clause and settings
+        self.assertIn("TTL insert_time + INTERVAL 30 DAY", result)
+        self.assertIn("ttl_only_drop_parts = 1", result)
+
+    def test_create_table_command_with_ttl_missing_column(self):
+        """Test create_table_command with TTL defined but missing TTL column."""
+        
+        # Set TTL but not TTL column
+        self.processor.table_ttl = "30 DAY"
+        self.processor.table_ttl_column = None
+        
+        # Call the method
+        result = self.processor.create_table_command()
+        
+        # Should not include TTL clause when TTL column is missing
+        self.assertNotIn("TTL", result)
+        self.assertNotIn("ttl_only_drop_parts", result)
+
+    def test_create_table_command_with_ttl_missing_interval(self):
+        """Test create_table_command with TTL column defined but missing TTL interval."""
+        
+        # Set TTL column but not TTL interval
+        self.processor.table_ttl = None
+        self.processor.table_ttl_column = "insert_time"
+        
+        # Call the method
+        result = self.processor.create_table_command()
+        
+        # Should not include TTL clause when TTL interval is missing
+        self.assertNotIn("TTL", result)
+        self.assertNotIn("ttl_only_drop_parts", result)
+
+    def test_create_table_command_with_all_features(self):
+        """Test create_table_command with all features: partition, TTL, primary keys, and extensions."""
+        
+        # Set all features
+        self.processor.partition_by = "toYYYYMM(insert_time)"
+        self.processor.table_ttl = "90 DAY"
+        self.processor.table_ttl_column = "insert_time"
+        self.processor.primary_keys = ["ref", "id"]
+        self.processor.extension_defs = {
+            "ext": [
+                ["device_type", "String", True],
+                ["location", "String", True]
+            ]
+        }
+        
+        # Call the method
+        result = self.processor.create_table_command()
+        
+        # Print the result for inspection
+        print("\n" + "="*80)
+        print("CREATE TABLE COMMAND OUTPUT (All Features):")
+        print("="*80)
+        print(result)
+        print("="*80)
+        
+        # Check for all clauses
+        self.assertIn("PARTITION BY toYYYYMM(insert_time)", result)
+        self.assertIn("PRIMARY KEY (`ref`,`id`)", result)
+        self.assertIn("ORDER BY (`ref`,`id`,`insert_time`)", result)
+        self.assertIn("TTL insert_time + INTERVAL 90 DAY", result)
+        self.assertIn("ttl_only_drop_parts = 1", result)
+        self.assertIn("`ext` JSON(", result)
+        self.assertIn("`device_type` String", result)
+        self.assertIn("`location` String", result)
+
     def test_create_table_command_validation_errors(self):
         """Test that create_table_command raises appropriate errors for invalid configurations."""
         

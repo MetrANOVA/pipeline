@@ -244,6 +244,101 @@ class TestBaseFlowProcessor(unittest.TestCase):
         self.assertIn("CREATE TABLE IF NOT EXISTS custom_flow_table", result)
         self.assertNotIn("CREATE TABLE IF NOT EXISTS data_flow", result)
 
+    @patch.dict(os.environ, {'CLICKHOUSE_FLOW_PARTITION_BY': 'toYYYYMM(start_time)'})
+    def test_create_table_command_with_custom_partition(self):
+        """Test the create_table_command method with custom partition configuration."""
+        
+        # Create an instance of BaseFlowProcessor
+        processor = BaseFlowProcessor(self.mock_pipeline)
+        
+        # Call the method
+        result = processor.create_table_command()
+        
+        # Print the result for inspection
+        print("\n" + "="*80)
+        print("CREATE TABLE COMMAND OUTPUT (BaseFlowProcessor - Custom Partition):")
+        print("="*80)
+        print(result)
+        print("="*80)
+        
+        # Check for the custom partition
+        self.assertIn("PARTITION BY toYYYYMM(start_time)", result)
+
+    @patch.dict(os.environ, {'CLICKHOUSE_FLOW_TTL': '60 DAY', 'CLICKHOUSE_FLOW_TTL_COLUMN': 'end_time'})
+    def test_create_table_command_with_ttl(self):
+        """Test the create_table_command method with TTL configuration."""
+        
+        # Create an instance of BaseFlowProcessor
+        processor = BaseFlowProcessor(self.mock_pipeline)
+        
+        # Call the method
+        result = processor.create_table_command()
+        
+        # Print the result for inspection
+        print("\n" + "="*80)
+        print("CREATE TABLE COMMAND OUTPUT (BaseFlowProcessor - TTL):")
+        print("="*80)
+        print(result)
+        print("="*80)
+        
+        # Check for TTL clause and settings
+        self.assertIn("TTL end_time + INTERVAL 60 DAY", result)
+        self.assertIn("ttl_only_drop_parts = 1", result)
+
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_FLOW_TABLE': 'custom_flow_data',
+        'CLICKHOUSE_FLOW_PARTITION_BY': 'toYYYYMMDD(end_time)',
+        'CLICKHOUSE_FLOW_TTL': '180 DAY',
+        'CLICKHOUSE_FLOW_TTL_COLUMN': 'start_time',
+        'CLICKHOUSE_FLOW_EXTENSIONS': 'bgp,mpls'
+    })
+    def test_create_table_command_comprehensive_configuration(self):
+        """Test the create_table_command method with comprehensive custom configuration."""
+        
+        # Create an instance of BaseFlowProcessor
+        processor = BaseFlowProcessor(self.mock_pipeline)
+        
+        # Call the method
+        result = processor.create_table_command()
+        
+        # Print the result for inspection
+        print("\n" + "="*80)
+        print("CREATE TABLE COMMAND OUTPUT (BaseFlowProcessor - Comprehensive):")
+        print("="*80)
+        print(result)
+        print("="*80)
+        
+        # Check for all custom configurations
+        self.assertIn("CREATE TABLE IF NOT EXISTS custom_flow_data", result)
+        self.assertIn("PARTITION BY toYYYYMMDD(end_time)", result)
+        self.assertIn("TTL start_time + INTERVAL 180 DAY", result)
+        self.assertIn("ttl_only_drop_parts = 1", result)
+        
+        # Check for BGP extensions
+        self.assertIn("`bgp_as_path_id` Array(UInt32)", result)
+        self.assertIn("`bgp_community` Array(LowCardinality(String))", result)
+        
+        # Check for MPLS extensions
+        self.assertIn("`mpls_labels` Array(UInt32)", result)
+        self.assertIn("`mpls_vpn_rd` LowCardinality(Nullable(String))", result)
+
+    def test_default_configuration_values(self):
+        """Test that the processor has correct default values."""
+        
+        # Create an instance of BaseFlowProcessor with no environment overrides
+        processor = BaseFlowProcessor(self.mock_pipeline)
+        
+        # Check default values
+        self.assertEqual(processor.table, 'data_flow')
+        self.assertEqual(processor.partition_by, 'toYYYYMMDD(start_time)')
+        self.assertEqual(processor.table_ttl, '30 DAY')
+        self.assertEqual(processor.table_ttl_column, 'start_time')
+        self.assertEqual(processor.flow_type, 'unknown')
+        
+        # Check that order_by is properly set
+        expected_order_by = ["src_as_id", "dst_as_id", "src_ip", "dst_ip", "start_time"]
+        self.assertEqual(processor.order_by, expected_order_by)
+
 if __name__ == '__main__':
     # Run tests with verbose output
     unittest.main(verbosity=2)

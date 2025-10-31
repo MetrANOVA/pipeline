@@ -560,6 +560,85 @@ class TestBaseInterfaceTrafficProcessor(unittest.TestCase):
         # The exact required fields depend on the base class implementation
         self.assertIsInstance(processor.required_fields, list)
 
+    @patch.dict(os.environ, {'CLICKHOUSE_IF_TRAFFIC_PARTITION_BY': 'toYYYYMM(start_time)'})
+    def test_create_table_command_with_custom_partition(self):
+        """Test create_table_command with custom partition configuration."""
+        
+        processor = BaseInterfaceTrafficProcessor(self.mock_pipeline)
+        
+        result = processor.create_table_command()
+        
+        print("\n" + "="*80)
+        print("CREATE TABLE COMMAND OUTPUT (BaseInterfaceTrafficProcessor - Custom Partition):")
+        print("="*80)
+        print(result)
+        print("="*80)
+        
+        # Check for custom partition
+        self.assertIn("PARTITION BY toYYYYMM(start_time)", result)
+
+    @patch.dict(os.environ, {'CLICKHOUSE_IF_TRAFFIC_TTL': '60 DAY', 'CLICKHOUSE_IF_TRAFFIC_TTL_COLUMN': 'end_time'})
+    def test_create_table_command_with_ttl(self):
+        """Test create_table_command with TTL configuration."""
+        
+        processor = BaseInterfaceTrafficProcessor(self.mock_pipeline)
+        
+        result = processor.create_table_command()
+        
+        print("\n" + "="*80)
+        print("CREATE TABLE COMMAND OUTPUT (BaseInterfaceTrafficProcessor - TTL):")
+        print("="*80)
+        print(result)
+        print("="*80)
+        
+        # Check for TTL clause and settings
+        self.assertIn("TTL end_time + INTERVAL 60 DAY", result)
+        self.assertIn("ttl_only_drop_parts = 1", result)
+
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_IF_TRAFFIC_TABLE': 'custom_interface_metrics',
+        'CLICKHOUSE_IF_TRAFFIC_PARTITION_BY': 'toYYYYMMDD(end_time)',
+        'CLICKHOUSE_IF_TRAFFIC_TTL': '365 DAY',
+        'CLICKHOUSE_IF_TRAFFIC_TTL_COLUMN': 'start_time'
+    })
+    def test_create_table_command_comprehensive_configuration(self):
+        """Test create_table_command with comprehensive custom configuration."""
+        
+        processor = BaseInterfaceTrafficProcessor(self.mock_pipeline)
+        
+        result = processor.create_table_command()
+        
+        print("\n" + "="*80)
+        print("CREATE TABLE COMMAND OUTPUT (BaseInterfaceTrafficProcessor - Comprehensive):")
+        print("="*80)
+        print(result)
+        print("="*80)
+        
+        # Check for all custom configurations
+        self.assertIn("CREATE TABLE IF NOT EXISTS custom_interface_metrics", result)
+        self.assertIn("PARTITION BY toYYYYMMDD(end_time)", result)
+        self.assertIn("TTL start_time + INTERVAL 365 DAY", result)
+        self.assertIn("ttl_only_drop_parts = 1", result)
+        
+        # Verify CoalescingMergeTree engine is still used
+        self.assertIn("ENGINE = CoalescingMergeTree", result)
+
+    def test_default_configuration_values(self):
+        """Test that the processor has correct default values."""
+        
+        processor = BaseInterfaceTrafficProcessor(self.mock_pipeline)
+        
+        # Check default values
+        self.assertEqual(processor.table, 'data_interface_traffic')
+        self.assertEqual(processor.partition_by, 'toYYYYMMDD(start_time)')
+        self.assertEqual(processor.table_ttl, '180 DAY')
+        self.assertEqual(processor.table_ttl_column, 'start_time')
+        self.assertEqual(processor.table_engine, 'CoalescingMergeTree')
+        
+        # Check that order_by is properly set
+        expected_order_by = ['interface_id', 'policy_level', 'policy_scope', 'policy_originator', 'collector_id', 'start_time']
+        self.assertEqual(processor.order_by, expected_order_by)
+
 
 if __name__ == '__main__':
     # Run tests with verbose output
