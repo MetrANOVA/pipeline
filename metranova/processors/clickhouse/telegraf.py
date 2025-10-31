@@ -20,20 +20,20 @@ class IFMIBInterfaceTrafficProcessor(BaseInterfaceTrafficProcessor):
             ["tags", "oidIndex"]
         ]
         self.metric_fields = {
-            "admin_status": "SNMP_IF-MIB::ifAdminStatus",
-            "oper_status": "SNMP_IF-MIB::ifOperStatus",
-            "in_bcast_packet_count": 'SNMP_IF-MIB::ifHCInBroadcastPkts',
-            "in_mcast_packet_count": 'SNMP_IF-MIB::ifHCInMulticastPkts',
-            "in_bit_count": 'SNMP_IF-MIB::ifHCInOctets',
-            "in_ucast_packet_count": 'SNMP_IF-MIB::ifHCInUcastPkts',
-            "out_bcast_packet_count": 'SNMP_IF-MIB::ifHCOutBroadcastPkts',
-            "out_mcast_packet_count": 'SNMP_IF-MIB::ifHCOutMulticastPkts',
-            "out_bit_count": 'SNMP_IF-MIB::ifHCOutOctets',
-            "out_ucast_packet_count": 'SNMP_IF-MIB::ifHCOutUcastPkts',
-            "in_discard_packet_count": 'SNMP_IF-MIB::ifInDiscards',
-            "in_error_packet_count": 'SNMP_IF-MIB::ifInErrors',
-            "out_discard_packet_count": 'SNMP_IF-MIB::ifOutDiscards',
-            "out_error_packet_count": 'SNMP_IF-MIB::ifOutErrors'
+            "admin_status": {"field": "SNMP_IF-MIB::ifAdminStatus"},
+            "oper_status": {"field": "SNMP_IF-MIB::ifOperStatus"},
+            "in_bcast_packet_count": {"field": 'SNMP_IF-MIB::ifHCInBroadcastPkts'},
+            "in_mcast_packet_count": {"field": 'SNMP_IF-MIB::ifHCInMulticastPkts'},
+            "in_bit_count": {"field": 'SNMP_IF-MIB::ifHCInOctets', "scale": 8},
+            "in_ucast_packet_count": {"field": 'SNMP_IF-MIB::ifHCInUcastPkts'},
+            "out_bcast_packet_count": {"field": 'SNMP_IF-MIB::ifHCOutBroadcastPkts'},
+            "out_mcast_packet_count": {"field": 'SNMP_IF-MIB::ifHCOutMulticastPkts'},
+            "out_bit_count": {"field": 'SNMP_IF-MIB::ifHCOutOctets', "scale": 8},
+            "out_ucast_packet_count": {"field": 'SNMP_IF-MIB::ifHCOutUcastPkts'},
+            "in_discard_packet_count": {"field": 'SNMP_IF-MIB::ifInDiscards'},
+            "in_error_packet_count": {"field": 'SNMP_IF-MIB::ifInErrors'},
+            "out_discard_packet_count": {"field": 'SNMP_IF-MIB::ifOutDiscards'},
+            "out_error_packet_count": {"field": 'SNMP_IF-MIB::ifOutErrors'}
         }
 
     def match_message(self, value):
@@ -47,10 +47,21 @@ class IFMIBInterfaceTrafficProcessor(BaseInterfaceTrafficProcessor):
         
         #make sure it has at least one metric field
         for field in self.metric_fields.values():
-            if field in value.get('fields', {}):
+            if value.get('fields', {}).get(field['field'], None) is not None:
                 return True
 
         return False
+
+    def scale_value(self, value, scale):
+        """Scale numeric value by scale factor."""
+        if value is None:
+            return None
+        try:
+            # note if we had float values this would round but only expect ints here
+            return int(value) * scale
+        except (ValueError, TypeError):
+            self.logger.warning(f"Non-numeric value encountered for scaling: {value}")
+            return None
 
     def build_message(self, value: dict, msg_metadata: dict) -> list[dict]:
         # check required fields
@@ -98,8 +109,10 @@ class IFMIBInterfaceTrafficProcessor(BaseInterfaceTrafficProcessor):
             "interface_ref": interface_ref
         }
         #add metric fields - set missing to null and CoalescingMergeTree will handle it
-        for target_name, telegraf_name in self.metric_fields.items():
-            formatted_record[target_name] = value.get("fields", {}).get(telegraf_name, None)
+        for target_name, telegraf_mapping in self.metric_fields.items():
+            formatted_record[target_name] = value.get("fields", {}).get(telegraf_mapping["field"], None)
+            if "scale" in telegraf_mapping:
+                formatted_record[target_name] = self.scale_value(formatted_record[target_name], telegraf_mapping["scale"])
 
         #map admin_status and oper_status to string values
         admin_status_map = {1: 'up', 2: 'down', 3: 'testing'}
