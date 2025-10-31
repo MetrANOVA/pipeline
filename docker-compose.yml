@@ -1,7 +1,8 @@
 version: '3.8'
 
 services:
-  flow_pipeline:
+
+  data_pipeline_flow:
     image: metranova/pipeline:latest
     build:
       context: .
@@ -21,7 +22,7 @@ services:
       mode: replicated
       replicas: 10
   
-  interface_pipeline:
+  data_pipeline_interface:
     image: metranova/pipeline:latest
     build:
       context: .
@@ -41,7 +42,7 @@ services:
       mode: replicated
       replicas: 10
 
-  metadata_redis_export_pipeline:
+  metadata_pipeline_redis_export:
     image: metranova/pipeline:latest
     build:
       context: .
@@ -55,7 +56,7 @@ services:
       - .env
     restart: always
 
-  metadata_file_export_pipeline:
+  metadata_pipeline_file_export:
     image: metranova/pipeline:latest
     build:
       context: .
@@ -71,19 +72,7 @@ services:
       - .env
     restart: always
 
-  metadata_import_pipeline:
-    image: metranova/pipeline:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - PIPELINE_TYPE=metadata_import
-      - CLICKHOUSE_CONSUMER_TABLES=${METADATA_IMPORT_CLICKHOUSE_CONSUMER_TABLES}
-    env_file:
-      - .env
-    restart: always
-  
-  metadata_caida_org_as_pipeline:
+  metadata_pipeline_caida_org_as:
     image: metranova/pipeline:latest
     build:
       context: .
@@ -99,7 +88,7 @@ services:
       - ./caches:/app/caches:ro
     restart: always
 
-  metadata_ip_geo_pipeline:
+  metadata_pipeline_ip_geo:
     image: metranova/pipeline:latest
     build:
       context: .
@@ -114,7 +103,7 @@ services:
       - ./caches:/app/caches:ro
     restart: always
 
-  scireg_pipeline:
+  metadata_pipeline_scireg:
     image: metranova/pipeline:latest
     build:
       context: .
@@ -126,8 +115,20 @@ services:
     env_file:
       - .env
     restart: always
-  
-  ip_metadata_import_pipeline:
+
+  cache_pipeline_clickhouse:
+    image: metranova/pipeline:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PIPELINE_TYPE=metadata_import
+      - CLICKHOUSE_CONSUMER_TABLES=${METADATA_IMPORT_CLICKHOUSE_CONSUMER_TABLES}
+    env_file:
+      - .env
+    restart: always
+
+  cache_pipeline_ip_trie:
     image: metranova/pipeline:latest
     build:
       context: .
@@ -141,26 +142,6 @@ services:
     volumes:
       - ./caches:/app/caches:rw
     restart: always
-
-  sfacctd_pipeline:
-    image: metranova/pipeline:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=${PIPELINE_SFACCTD_CLICKHOUSE_PROCESSORS}
-      - KAFKA_TOPIC=${PIPELINE_SFACCTD_KAFKA_TOPIC}
-      - IP_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}
-    env_file:
-      - .env
-    volumes:
-      - ./certificates:/app/certificates:ro
-      - ./caches:/app/caches:ro
-    restart: always
-    deploy:
-      mode: replicated
-      replicas: 10
 
   redis:
     image: redis:8.2.1
