@@ -127,10 +127,38 @@ class NFAcctdFlowProcessor(BaseFlowProcessor):
         if value.get("mpls_vpn_rd", None):
             ext["mpls_vpn_rd"] = value.get("mpls_vpn_rd")
 
+    def lookup_ip_as_fields(self, ip_field: str, target_ip_field: str, as_field: str, target_as_field: str, value: dict, formatted_record: dict):
+        """ Lookup IP address and AS fields in cache to get associated metadata. If AS not provided, try to get from IP cache."""
+        formatted_record[target_ip_field] = value.get(ip_field, None)
+        as_id_field = f"{target_as_field}_id"
+        formatted_record[as_id_field] = value.get(as_field, None)
+        ip_cache_result = self.pipeline.cacher("ip").lookup("meta_ip", formatted_record[target_ip_field])
+        if ip_cache_result:
+            formatted_record[f"{target_ip_field}_ref"] = ip_cache_result.get("ref", None)
+            #if no AS provided in value (0 or None), see if we have one in the cached result
+            try:
+                if formatted_record[as_id_field] is None or int(formatted_record[as_id_field]) == 0:
+                    formatted_record[as_id_field] = ip_cache_result.get("as_id", None)
+            except ValueError:
+                pass
+        else:
+            formatted_record[f"{target_ip_field}_ref"] = None
+
+        #set the as ref field
+        formatted_record[f"{target_as_field}_ref"] = self.pipeline.cacher("redis").lookup("meta_as", formatted_record[as_id_field])
+
     def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
         # check required fields
         if not self.has_required_fields(value):
             return None
+
+        #Initialize formatted record
+        formatted_record = {}
+
+        #Lookup IPs in cache
+        self.lookup_ip_as_fields("ip_src", "src_ip", "as_src", "src_as", value, formatted_record)
+        self.lookup_ip_as_fields("ip_dst", "dst_ip", "as_dst", "dst_as", value, formatted_record)
+        self.lookup_ip_as_fields("peer_ip_dst", "peer_ip", "peer_as_dst", "peer_as", value, formatted_record)
 
         # Lookup device id based on IP address
         device_id = self.pipeline.cacher("redis").lookup("meta_device__@loopback_ip", value.get("peer_ip_src", None))
@@ -174,9 +202,8 @@ class NFAcctdFlowProcessor(BaseFlowProcessor):
         self.add_mpls_extensions(value, ext)
 
         # Pull the relevant fields from the value dict as needed.
-        # you may also need to do some formattingto make sure theya re the right data type, etc
-        # if you are not sure about something, just set it to None for now
-        formatted_record = { 
+        # you may also need to do some formatting to make sure they are the right data type, etc
+        formatted_record.update({ 
             "start_time": start_time,
             "end_time": end_time,
             "collector_id": value.get("label", "unknown"),
@@ -186,30 +213,18 @@ class NFAcctdFlowProcessor(BaseFlowProcessor):
             "flow_type": self.flow_type,
             "device_id": device_id,
             "device_ref": self.pipeline.cacher("redis").lookup("meta_device", device_id),
-            "src_as_id": value.get("as_src", None),
-            "src_as_ref": self.pipeline.cacher("redis").lookup("meta_as", value.get("as_src", None)),
-            "src_ip": value.get("ip_src", None),
-            "src_ip_ref": self.pipeline.cacher("ip").lookup("meta_ip", value.get("ip_src", None)),
             "src_port": value.get("port_src", None),
-            "dst_as_id":  value.get("as_dst", None),
-            "dst_as_ref": self.pipeline.cacher("redis").lookup("meta_as", value.get("as_dst", None)),
-            "dst_ip": value.get("ip_dst", None),
-            "dst_ip_ref": self.pipeline.cacher("ip").lookup("meta_ip", value.get("ip_dst", None)),
             "dst_port": value.get("port_dst", None),
             "protocol": value.get("ip_proto", None),
             "in_interface_id": interface_in_id,
             "in_interface_ref": self.pipeline.cacher("redis").lookup("meta_interface", interface_in_id),
             "out_interface_id": interface_out_id,
             "out_interface_ref": self.pipeline.cacher("redis").lookup("meta_interface", interface_out_id),
-            "peer_as_id": value.get("peer_as_dst", None),
-            "peer_as_ref": self.pipeline.cacher("redis").lookup("meta_as", value.get("peer_as_dst", None)),
-            "peer_ip": value.get("peer_ip_dst", None),
-            "peer_ip_ref": self.pipeline.cacher("ip").lookup("meta_ip", value.get("peer_ip_dst", None)),
             "ip_version": ip_version,
             "application_port": application_port,
             "bit_count": value.get("bytes", 0),
             "packet_count": value.get("packets", 0),
-        }
+        })
 
         # format integers
         int_fields = ['src_as_id', 'src_port', 'dst_as_id', 'dst_port', 'peer_as_id', 'application_port', 'bit_count', 'packet_count']

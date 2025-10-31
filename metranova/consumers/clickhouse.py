@@ -38,6 +38,7 @@ class MetadataClickHouseConsumer(BaseClickHouseConsumer):
         super().__init__(pipeline)
         self.logger = logger
         self.update_interval = int(os.getenv('CLICKHOUSE_CONSUMER_UPDATE_INTERVAL', -1))
+        self.primary_columns = ['id', 'ref']
         # Load tables from environment variable - can be in format table or table:field[:field...]
         tables_str = os.getenv('CLICKHOUSE_CONSUMER_TABLES', '')
         if tables_str:
@@ -54,9 +55,11 @@ class MetadataClickHouseConsumer(BaseClickHouseConsumer):
         - meta_interface:@loopback_ip - Grabs the array field loopback_ip and expands it via ARRAY JOIN
         """
         (table_name, *fields) = table.split(':') if ':' in table else (table, None)
-        query = "SELECT argMax(id, insert_time) as latest_id,argMax(ref, insert_time) as latest_ref"
+        #query = "SELECT argMax(id, insert_time) as latest_id, argMax(ref, insert_time) as latest_ref"
+        #start building query with self.primary_columns
+        query = "SELECT " + ", ".join([f"argMax({col}, insert_time) as latest_{col}" for col in self.primary_columns])
         array_joins = []
-        latest_fields = ["latest_id", "latest_ref"]
+        latest_fields = [ f"latest_{col}" for col in self.primary_columns ]
         for field in fields:
             if field is None:
                 continue
@@ -102,21 +105,14 @@ class MetadataClickHouseConsumer(BaseClickHouseConsumer):
                 logger.warning(f"No data found in table {table}")
                 return {}
 
-            return {"table": table, "rows": rows}
+            return {"table": table, "column_names": result.column_names, "rows": rows}
             
         except Exception as e:
             logger.error(f"Failed to load metadata from table {table}: {e}")
             raise
 
 class IPMetadataClickHouseConsumer(MetadataClickHouseConsumer):
-    def build_query(self, table: str) -> str:
-        """Build the metadata query for a specific table"""
-        query = f"""
-        SELECT argMax(id, insert_time) as latest_id, 
-               argMax(ref, insert_time) as latest_ref,
-               argMax(ip_subnet, insert_time) as latest_ip_subnet
-        FROM {table} 
-        GROUP BY id
-        ORDER BY id
-        """
-        return query
+    """ClickHouse consumer for loading IP metadata tables"""
+    def __init__(self, pipeline: BasePipeline):
+        super().__init__(pipeline)
+        self.primary_columns.append('ip_subnet')

@@ -134,7 +134,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - PIPELINE_TYPE=ip_metadata_import
-      - CLICKHOUSE_CONSUMER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}
+      - CLICKHOUSE_CONSUMER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}:as_id
       - FILE_PROCESSORS=metranova.processors.file.base.IPTriePickleFileProcessor
     env_file:
       - .env
