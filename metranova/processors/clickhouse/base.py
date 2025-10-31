@@ -19,10 +19,13 @@ class BaseClickHouseProcessor(BaseProcessor):
         self.table_engine = "MergeTree()"
         self.table_granularity = 8192  # default ClickHouse index granularity
         self.extension_columns = {"ext": True}  # default extension column"}
+        self.table_ttl_column = "insert_time"
 
         # Override these in child classes
         # name of table
         self.table = ""
+        self.table_ttl = None
+
         # array of arrays in format [['col_name', 'col_definition', bool_include_in_insert], ...]
         # for extension columns, col_definition is ignored and can be set to None
         self.column_defs = []
@@ -44,6 +47,7 @@ class BaseClickHouseProcessor(BaseProcessor):
         if not self.table_engine:
             raise ValueError("Table engine is not set")
 
+        table_settings = { "index_granularity": self.table_granularity }
         create_table_cmd =  "CREATE TABLE IF NOT EXISTS {} (".format(self.table)
         has_columns = False
         for col_def in self.column_defs:
@@ -76,7 +80,10 @@ class BaseClickHouseProcessor(BaseProcessor):
         if self.order_by:
             #format as `col1`,`col2`,...
             create_table_cmd += "ORDER BY ({}) \n".format(",".join(["`{}`".format(col) for col in self.order_by]))
-        create_table_cmd += "SETTINGS index_granularity = {} \n".format(self.table_granularity)
+        if self.table_ttl and self.table_ttl_column:
+            create_table_cmd += "TTL {} + INTERVAL {} \n".format(self.table_ttl_column, self.table_ttl)
+            table_settings["ttl_only_drop_parts"] = "1"
+        create_table_cmd += "SETTINGS {} \n".format(",".join(["{} = {}".format(k, v) for k, v in sorted(table_settings.items())]))
         return create_table_cmd
 
     def get_extension_defs(self, env_var_name: str, extension_options: dict, json_column_name: str = "ext") -> list:
@@ -125,6 +132,7 @@ class BaseClickHouseProcessor(BaseProcessor):
 class BaseMetadataProcessor(BaseClickHouseProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
+        self.table_ttl = os.getenv('CLICKHOUSE_METADATA_TTL', None)
         self.force_update = os.getenv('CLICKHOUSE_METADATA_FORCE_UPDATE', 'false').lower() in ['true', '1', 'yes']
         self.db_ref_field = 'ref'  # Field in the data to use as the versioned reference
         self.val_id_field = ['id']  # Field in the data to use as the identifier

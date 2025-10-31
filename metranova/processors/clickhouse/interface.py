@@ -87,6 +87,9 @@ class BaseInterfaceTrafficProcessor(BaseDataProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.table = os.getenv('CLICKHOUSE_IF_TRAFFIC_TABLE', 'data_interface_traffic')
+        self.partition_by = os.getenv('CLICKHOUSE_IF_TRAFFIC_PARTITION_BY', 'toYYYYMMDD(start_time)')
+        self.table_ttl = os.getenv('CLICKHOUSE_IF_TRAFFIC_TTL', '180 DAY')
+        self.table_ttl_column = os.getenv('CLICKHOUSE_IF_TRAFFIC_TTL_COLUMN', 'start_time')
         self.column_defs.insert(0, ["start_time", "DateTime('UTC') CODEC(Delta,ZSTD)", True])
         self.column_defs.insert(1, ["end_time", "DateTime('UTC') CODEC(Delta,ZSTD)", True])
         self.column_defs.extend([
@@ -108,5 +111,4 @@ class BaseInterfaceTrafficProcessor(BaseDataProcessor):
             ['out_mcast_packet_count', 'Nullable(UInt64) CODEC(Delta,ZSTD)', True]
         ])
         self.table_engine = "CoalescingMergeTree"
-        self.partition_by = 'toYYYYMMDD(start_time)'
         self.order_by = ['interface_id', 'policy_level', 'policy_scope', 'policy_originator', 'collector_id', 'start_time']

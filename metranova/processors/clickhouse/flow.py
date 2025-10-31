@@ -9,7 +9,10 @@ class BaseFlowProcessor(BaseDataProcessor):
         super().__init__(pipeline)
         # environment settings
         self.table = os.getenv('CLICKHOUSE_FLOW_TABLE', 'data_flow')
+        self.table_ttl = os.getenv('CLICKHOUSE_FLOW_TTL', '30 DAY')
+        self.table_ttl_column = os.getenv('CLICKHOUSE_FLOW_TTL_COLUMN', 'start_time')
         self.flow_type = os.getenv('CLICKHOUSE_FLOW_TYPE', 'unknown')
+        self.partition_by = os.getenv('CLICKHOUSE_FLOW_PARTITION_BY', "toYYYYMMDD(start_time)")
         self.policy_auto_scopes = os.getenv('CLICKHOUSE_FLOW_POLICY_AUTO_SCOPES', 'true').lower() in ('true', '1', 'yes')
         #A comma separated list of key-value pairs in form key:value, mapping a community id (such as a l3vpn rd) to a scope string
         policy_community_scope_map_str = os.getenv('CLICKHOUSE_FLOW_POLICY_COMMUNITY_SCOPE_MAP', None)
@@ -76,7 +79,6 @@ class BaseFlowProcessor(BaseDataProcessor):
         self.extension_defs['ext'] = self.get_extension_defs('CLICKHOUSE_FLOW_EXTENSIONS', extension_options)
 
         # set additional table settings
-        self.partition_by = "toYYYYMMDD(start_time)"
         self.order_by = ["src_as_id", "dst_as_id", "src_ip", "dst_ip", "start_time"]
 
     def parse_env_map_list(self, map_list_str: str | None) -> Dict[str, str]:
