@@ -20,11 +20,18 @@ class IPTriePickleFileProcessor(BaseFileProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.use_simple_table_name = os.getenv('IP_FILE_USE_SIMPLE_FILE_NAME', 'true').lower() in ('true', '1', 'yes')
-
+        self.required_fields = [
+            ['table'],
+            ['rows'],
+            ['column_names'],
+        ]
     def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
+        #check for required fields
+        if not self.has_required_fields(value):
+            return []
+
         #initialize ip trie
         ip_trie = pytricia.PyTricia(128)
-
         # Got through rows and add to trie
         for row in value.get('rows', []):
             id, ref, ip_subnet, *fields = row

@@ -178,7 +178,6 @@ class NFAcctdFlowProcessor(BaseFlowProcessor):
         if application_port is None:
             application_port = value.get("port_src", None)
 
-        # todo: for any asns that are 0 but have an ip, lookup the asn from the ip
         # todo: enable extensions like scireg based on env var
 
         # determine ip version - use quick method based on presence of ':' in ip address

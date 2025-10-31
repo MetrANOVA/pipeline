@@ -68,7 +68,8 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         # Test that required_fields is correctly inherited
         expected_required_fields = [
             ['table'],
-            ['rows']
+            ['rows'],
+            ['column_names']
         ]
         self.assertEqual(processor.required_fields, expected_required_fields)
 
@@ -78,6 +79,7 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         input_data = {
             'table': 'meta_ip',
+            'column_names': ['id', 'ref', 'ip_subnet'],
             'rows': [
                 ['ip-block-1', 'ref-1', [['192.168.1.0', 24], ['10.0.0.0', 8]]],
                 ['ip-block-2', 'ref-2', [['172.16.0.0', 12]]]
@@ -101,9 +103,9 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         # Verify trie contents
         trie = output['data']
-        self.assertEqual(trie['192.168.1.0/24'], 'ref-1')
-        self.assertEqual(trie['10.0.0.0/8'], 'ref-1')
-        self.assertEqual(trie['172.16.0.0/12'], 'ref-2')
+        self.assertEqual(trie['192.168.1.0/24'], {'ref': 'ref-1'})
+        self.assertEqual(trie['10.0.0.0/8'], {'ref': 'ref-1'})
+        self.assertEqual(trie['172.16.0.0/12'], {'ref': 'ref-2'})
 
     def test_build_message_ipv6_subnets(self):
         """Test build_message with IPv6 subnets."""
@@ -111,6 +113,7 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         input_data = {
             'table': 'meta_ipv6',
+            'column_names': ['id', 'ref', 'ip_subnet'],
             'rows': [
                 ['ipv6-block-1', 'ref-ipv6-1', [['2001:db8::', 32], ['fe80::', 10]]]
             ]
@@ -126,8 +129,8 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         # Verify IPv6 entries in trie
         trie = output['data']
-        self.assertEqual(trie['2001:db8::/32'], 'ref-ipv6-1')
-        self.assertEqual(trie['fe80::/10'], 'ref-ipv6-1')
+        self.assertEqual(trie['2001:db8::/32'], {'ref': 'ref-ipv6-1'})
+        self.assertEqual(trie['fe80::/10'], {'ref': 'ref-ipv6-1'})
 
     def test_build_message_mixed_ip_versions(self):
         """Test build_message with mixed IPv4 and IPv6 subnets."""
@@ -135,6 +138,7 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         input_data = {
             'table': 'meta_mixed_ip',
+            'column_names': ['id', 'ref', 'ip_subnet'],
             'rows': [
                 ['mixed-block-1', 'ref-mixed-1', [['192.168.1.0', 24], ['2001:db8::', 32]]]
             ]
@@ -147,8 +151,8 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         # Verify both IPv4 and IPv6 entries
         trie = output['data']
-        self.assertEqual(trie['192.168.1.0/24'], 'ref-mixed-1')
-        self.assertEqual(trie['2001:db8::/32'], 'ref-mixed-1')
+        self.assertEqual(trie['192.168.1.0/24'], {'ref': 'ref-mixed-1'})
+        self.assertEqual(trie['2001:db8::/32'], {'ref': 'ref-mixed-1'})
 
     def test_build_message_empty_rows(self):
         """Test build_message with empty rows list."""
@@ -156,6 +160,7 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         input_data = {
             'table': 'meta_empty',
+            'column_names': [],
             'rows': []
         }
         
@@ -181,6 +186,7 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         input_data = {
             'table': 'meta_ip_with_nulls',
+            'column_names': ['id', 'ref', 'ip_subnet'],
             'rows': [
                 ['ip-block-1', 'ref-1', [['192.168.1.0', 24]]],  # Valid row
                 [None, 'ref-2', [['10.0.0.0', 8]]],  # Null id
@@ -201,9 +207,9 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         # Verify only valid rows were added to trie
         trie = output['data']
-        self.assertEqual(trie['192.168.1.0/24'], 'ref-1')
-        self.assertEqual(trie['203.0.113.0/24'], 'ref-5')
-        
+        self.assertEqual(trie['192.168.1.0/24'], {'ref': 'ref-1'})
+        self.assertEqual(trie['203.0.113.0/24'], {'ref': 'ref-5'})
+
         # Verify null value rows were skipped
         with self.assertRaises(KeyError):
             _ = trie['10.0.0.0/8']  # Should not exist due to null id
@@ -216,6 +222,7 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         input_data = {
             'table': 'meta_ip_invalid',
+            'column_names': ['id', 'ref', 'ip_subnet'],
             'rows': [
                 ['ip-block-1', 'ref-1', [['192.168.1.0', 24]]],  # Valid
                 ['ip-block-2', 'ref-2', 'not-a-list'],  # Invalid - string
@@ -235,8 +242,8 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         # Verify only valid rows were added to trie
         trie = output['data']
-        self.assertEqual(trie['192.168.1.0/24'], 'ref-1')
-        self.assertEqual(trie['10.0.0.0/8'], 'ref-4')
+        self.assertEqual(trie['192.168.1.0/24'], {'ref': 'ref-1'})
+        self.assertEqual(trie['10.0.0.0/8'], {'ref': 'ref-4'})
 
     def test_build_message_missing_rows_key(self):
         """Test build_message handles missing 'rows' key gracefully."""
@@ -249,12 +256,24 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         result = list(processor.build_message(input_data, {}))
         
-        self.assertEqual(len(result), 1)
-        output = result[0]
+        self.assertEqual(len(result), 0)
+
+    def test_build_message_missing_column_names_key(self):
+        """Test build_message handles missing 'column_names' key gracefully."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
         
-        # Should still create trie with correct name
-        self.assertEqual(output['name'], 'ip_trie_meta_ip_no_rows.pickle')
-        self.assertIsInstance(output['data'], pytricia.PyTricia)
+        input_data = {
+            'table': 'meta_ip_no_column_names',
+            'rows': [
+                ['ip-block-1', 'ref-1', [['192.168.1.0', 24]]],
+                ['ip-block-2', 'ref-2', [['10.0.0.0', 8]]]
+            ]
+        }
+
+        result = list(processor.build_message(input_data, {}))
+
+        self.assertEqual(len(result), 0)
+
 
     def test_build_message_comprehensive_scenario(self):
         """Test build_message with a comprehensive real-world scenario."""
@@ -262,6 +281,7 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         input_data = {
             'table': 'meta_ip_comprehensive',
+            'column_names': ['id', 'ref', 'ip_subnet'],
             'rows': [
                 # Valid IPv4 entries
                 ['ucla-ipv4-1', 'ucla-ref-1', [['164.67.0.0', 16], ['128.97.0.0', 16]]],
@@ -301,21 +321,21 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         trie = output['data']
         
         # UCLA IPv4 blocks
-        self.assertEqual(trie['164.67.0.0/16'], 'ucla-ref-1')
-        self.assertEqual(trie['128.97.0.0/16'], 'ucla-ref-1')
-        
+        self.assertEqual(trie['164.67.0.0/16'], {'ref': 'ucla-ref-1'})
+        self.assertEqual(trie['128.97.0.0/16'], {'ref': 'ucla-ref-1'})
+
         # Private IPv4 blocks
-        self.assertEqual(trie['192.168.0.0/16'], 'private-ref-1')
-        self.assertEqual(trie['10.0.0.0/8'], 'private-ref-1')
+        self.assertEqual(trie['192.168.0.0/16'], {'ref': 'private-ref-1'})
+        self.assertEqual(trie['10.0.0.0/8'], {'ref': 'private-ref-1'})
         
         # IPv6 blocks
-        self.assertEqual(trie['2607:f010::/32'], 'ucla-ref-2')
-        self.assertEqual(trie['fe80::/10'], 'link-local-ref')
-        
+        self.assertEqual(trie['2607:f010::/32'], {'ref': 'ucla-ref-2'})
+        self.assertEqual(trie['fe80::/10'], {'ref': 'link-local-ref'})
+
         # Mixed blocks
-        self.assertEqual(trie['172.16.0.0/12'], 'mixed-ref')
-        self.assertEqual(trie['2001:db8::/32'], 'mixed-ref')
-        
+        self.assertEqual(trie['172.16.0.0/12'], {'ref': 'mixed-ref'})
+        self.assertEqual(trie['2001:db8::/32'], {'ref': 'mixed-ref'})
+
         # Verify invalid entries were not added
         with self.assertRaises(KeyError):
             _ = trie['203.0.113.0/24']  # Should not exist due to null id
@@ -326,6 +346,7 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         input_data = {
             'table': 'meta_ip_frozen_test',
+            'column_names': ['id', 'ref', 'ip_subnet'],
             'rows': [
                 ['test-block', 'test-ref', [['192.168.1.0', 24]]]
             ]
@@ -346,6 +367,7 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         input_data = {
             'table': 'meta_ip_iterator_test',
+            'column_names': ['id', 'ref', 'ip_subnet'],
             'rows': [
                 ['test-block', 'test-ref', [['192.168.1.0', 24]]]
             ]
@@ -378,6 +400,7 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
             with self.subTest(table_name=table_name):
                 input_data = {
                     'table': table_name,
+                    'column_names': ['id', 'ref', 'ip_subnet'],
                     'rows': [
                         ['test-block', 'test-ref', [['192.168.1.0', 24]]]
                     ]
@@ -395,6 +418,7 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         input_data = {
             'table': 'meta_ip_edge_cases',
+            'column_names': ['id', 'ref', 'ip_subnet'],
             'rows': [
                 # /32 IPv4 (single host)
                 ['single-host-ipv4', 'host-ref-1', [['192.168.1.1', 32]]],
@@ -415,10 +439,10 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         trie = output['data']
         
         # Verify edge case entries
-        self.assertEqual(trie['192.168.1.1/32'], 'host-ref-1')
-        self.assertEqual(trie['10.0.1.0/24'], 'common-ipv4-ref')
-        self.assertEqual(trie['2001:db8::1/128'], 'host-ref-2')
-        self.assertEqual(trie['2001:db8::/64'], 'common-ipv6-ref')
+        self.assertEqual(trie['192.168.1.1/32'], {'ref': 'host-ref-1'})
+        self.assertEqual(trie['10.0.1.0/24'], {'ref': 'common-ipv4-ref'})
+        self.assertEqual(trie['2001:db8::1/128'], {'ref': 'host-ref-2'})
+        self.assertEqual(trie['2001:db8::/64'], {'ref': 'common-ipv6-ref'})
 
 
 if __name__ == '__main__':
