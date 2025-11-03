@@ -61,7 +61,7 @@ Each resource type is accessed through dedicated connectors that provide consist
 
 4. **Build and run the pipelines**
    ```bash
-   docker-compose up --build
+   docker compose up --build
    ```
 
 ## Running Individual Pipelines

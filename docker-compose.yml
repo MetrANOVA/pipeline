@@ -146,7 +146,121 @@ services:
       - ./caches:/app/caches:rw
     restart: always
 
-  redis:
+  # Redis Cluster Nodes
+  redis-cluster-1:
     image: redis:8.2.1
+    command: >
+      redis-server 
+      --cluster-enabled yes 
+      --cluster-config-file nodes.conf 
+      --cluster-node-timeout 5000 
+      --appendonly yes 
+      --port 6379
     ports:
-      - "6379:6379"
+      - "7001:6379"
+    volumes:
+      - redis-cluster-1-data:/data
+    restart: always
+
+  redis-cluster-2:
+    image: redis:8.2.1
+    command: >
+      redis-server 
+      --cluster-enabled yes 
+      --cluster-config-file nodes.conf 
+      --cluster-node-timeout 5000 
+      --appendonly yes 
+      --port 6379
+    ports:
+      - "7002:6379"
+    volumes:
+      - redis-cluster-2-data:/data
+    restart: always
+
+  redis-cluster-3:
+    image: redis:8.2.1
+    command: >
+      redis-server 
+      --cluster-enabled yes 
+      --cluster-config-file nodes.conf 
+      --cluster-node-timeout 5000 
+      --appendonly yes 
+      --port 6379
+    ports:
+      - "7003:6379"
+    volumes:
+      - redis-cluster-3-data:/data
+    restart: always
+
+  redis-cluster-4:
+    image: redis:8.2.1
+    command: >
+      redis-server 
+      --cluster-enabled yes 
+      --cluster-config-file nodes.conf 
+      --cluster-node-timeout 5000 
+      --appendonly yes 
+      --port 6379
+    ports:
+      - "7004:6379"
+    volumes:
+      - redis-cluster-4-data:/data
+    restart: always
+
+  redis-cluster-5:
+    image: redis:8.2.1
+    command: >
+      redis-server 
+      --cluster-enabled yes 
+      --cluster-config-file nodes.conf 
+      --cluster-node-timeout 5000 
+      --appendonly yes 
+      --port 6379
+    ports:
+      - "7005:6379"
+    volumes:
+      - redis-cluster-5-data:/data
+    restart: always
+
+  redis-cluster-6:
+    image: redis:8.2.1
+    command: >
+      redis-server 
+      --cluster-enabled yes 
+      --cluster-config-file nodes.conf 
+      --cluster-node-timeout 5000 
+      --appendonly yes 
+      --port 6379
+    ports:
+      - "7006:6379"
+    volumes:
+      - redis-cluster-6-data:/data
+    restart: always
+
+  # Redis Cluster Initialization (run once)
+  redis-cluster-init:
+    image: redis:8.2.1
+    depends_on:
+      - redis-cluster-1
+      - redis-cluster-2
+      - redis-cluster-3
+      - redis-cluster-4
+      - redis-cluster-5
+      - redis-cluster-6
+    command: >
+      sh -c "
+        echo 'Waiting for Redis nodes to be ready...'
+        sleep 10
+        echo 'Creating Redis cluster...'
+        redis-cli --cluster create redis-cluster-1:6379 redis-cluster-2:6379 redis-cluster-3:6379 redis-cluster-4:6379 redis-cluster-5:6379 redis-cluster-6:6379 --cluster-replicas 1 --cluster-yes
+        echo 'Redis cluster initialized!'
+      "
+    restart: "no"
+
+volumes:
+  redis-cluster-1-data:
+  redis-cluster-2-data:
+  redis-cluster-3-data:
+  redis-cluster-4-data:
+  redis-cluster-5-data:
+  redis-cluster-6-data:
