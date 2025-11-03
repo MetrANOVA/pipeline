@@ -39,6 +39,22 @@ class InterfaceMetadataProcessor(BaseMetadataProcessor):
             ['remote_organization_id', 'LowCardinality(Nullable(String))', True],
             ['remote_organization_ref', 'Nullable(String)', True]
         ])
+        extension_options = {
+            "sap": [
+                ['sap_name', 'Nullable(String)', True]
+            ],
+            "vrtr": [
+                ['vrtr_id', 'Nullable(LowCardinality(String))', True],
+                ['vrtr_name', 'Nullable(LowCardinality(String))', True]
+            ],
+            "vrtr_interface": [
+                ['vrtr_interface_encap', 'Nullable(UInt32)', True],
+                ['vrtr_interface_global_index', 'Nullable(UInt32)', True],
+                ['vrtr_interface_index', 'Nullable(String)', True]
+            ]
+        }
+        # determine columns to use from environment
+        self.extension_defs['ext'] = self.get_extension_defs('CLICKHOUSE_AS_METADATA_EXTENSIONS', extension_options)
         self.val_id_field = ['id']
         self.required_fields = [['id'], ['device_id'], ['name'], ['type']]
         self.self_ref_fields = ['port_interface', 'remote_interface', 'lag_member_interface']
