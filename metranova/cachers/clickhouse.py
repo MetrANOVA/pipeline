@@ -11,17 +11,19 @@ logger = logging.getLogger(__name__)
 class ClickHouseCacher(BaseCacher):
 
     def __init__(self):
+        super().__init__()
         self.logger = logger
         self.cache = ClickHouseConnector()
         self.local_cache = {}
         tables_str = os.getenv('CLICKHOUSE_CACHER_TABLES', '')
+        self.cache_refresh_interval = int(os.getenv('CLICKHOUSE_CACHER_REFRESH_INTERVAL', '600'))
         self.tables = [t.strip() for t in tables_str.split(',') if t.strip()]
         self.primary_columns = ['id', 'ref', 'hash']
         if not self.tables:
             self.logger.warning("No tables specified for ClickHouse cacher")
         
-        #TODO: Delete this line after testing
-        self.prime()
+        #Prime cache and start refresh thread if needed
+        self.start_refresh_thread()
 
     def prime(self):
         for table in self.tables:
