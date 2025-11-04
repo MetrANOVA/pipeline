@@ -2,6 +2,7 @@ from ipaddress import IPv6Address
 import logging
 import os
 import time
+from cachetools import TTLCache
 from typing import Optional
 from metranova.cachers.base import BaseCacher
 from metranova.connectors.clickhouse import ClickHouseConnector
@@ -14,7 +15,9 @@ class ClickHouseCacher(BaseCacher):
         super().__init__()
         self.logger = logger
         self.cache = ClickHouseConnector()
-        self.local_cache = {}
+        self.cache_max_size = int(os.getenv('CLICKHOUSE_CACHER_MAX_SIZE', '100000000')) #defaults to large 100 million entries
+        self.cache_max_ttl = int(os.getenv('CLICKHOUSE_CACHER_MAX_TTL', '86400')) #defaults to large 1 hour TTL
+        self.local_cache = TTLCache(maxsize=self.cache_max_size, ttl=self.cache_max_ttl)
         tables_str = os.getenv('CLICKHOUSE_CACHER_TABLES', '')
         self.cache_refresh_interval = int(os.getenv('CLICKHOUSE_CACHER_REFRESH_INTERVAL', '600'))
         self.tables = [t.strip() for t in tables_str.split(',') if t.strip()]

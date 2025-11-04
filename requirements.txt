@@ -24,3 +24,6 @@ pycountry==24.6.1
 
 # pycountry-convert for continents
 pycountry-convert==0.7.2
+
+# cachetools for in-memory caching with TTL
+cachetools==6.2.1
