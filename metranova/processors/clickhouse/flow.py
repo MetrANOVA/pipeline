@@ -77,7 +77,8 @@ class BaseFlowProcessor(BaseDataProcessor):
             }
         # determine columns to use from environment
         self.extension_defs['ext'] = self.get_extension_defs('CLICKHOUSE_FLOW_EXTENSIONS', extension_options)
-
+        #grab references to extension tables for IP ref lookups
+        self.ip_ref_extensions = self.get_ip_ref_extensions("CLICKHOUSE_FLOW_IP_REF_EXTENSIONS")
         # set additional table settings
         self.order_by = ["src_as_id", "dst_as_id", "src_ip", "dst_ip", "start_time"]
 

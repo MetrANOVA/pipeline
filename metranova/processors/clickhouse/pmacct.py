@@ -199,6 +199,8 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         self.add_ipv4_extensions(value, ext)
         self.add_ipv6_extensions(value, ext)
         self.add_mpls_extensions(value, ext)
+        ext.update(self.lookup_ip_ref_extensions(formatted_record.get("src_ip", None), "src"))
+        ext.update(self.lookup_ip_ref_extensions(formatted_record.get("dst_ip", None), "dst"))
 
         # Pull the relevant fields from the value dict as needed.
         # you may also need to do some formatting to make sure they are the right data type, etc

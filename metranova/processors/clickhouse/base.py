@@ -33,6 +33,9 @@ class BaseClickHouseProcessor(BaseProcessor):
         self.extension_defs = {"ext": []}
         #dictionary where key is extension field name and value is dict of options for that extension. Populated via get_extension_defs()
         self.extension_enabled = defaultdict(dict)
+        # list of reference fields that will be used if lookups to ip cacher and src dst IP then loaded in ext
+        # if var name is <value> then assumes lookup table of meta_<value>, and creates fields like ext.src_<value>_ref and ext.dst_<value>_ref
+        self.ip_ref_extensions = []
         self.partition_by = ""
         self.primary_keys = []
         self.order_by = []
@@ -106,6 +109,32 @@ class BaseClickHouseProcessor(BaseProcessor):
 
     def extension_is_enabled(self, extension_name: str, json_column_name: str = "ext") -> bool:
         return self.extension_enabled.get(json_column_name, {}).get(extension_name, False)
+
+    def get_ip_ref_extensions(self, env_var_name: str) -> list:
+        """Get list of extension names that should have IP reference fields from environment variable"""
+        extension_str = os.getenv(env_var_name, None)
+        ip_ref_extensions = []
+        if not extension_str:
+            return ip_ref_extensions
+        extension_str = extension_str.strip()
+        for ext in extension_str.split(','):
+            ext = ext.strip()
+            if not ext:
+                continue
+            ip_ref_extensions.append(ext)
+        return ip_ref_extensions
+
+    def lookup_ip_ref_extensions(self, ip_address: str, direction: str) -> dict:
+        """Lookup IP reference extensions for a given IP address from the cacher"""
+        ref_results = {}
+        if not ip_address:
+            return ref_results
+        for ext in self.ip_ref_extensions:
+            table_name = f"meta_ip_{ext}"
+            ref = self.pipeline.cacher("ip").lookup(table_name, ip_address)
+            if ref:
+                ref_results[f"{direction}_ip_{ext}_ref"] = ref.get("ref", None)
+        return ref_results
 
     def column_names(self) -> list:
         """Return list of column names for insertion into ClickHouse"""
