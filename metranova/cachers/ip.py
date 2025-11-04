@@ -41,6 +41,4 @@ class IPCacher(BaseCacher):
 
     def lookup(self, table, key: str) -> Optional[str]:
         return self.local_cache.get(table, {}).get(key, None) if key and table else None
-    
-    def close(self):
-        super().close()
+
