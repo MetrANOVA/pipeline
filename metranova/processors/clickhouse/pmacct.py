@@ -145,7 +145,7 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             formatted_record[f"{target_ip_field}_ref"] = None
 
         #set the as ref field
-        formatted_record[f"{target_as_field}_ref"] = self.pipeline.cacher("redis").lookup("meta_as", formatted_record[as_id_field])
+        formatted_record[f"{target_as_field}_ref"] = self.pipeline.cacher("clickhouse").lookup_dict_key("meta_as", formatted_record[as_id_field], "ref")
 
     def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
         # check required fields
@@ -161,7 +161,7 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         self.lookup_ip_as_fields("peer_ip_dst", "peer_ip", "peer_as_dst", "peer_as", value, formatted_record)
 
         # Lookup device id based on IP address
-        device_id = self.pipeline.cacher("redis").lookup("meta_device__@loopback_ip", value.get("peer_ip_src", None))
+        device_id = self.pipeline.cacher("clickhouse").lookup_dict_key("meta_device:@loopback_ip", value.get("peer_ip_src", None), "id")
         if not device_id:
             device_id = value.get("peer_ip_src", "unknown")
 
@@ -169,9 +169,9 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         interface_in_id = None
         interface_out_id = None
         if value.get("iface_in", None):
-            interface_in_id = self.pipeline.cacher("redis").lookup("meta_interface__device_id__flow_index", "{}:{}".format(device_id, str(value["iface_in"])))
+            interface_in_id = self.pipeline.cacher("clickhouse").lookup_dict_key("meta_interface:device_id:flow_index", "{}:{}".format(device_id, str(value["iface_in"])), "id")
         if value.get("iface_out", None):
-            interface_out_id = self.pipeline.cacher("redis").lookup("meta_interface__device_id__flow_index", "{}:{}".format(device_id, str(value["iface_out"])))
+            interface_out_id = self.pipeline.cacher("clickhouse").lookup_dict_key("meta_interface:device_id:flow_index", "{}:{}".format(device_id, str(value["iface_out"])), "id")
 
         # todo: determine application port - use dst port if available, else src port
         application_port = value.get("port_dst", None)
@@ -211,14 +211,14 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             "ext": orjson.dumps(ext).decode('utf-8'),
             "flow_type": self.flow_type,
             "device_id": device_id,
-            "device_ref": self.pipeline.cacher("redis").lookup("meta_device", device_id),
+            "device_ref": self.pipeline.cacher("clickhouse").lookup_dict_key("meta_device", device_id, "ref"),
             "src_port": value.get("port_src", None),
             "dst_port": value.get("port_dst", None),
             "protocol": value.get("ip_proto", None),
             "in_interface_id": interface_in_id,
-            "in_interface_ref": self.pipeline.cacher("redis").lookup("meta_interface", interface_in_id),
+            "in_interface_ref": self.pipeline.cacher("clickhouse").lookup_dict_key("meta_interface", interface_in_id, "ref"),
             "out_interface_id": interface_out_id,
-            "out_interface_ref": self.pipeline.cacher("redis").lookup("meta_interface", interface_out_id),
+            "out_interface_ref": self.pipeline.cacher("clickhouse").lookup_dict_key("meta_interface", interface_out_id, "ref"),
             "ip_version": ip_version,
             "application_port": application_port,
             "bit_count": value.get("bytes", 0),

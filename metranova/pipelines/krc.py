@@ -1,5 +1,6 @@
 import logging
 import os
+from metranova.cachers.clickhouse import ClickHouseCacher
 from metranova.cachers.ip import IPCacher
 from metranova.cachers.redis import RedisCacher
 from metranova.consumers.kafka import KafkaConsumer
@@ -24,6 +25,7 @@ class KRCPipeline(BasePipeline):
         # Initialize Redis connection
         self.cachers['redis'] = RedisCacher()
         self.cachers['ip'] = IPCacher()
+        self.cachers['clickhouse'] = ClickHouseCacher()
 
         # Load clickhouse processors
         ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')
