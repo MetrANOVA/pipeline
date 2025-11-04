@@ -172,8 +172,11 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         self.boolean_fields = []  # List of fields to format as booleans
         self.array_fields = []  # List of fields to format as arrays
         self.self_ref_fields = []  # List of fields that have self references to update
+        # If versioned then calculate hash and ref fields
+        self.versioned  = True
         # array of arrays in format [['col_name', 'col_definition', bool_include_in_insert], ...]
         # for extension columns, col_definition is ignored and can be set to None
+        # NOTE: if subclass is not versioned, then must override column_defs to remove hash and ref fields
         self.column_defs = [
             ['id', 'String', True],
             ['ref', 'String', True],
@@ -288,7 +291,10 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         formatted_record = { "id": id }
         # merge formatted_record with result of self.build_metadata_fields(value)
         formatted_record.update(self.build_metadata_fields(value))
-
+        if not self.versioned:
+            #if not versioned metadata, then we are done
+            return formatted_record
+        
         # Calculate hash - do after building full record so any refs or other changes in hash
         record_md5 = self.calculate_hash(formatted_record)
 

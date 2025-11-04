@@ -1,24 +1,36 @@
-# Aggregates
+# Dictionaries and Materialized Views
 
-This document records the commands used toi create materialized view aggregates.
+This document records the commands used to create dictionaries and materialized view aggregates.
 
 Note that any dimensions used must also be in the PRIMARY KEY or ORDER BY to working correctly for SummingMergeTree. For this reason, its nice to split the PRIMARY KEY and sorting keys so its easier to make changes over time without having to touch the primary key. See the document here for details: https://clickhouse.com/docs/engines/table-engines/mergetree-family/mergetree#choosing-a-primary-key-that-differs-from-the-sorting-key 
 
+## Dictionary: meta_application_dict
+This is a dictionary for looking up application names from meta_application based on protocol and port.
+```
+CREATE DICTIONARY meta_application_dict (
+    `id` String,
+    `protocol` String,
+    `port_range_min` UInt16,
+    `port_range_max` UInt16
+)
+PRIMARY KEY protocol
+SOURCE(CLICKHOUSE(TABLE 'meta_application' USER 'default' PASSWORD '<password>' DB 'metranova'))
+LIFETIME(MIN 600 MAX 3600)
+LAYOUT(RANGE_HASHED(range_lookup_strategy 'min'))
+RANGE(MIN port_range_min MAX port_range_max)
+```
 
-## 5m_edge_asns
+## Materialized View: 5m_edge_asns
 
 ### Create Table
 ```
 CREATE TABLE IF NOT EXISTS flow_edge_5m_asns_v2 (
             `start_ts` DateTime,
-            `src_as_name` LowCardinality(Nullable(String)),
-            `dst_as_name` LowCardinality(Nullable(String)),
             `policy_originator` LowCardinality(Nullable(String)),
             `policy_level` LowCardinality(Nullable(String)),
             `policy_scopes` Array(LowCardinality(String)),
             `app_name` LowCardinality(Nullable(String)),
             `bgp_as_path` Array(Nullable(UInt32)),
-            `bgp_as_path_name` Array(Nullable(String)),
             `bgp_comms` Array(LowCardinality(Nullable(String))),
             `bgp_ecomms` Array(LowCardinality(Nullable(String))),
             `bgp_lcomms` Array(LowCardinality(Nullable(String))),
@@ -26,34 +38,18 @@ CREATE TABLE IF NOT EXISTS flow_edge_5m_asns_v2 (
             `bgp_med` Nullable(UInt32),
             `bgp_next_hop` Nullable(IPv6),
             `bgp_peer_as_dst` Nullable(UInt32),
-            `bgp_peer_as_dst_name` LowCardinality(Nullable(String)),
             `device_name` LowCardinality(Nullable(String)),
             `dst_asn` UInt32,
-            `dst_continent` LowCardinality(Nullable(String)),
-            `dst_country_name` LowCardinality(Nullable(String)),
-            `dst_esdb_ipsvc_ref` Array(Nullable(String)),
-            `dst_pub_asn` Nullable(UInt32),
-            `dst_region_iso_code` LowCardinality(Nullable(String)),
-            `dst_region_name` LowCardinality(Nullable(String)),
-            `dst_pref_org` LowCardinality(Nullable(String)),
             `dst_scireg_ref` Nullable(String),
             `ifin_ref` Nullable(String),
             `ifout_ref` Nullable(String),
             `ip_version`  Nullable(UInt8),
             `protocol` LowCardinality(Nullable(String)),
             `src_asn` UInt32,
-            `src_continent` LowCardinality(Nullable(String)),
-            `src_country_name` LowCardinality(Nullable(String)),
-            `src_esdb_ipsvc_ref` Array(Nullable(String)),
-            `src_pub_asn` Nullable(UInt32),
-            `src_region_iso_code` LowCardinality(Nullable(String)),
-            `src_region_name` LowCardinality(Nullable(String)),
-            `src_pref_org` LowCardinality(Nullable(String)),
             `src_scireg_ref` Nullable(String),
-            `traffic_class` LowCardinality(Nullable(String)),
             `flow_count` UInt32,
-            `num_bits` Float64,
-            `num_pkts` Float64
+            `bit_count` UInt32,
+            `packet_count` UInt32
         )
         ENGINE = SummingMergeTree((flow_count, num_bits, num_pkts))
         PARTITION BY toYYYYMMDD(`start_ts`)
@@ -160,7 +156,7 @@ SELECT
 FROM flow_edge_v2 
 ```
 
-## 5m_ip_version 
+## Materialized View: 5m_ip_version 
 
 ### Create Table
 ```
@@ -189,7 +185,7 @@ FROM flow_edge_v2
 WHERE ip_version IS NOT NULL
 ```
 
-## 5m_ifaces
+## Materialized View: 5m_ifaces
 
 ### Create Table
 ```
