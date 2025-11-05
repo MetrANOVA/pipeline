@@ -20,6 +20,19 @@ LAYOUT(RANGE_HASHED(range_lookup_strategy 'min'))
 RANGE(MIN port_range_min MAX port_range_max)
 ```
 
+## Dictionary: meta_as_dict
+This is a dictionary for looking up AS names from meta_as based on AS number
+```
+CREATE DICTIONARY meta_application_dict (
+    `id` UInt32,
+    `name` String
+)
+PRIMARY KEY id
+SOURCE(CLICKHOUSE(TABLE 'meta_as' USER 'default' PASSWORD '<password>' DB 'metranova'))
+LIFETIME(MIN 600 MAX 3600)
+LAYOUT(HASHED)
+```
+
 ## Materialized View: 5m_edge_asns
 
 ### Create Table 
