@@ -1,166 +1,109 @@
-# Aggregates
+# Dictionaries and Materialized Views
 
-This document records the commands used toi create materialized view aggregates.
+This document records the commands used to create dictionaries and materialized view aggregates.
 
 Note that any dimensions used must also be in the PRIMARY KEY or ORDER BY to working correctly for SummingMergeTree. For this reason, its nice to split the PRIMARY KEY and sorting keys so its easier to make changes over time without having to touch the primary key. See the document here for details: https://clickhouse.com/docs/engines/table-engines/mergetree-family/mergetree#choosing-a-primary-key-that-differs-from-the-sorting-key 
 
-
-## 5m_edge_asns
-
-### Create Table
+## Dictionary: meta_application_dict
+This is a dictionary for looking up application names from meta_application based on protocol and port.
 ```
-CREATE TABLE IF NOT EXISTS flow_edge_5m_asns_v2 (
-            `start_ts` DateTime,
-            `src_as_name` LowCardinality(Nullable(String)),
-            `dst_as_name` LowCardinality(Nullable(String)),
-            `policy_originator` LowCardinality(Nullable(String)),
-            `policy_level` LowCardinality(Nullable(String)),
-            `policy_scopes` Array(LowCardinality(String)),
-            `app_name` LowCardinality(Nullable(String)),
-            `bgp_as_path` Array(Nullable(UInt32)),
-            `bgp_as_path_name` Array(Nullable(String)),
-            `bgp_comms` Array(LowCardinality(Nullable(String))),
-            `bgp_ecomms` Array(LowCardinality(Nullable(String))),
-            `bgp_lcomms` Array(LowCardinality(Nullable(String))),
-            `bgp_local_pref` Nullable(UInt32),
-            `bgp_med` Nullable(UInt32),
-            `bgp_next_hop` Nullable(IPv6),
-            `bgp_peer_as_dst` Nullable(UInt32),
-            `bgp_peer_as_dst_name` LowCardinality(Nullable(String)),
-            `device_name` LowCardinality(Nullable(String)),
-            `dst_asn` UInt32,
-            `dst_continent` LowCardinality(Nullable(String)),
-            `dst_country_name` LowCardinality(Nullable(String)),
-            `dst_esdb_ipsvc_ref` Array(Nullable(String)),
-            `dst_pub_asn` Nullable(UInt32),
-            `dst_region_iso_code` LowCardinality(Nullable(String)),
-            `dst_region_name` LowCardinality(Nullable(String)),
-            `dst_pref_org` LowCardinality(Nullable(String)),
-            `dst_scireg_ref` Nullable(String),
-            `ifin_ref` Nullable(String),
-            `ifout_ref` Nullable(String),
-            `ip_version`  Nullable(UInt8),
-            `protocol` LowCardinality(Nullable(String)),
-            `src_asn` UInt32,
-            `src_continent` LowCardinality(Nullable(String)),
-            `src_country_name` LowCardinality(Nullable(String)),
-            `src_esdb_ipsvc_ref` Array(Nullable(String)),
-            `src_pub_asn` Nullable(UInt32),
-            `src_region_iso_code` LowCardinality(Nullable(String)),
-            `src_region_name` LowCardinality(Nullable(String)),
-            `src_pref_org` LowCardinality(Nullable(String)),
-            `src_scireg_ref` Nullable(String),
-            `traffic_class` LowCardinality(Nullable(String)),
-            `flow_count` UInt32,
-            `num_bits` Float64,
-            `num_pkts` Float64
-        )
-        ENGINE = SummingMergeTree((flow_count, num_bits, num_pkts))
-        PARTITION BY toYYYYMMDD(`start_ts`)
-        PRIMARY KEY (
-            src_asn,
-            dst_asn,
-            start_ts
-        )
-        ORDER BY (
-            src_asn,
-            dst_asn,
-            start_ts,
-            src_as_name, 
-            dst_as_name,
-            ifin_ref,
-            ifout_ref, 
-            policy_level,
-            policy_scopes,
-            policy_originator,
-            app_name,
-            device_name,
-            bgp_next_hop,  
-            bgp_peer_as_dst,
-            bgp_peer_as_dst_name,
-            bgp_as_path,
-            bgp_as_path_name,
-            bgp_comms,
-            bgp_lcomms,
-            bgp_ecomms,
-            bgp_local_pref,
-            bgp_med,
-            dst_pub_asn,
-            dst_continent,
-            dst_country_name,
-            dst_esdb_ipsvc_ref,
-            dst_region_name,
-            dst_region_iso_code,
-            dst_pref_org,
-            dst_scireg_ref,
-            ip_version,
-            protocol, 
-            src_pub_asn,
-            src_continent,
-            src_country_name,
-            src_esdb_ipsvc_ref,
-            src_region_name,
-            src_region_iso_code,
-            src_pref_org,
-            src_scireg_ref,
-            traffic_class
-        )
-        TTL start_ts + INTERVAL 5 YEAR
-        SETTINGS index_granularity = 8192, allow_nullable_key = 1
+CREATE DICTIONARY meta_application_dict (
+    `id` String,
+    `protocol` String,
+    `port_range_min` UInt16,
+    `port_range_max` UInt16
+)
+PRIMARY KEY protocol
+SOURCE(CLICKHOUSE(TABLE 'meta_application' USER 'default' PASSWORD '<password>' DB 'metranova'))
+LIFETIME(MIN 600 MAX 3600)
+LAYOUT(RANGE_HASHED(range_lookup_strategy 'min'))
+RANGE(MIN port_range_min MAX port_range_max)
+```
+
+## Materialized View: 5m_edge_asns
+
+### Create Table 
+```
+CREATE TABLE IF NOT EXISTS data_flow_by_edge_as_5m (
+    `start_time` DateTime,
+    `policy_originator` LowCardinality(Nullable(String)),
+    `policy_level` LowCardinality(Nullable(String)),
+    `policy_scope` Array(LowCardinality(String)),
+    `ext` JSON(
+        `bgp_as_path_id` Array(UInt32)
+    ),
+    `src_as_id` UInt32,
+    `dst_as_id` UInt32,
+    `device_id` LowCardinality(String),
+    `application_id` LowCardinality(Nullable(String)),
+    `in_interface_id` LowCardinality(Nullable(String)),
+    `in_interface_ref` Nullable(String),
+    `out_interface_id` LowCardinality(Nullable(String)),
+    `out_interface_ref` Nullable(String),
+    `ip_version` UInt8,
+    `flow_count` UInt64,
+    `bit_count` UInt64,
+    `packet_count` UInt64
+)
+ENGINE = SummingMergeTree((flow_count, bit_count, packet_count))
+PARTITION BY toYYYYMMDD(`start_time`)
+PRIMARY KEY (
+    src_as_id,
+    dst_as_id,
+    start_time
+)
+ORDER BY (
+    src_as_id,
+    dst_as_id,
+    start_time,
+    policy_originator,
+    policy_level,
+    policy_scope,
+    ext.bgp_as_path_id,
+    device_id,
+    application_id,
+    in_interface_id,
+    in_interface_ref,
+    out_interface_id,
+    out_interface_ref,
+    ip_version
+)
+TTL start_time + INTERVAL 5 YEAR
+SETTINGS index_granularity = 8192, allow_nullable_key = 1
 ```
 
 ### Materialized View
 ```
-CREATE MATERIALIZED VIEW flow_edge_5m_asns_v2_mv TO flow_edge_5m_asns_v2 AS
-SELECT 
-    toStartOfInterval(start_ts, INTERVAL 5 MINUTE) AS start_ts, 
+CREATE MATERIALIZED VIEW data_flow_by_edge_as_5m_mv TO data_flow_by_edge_as_5m AS
+SELECT
+    toStartOfInterval(start_time, INTERVAL 5 MINUTE) AS start_time, 
     policy_originator,
     policy_level,
-    policy_scopes,
-    app_name, 
-    bgp_next_hop,  
-    bgp_peer_as_dst,
-    bgp_peer_as_dst_name,
-    bgp_as_path,
-    bgp_as_path_name,
-    bgp_comms,
-    bgp_lcomms,
-    bgp_ecomms,
-    bgp_local_pref,
-    bgp_med,
-    device_name,
-    dst_as_name,
-    dst_asn,
-    dst_pub_asn,
-    dst_continent,
-    dst_country_name,
-    dst_esdb_ipsvc_ref,
-    dst_region_name,
-    dst_region_iso_code,
-    dst_pref_org,
-    dst_scireg_ref,
-    ifin_ref, 
-    ifout_ref, 
-    ip_version, 
-    protocol,
-    src_as_name,
-    src_asn,
-    src_pub_asn,
-    src_continent,
-    src_country_name,
-    src_esdb_ipsvc_ref,
-    src_region_name,
-    src_region_iso_code,
-    src_pref_org,
-    src_scireg_ref,
-    traffic_class,
-    1 AS flow_count, 
-    num_bits, 
-    num_pkts
-FROM flow_edge_v2 
+    policy_scope,
+    toJSONString(
+        map(
+            'bgp_as_path_id', ext.bgp_as_path_id
+        )
+    ) as ext,
+    src_as_id,
+    dst_as_id,
+    device_id,
+    dictGetOrNull('meta_application_dict', 'id', protocol, application_port) AS application_id,
+    in_interface_id,
+    in_interface_ref,
+    out_interface_id,
+    out_interface_ref,
+    ip_version,
+    1 AS flow_count,
+    bit_count,
+    packet_count
+FROM data_flow
+WHERE 
+    true = (SELECT edge FROM meta_interface WHERE ref=data_flow.in_interface_ref)
+    OR true = (SELECT edge FROM meta_interface WHERE ref=data_flow.out_interface_ref)
 ```
 
-## 5m_ip_version 
+## Materialized View: 5m_ip_version 
 
 ### Create Table
 ```
@@ -189,7 +132,7 @@ FROM flow_edge_v2
 WHERE ip_version IS NOT NULL
 ```
 
-## 5m_ifaces
+## Materialized View: 5m_ifaces
 
 ### Create Table
 ```

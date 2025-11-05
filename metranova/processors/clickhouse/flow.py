@@ -37,8 +37,10 @@ class BaseFlowProcessor(BaseDataProcessor):
         self.column_defs.append(['protocol', 'LowCardinality(String)', True])
         self.column_defs.append(['in_interface_id', 'LowCardinality(Nullable(String))', True])
         self.column_defs.append(['in_interface_ref', 'Nullable(String)', True])
+        self.column_defs.append(['in_interface_edge', 'Bool', True])
         self.column_defs.append(['out_interface_id', 'LowCardinality(Nullable(String))', True])
         self.column_defs.append(['out_interface_ref', 'Nullable(String)', True])
+        self.column_defs.append(['out_interface_edge', 'Bool', True])
         self.column_defs.append(['peer_as_id', 'Nullable(UInt32)', True])
         self.column_defs.append(['peer_as_ref', 'Nullable(String)', True])
         self.column_defs.append(['peer_ip', 'Nullable(IPv6)', True])
@@ -77,7 +79,8 @@ class BaseFlowProcessor(BaseDataProcessor):
             }
         # determine columns to use from environment
         self.extension_defs['ext'] = self.get_extension_defs('CLICKHOUSE_FLOW_EXTENSIONS', extension_options)
-
+        #grab references to extension tables for IP ref lookups
+        self.ip_ref_extensions = self.get_ip_ref_extensions("CLICKHOUSE_FLOW_IP_REF_EXTENSIONS")
         # set additional table settings
         self.order_by = ["src_as_id", "dst_as_id", "src_ip", "dst_ip", "start_time"]
 

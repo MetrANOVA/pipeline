@@ -33,6 +33,9 @@ class BaseClickHouseProcessor(BaseProcessor):
         self.extension_defs = {"ext": []}
         #dictionary where key is extension field name and value is dict of options for that extension. Populated via get_extension_defs()
         self.extension_enabled = defaultdict(dict)
+        # list of reference fields that will be used if lookups to ip cacher and src dst IP then loaded in ext
+        # if var name is <value> then assumes lookup table of meta_<value>, and creates fields like ext.src_<value>_ref and ext.dst_<value>_ref
+        self.ip_ref_extensions = []
         self.partition_by = ""
         self.primary_keys = []
         self.order_by = []
@@ -107,6 +110,32 @@ class BaseClickHouseProcessor(BaseProcessor):
     def extension_is_enabled(self, extension_name: str, json_column_name: str = "ext") -> bool:
         return self.extension_enabled.get(json_column_name, {}).get(extension_name, False)
 
+    def get_ip_ref_extensions(self, env_var_name: str) -> list:
+        """Get list of extension names that should have IP reference fields from environment variable"""
+        extension_str = os.getenv(env_var_name, None)
+        ip_ref_extensions = []
+        if not extension_str:
+            return ip_ref_extensions
+        extension_str = extension_str.strip()
+        for ext in extension_str.split(','):
+            ext = ext.strip()
+            if not ext:
+                continue
+            ip_ref_extensions.append(ext)
+        return ip_ref_extensions
+
+    def lookup_ip_ref_extensions(self, ip_address: str, direction: str) -> dict:
+        """Lookup IP reference extensions for a given IP address from the cacher"""
+        ref_results = {}
+        if not ip_address:
+            return ref_results
+        for ext in self.ip_ref_extensions:
+            table_name = f"meta_ip_{ext}"
+            ref = self.pipeline.cacher("ip").lookup(table_name, ip_address)
+            if ref:
+                ref_results[f"{direction}_ip_{ext}_ref"] = ref.get("ref", None)
+        return ref_results
+
     def column_names(self) -> list:
         """Return list of column names for insertion into ClickHouse"""
         column_names = []
@@ -143,8 +172,11 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         self.boolean_fields = []  # List of fields to format as booleans
         self.array_fields = []  # List of fields to format as arrays
         self.self_ref_fields = []  # List of fields that have self references to update
+        # If versioned then calculate hash and ref fields
+        self.versioned  = True
         # array of arrays in format [['col_name', 'col_definition', bool_include_in_insert], ...]
         # for extension columns, col_definition is ignored and can be set to None
+        # NOTE: if subclass is not versioned, then must override column_defs to remove hash and ref fields
         self.column_defs = [
             ['id', 'String', True],
             ['ref', 'String', True],
@@ -259,7 +291,10 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         formatted_record = { "id": id }
         # merge formatted_record with result of self.build_metadata_fields(value)
         formatted_record.update(self.build_metadata_fields(value))
-
+        if not self.versioned:
+            #if not versioned metadata, then we are done
+            return formatted_record
+        
         # Calculate hash - do after building full record so any refs or other changes in hash
         record_md5 = self.calculate_hash(formatted_record)
 

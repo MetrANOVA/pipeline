@@ -147,6 +147,50 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         #set the as ref field
         formatted_record[f"{target_as_field}_ref"] = self.pipeline.cacher("clickhouse").lookup_dict_key("meta_as", formatted_record[as_id_field], "ref")
 
+    def lookup_interface(self, device_id: str, flow_index: Any, formatted_record: dict, direction: str) -> None:
+        """ Lookup interface based on device_id and flow_index. Sets interface_id, interface_ref, and interface_edge in formatted_record."""
+        #Initialize values
+        interface_id = None
+        interface_ref = None
+        interface_edge = False
+
+        # make sure we have the keys we need
+        if device_id is not None and flow_index is not None:
+            # Try edge true first
+            flow_index = str(flow_index)
+            interface_details = self.pipeline.cacher("clickhouse").lookup("meta_interface:device_id:flow_index:edge", f"{device_id}:{flow_index}:True")
+            # check if we got details
+            if interface_details:
+                # set edge to true if we did
+                interface_edge = True
+            else:
+                # otherwise try edge false
+                interface_details = self.pipeline.cacher("clickhouse").lookup("meta_interface:device_id:flow_index:edge", f"{device_id}:{flow_index}:False")
+            #set id and ref if we found details
+            if interface_details:
+                interface_id = interface_details.get("id", None)
+                interface_ref = interface_details.get("ref", None)
+        
+        #update record
+        formatted_record[f"{direction}_interface_id"] = interface_id
+        formatted_record[f"{direction}_interface_ref"] = interface_ref
+        formatted_record[f"{direction}_interface_edge"] = interface_edge
+
+    def lookup_device(self, device_ip: str, formatted_record: dict):
+        #initialize values
+        device_id = "unknown"
+        device_ref = None
+        if device_ip:
+            #if we have an ip, at a minimum device_id should be that
+            device_id = device_ip
+            device_details = self.pipeline.cacher("clickhouse").lookup("meta_device:@loopback_ip", device_ip)
+            if device_details:
+                #if we got this far, set to id of fallback to ip
+                device_id = device_details.get("id", device_id)
+                device_ref = device_details.get("ref", None)
+        formatted_record["device_id"] = device_id
+        formatted_record["device_ref"] = device_ref
+
     def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
         # check required fields
         if not self.has_required_fields(value):
@@ -161,24 +205,16 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         self.lookup_ip_as_fields("peer_ip_dst", "peer_ip", "peer_as_dst", "peer_as", value, formatted_record)
 
         # Lookup device id based on IP address
-        device_id = self.pipeline.cacher("clickhouse").lookup_dict_key("meta_device:@loopback_ip", value.get("peer_ip_src", None), "id")
-        if not device_id:
-            device_id = value.get("peer_ip_src", "unknown")
+        self.lookup_device(value.get("peer_ip_src", None), formatted_record)
 
         #map to in and out interface ids as strings
-        interface_in_id = None
-        interface_out_id = None
-        if value.get("iface_in", None):
-            interface_in_id = self.pipeline.cacher("clickhouse").lookup_dict_key("meta_interface:device_id:flow_index", "{}:{}".format(device_id, str(value["iface_in"])), "id")
-        if value.get("iface_out", None):
-            interface_out_id = self.pipeline.cacher("clickhouse").lookup_dict_key("meta_interface:device_id:flow_index", "{}:{}".format(device_id, str(value["iface_out"])), "id")
+        self.lookup_interface(formatted_record["device_id"], value.get("iface_in", None), formatted_record, "in")
+        self.lookup_interface(formatted_record["device_id"], value.get("iface_out", None), formatted_record, "out")
 
         # todo: determine application port - use dst port if available, else src port
         application_port = value.get("port_dst", None)
         if application_port is None:
             application_port = value.get("port_src", None)
-
-        # todo: enable extensions like scireg based on env var
 
         # determine ip version - use quick method based on presence of ':' in ip address
         ip_version = 4
@@ -199,6 +235,8 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         self.add_ipv4_extensions(value, ext)
         self.add_ipv6_extensions(value, ext)
         self.add_mpls_extensions(value, ext)
+        ext.update(self.lookup_ip_ref_extensions(formatted_record.get("src_ip", None), "src"))
+        ext.update(self.lookup_ip_ref_extensions(formatted_record.get("dst_ip", None), "dst"))
 
         # Pull the relevant fields from the value dict as needed.
         # you may also need to do some formatting to make sure they are the right data type, etc
@@ -210,15 +248,9 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             "policy_level": self.policy_level,
             "ext": orjson.dumps(ext).decode('utf-8'),
             "flow_type": self.flow_type,
-            "device_id": device_id,
-            "device_ref": self.pipeline.cacher("clickhouse").lookup_dict_key("meta_device", device_id, "ref"),
             "src_port": value.get("port_src", None),
             "dst_port": value.get("port_dst", None),
             "protocol": value.get("ip_proto", None),
-            "in_interface_id": interface_in_id,
-            "in_interface_ref": self.pipeline.cacher("clickhouse").lookup_dict_key("meta_interface", interface_in_id, "ref"),
-            "out_interface_id": interface_out_id,
-            "out_interface_ref": self.pipeline.cacher("clickhouse").lookup_dict_key("meta_interface", interface_out_id, "ref"),
             "ip_version": ip_version,
             "application_port": application_port,
             "bit_count": value.get("bytes", 0),
