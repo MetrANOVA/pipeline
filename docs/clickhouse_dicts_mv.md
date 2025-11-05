@@ -23,7 +23,7 @@ RANGE(MIN port_range_min MAX port_range_max)
 ## Dictionary: meta_as_dict
 This is a dictionary for looking up AS names from meta_as based on AS number
 ```
-CREATE DICTIONARY meta_application_dict (
+CREATE DICTIONARY meta_as_dict (
     `id` UInt32,
     `name` String
 )
