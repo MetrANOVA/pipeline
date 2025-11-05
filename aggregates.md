@@ -33,13 +33,18 @@ CREATE TABLE IF NOT EXISTS data_flow_by_edge_as_5m (
         `bgp_as_path_id` Array(UInt32)
     ),
     `src_as_id` UInt32,
+    `src_as_ref` Nullable(String),
     `dst_as_id` UInt32,
+    `dst_as_ref` Nullable(String),
     `device_id` LowCardinality(String),
+    `device_ref` Nullable(String),
     `application_id` LowCardinality(Nullable(String)),
     `in_interface_id` LowCardinality(Nullable(String)),
     `in_interface_ref` Nullable(String),
+    `in_interface_edge` Bool,
     `out_interface_id` LowCardinality(Nullable(String)),
     `out_interface_ref` Nullable(String),
+    `out_interface_edge` Bool,
     `ip_version` UInt8,
     `flow_count` UInt64,
     `bit_count` UInt64,
@@ -60,12 +65,17 @@ ORDER BY (
     policy_level,
     policy_scope,
     ext.bgp_as_path_id,
+    src_as_ref,
+    dst_as_ref,
     device_id,
+    device_ref,
     application_id,
     in_interface_id,
     in_interface_ref,
+    in_interface_edge,
     out_interface_id,
     out_interface_ref,
+    out_interface_edge,
     ip_version
 )
 TTL start_time + INTERVAL 5 YEAR
@@ -86,21 +96,24 @@ SELECT
         )
     ) as ext,
     src_as_id,
+    src_as_ref,
     dst_as_id,
+    dst_as_ref,
     device_id,
+    device_ref,
     dictGetOrNull('meta_application_dict', 'id', protocol, application_port) AS application_id,
     in_interface_id,
     in_interface_ref,
+    in_interface_edge,
     out_interface_id,
     out_interface_ref,
+    out_interface_edge,
     ip_version,
     1 AS flow_count,
     bit_count,
     packet_count
 FROM data_flow
-WHERE 
-    true = (SELECT edge FROM meta_interface WHERE ref=data_flow.in_interface_ref)
-    OR true = (SELECT edge FROM meta_interface WHERE ref=data_flow.out_interface_ref)
+WHERE in_interface_edge = True OR out_interface_edge = True
 ```
 
 ## Materialized View: 5m_ip_version 
