@@ -22,138 +22,85 @@ RANGE(MIN port_range_min MAX port_range_max)
 
 ## Materialized View: 5m_edge_asns
 
-### Create Table
+### Create Table 
 ```
-CREATE TABLE IF NOT EXISTS flow_edge_5m_asns_v2 (
-            `start_ts` DateTime,
-            `policy_originator` LowCardinality(Nullable(String)),
-            `policy_level` LowCardinality(Nullable(String)),
-            `policy_scopes` Array(LowCardinality(String)),
-            `app_name` LowCardinality(Nullable(String)),
-            `bgp_as_path` Array(Nullable(UInt32)),
-            `bgp_comms` Array(LowCardinality(Nullable(String))),
-            `bgp_ecomms` Array(LowCardinality(Nullable(String))),
-            `bgp_lcomms` Array(LowCardinality(Nullable(String))),
-            `bgp_local_pref` Nullable(UInt32),
-            `bgp_med` Nullable(UInt32),
-            `bgp_next_hop` Nullable(IPv6),
-            `bgp_peer_as_dst` Nullable(UInt32),
-            `device_name` LowCardinality(Nullable(String)),
-            `dst_asn` UInt32,
-            `dst_scireg_ref` Nullable(String),
-            `ifin_ref` Nullable(String),
-            `ifout_ref` Nullable(String),
-            `ip_version`  Nullable(UInt8),
-            `protocol` LowCardinality(Nullable(String)),
-            `src_asn` UInt32,
-            `src_scireg_ref` Nullable(String),
-            `flow_count` UInt32,
-            `bit_count` UInt32,
-            `packet_count` UInt32
-        )
-        ENGINE = SummingMergeTree((flow_count, num_bits, num_pkts))
-        PARTITION BY toYYYYMMDD(`start_ts`)
-        PRIMARY KEY (
-            src_asn,
-            dst_asn,
-            start_ts
-        )
-        ORDER BY (
-            src_asn,
-            dst_asn,
-            start_ts,
-            src_as_name, 
-            dst_as_name,
-            ifin_ref,
-            ifout_ref, 
-            policy_level,
-            policy_scopes,
-            policy_originator,
-            app_name,
-            device_name,
-            bgp_next_hop,  
-            bgp_peer_as_dst,
-            bgp_peer_as_dst_name,
-            bgp_as_path,
-            bgp_as_path_name,
-            bgp_comms,
-            bgp_lcomms,
-            bgp_ecomms,
-            bgp_local_pref,
-            bgp_med,
-            dst_pub_asn,
-            dst_continent,
-            dst_country_name,
-            dst_esdb_ipsvc_ref,
-            dst_region_name,
-            dst_region_iso_code,
-            dst_pref_org,
-            dst_scireg_ref,
-            ip_version,
-            protocol, 
-            src_pub_asn,
-            src_continent,
-            src_country_name,
-            src_esdb_ipsvc_ref,
-            src_region_name,
-            src_region_iso_code,
-            src_pref_org,
-            src_scireg_ref,
-            traffic_class
-        )
-        TTL start_ts + INTERVAL 5 YEAR
-        SETTINGS index_granularity = 8192, allow_nullable_key = 1
+CREATE TABLE IF NOT EXISTS data_flow_by_edge_as_5m (
+    `start_time` DateTime,
+    `policy_originator` LowCardinality(Nullable(String)),
+    `policy_level` LowCardinality(Nullable(String)),
+    `policy_scope` Array(LowCardinality(String)),
+    `ext` JSON(
+        `bgp_as_path_id` Array(UInt32)
+    ),
+    `src_as_id` UInt32,
+    `dst_as_id` UInt32,
+    `device_id` LowCardinality(String),
+    `application_id` LowCardinality(Nullable(String)),
+    `in_interface_id` LowCardinality(Nullable(String)),
+    `in_interface_ref` Nullable(String),
+    `out_interface_id` LowCardinality(Nullable(String)),
+    `out_interface_ref` Nullable(String),
+    `ip_version` UInt8,
+    `flow_count` UInt64,
+    `bit_count` UInt64,
+    `packet_count` UInt64
+)
+ENGINE = SummingMergeTree((flow_count, bit_count, packet_count))
+PARTITION BY toYYYYMMDD(`start_time`)
+PRIMARY KEY (
+    src_as_id,
+    dst_as_id,
+    start_time
+)
+ORDER BY (
+    src_as_id,
+    dst_as_id,
+    start_time,
+    policy_originator,
+    policy_level,
+    policy_scope,
+    ext.bgp_as_path_id,
+    device_id,
+    application_id,
+    in_interface_id,
+    in_interface_ref,
+    out_interface_id,
+    out_interface_ref,
+    ip_version
+)
+TTL start_time + INTERVAL 5 YEAR
+SETTINGS index_granularity = 8192, allow_nullable_key = 1
 ```
 
 ### Materialized View
 ```
-CREATE MATERIALIZED VIEW flow_edge_5m_asns_v2_mv TO flow_edge_5m_asns_v2 AS
-SELECT 
-    toStartOfInterval(start_ts, INTERVAL 5 MINUTE) AS start_ts, 
+CREATE MATERIALIZED VIEW data_flow_by_edge_as_5m_mv TO data_flow_by_edge_as_5m AS
+SELECT
+    toStartOfInterval(start_time, INTERVAL 5 MINUTE) AS start_time, 
     policy_originator,
     policy_level,
-    policy_scopes,
-    app_name, 
-    bgp_next_hop,  
-    bgp_peer_as_dst,
-    bgp_peer_as_dst_name,
-    bgp_as_path,
-    bgp_as_path_name,
-    bgp_comms,
-    bgp_lcomms,
-    bgp_ecomms,
-    bgp_local_pref,
-    bgp_med,
-    device_name,
-    dst_as_name,
-    dst_asn,
-    dst_pub_asn,
-    dst_continent,
-    dst_country_name,
-    dst_esdb_ipsvc_ref,
-    dst_region_name,
-    dst_region_iso_code,
-    dst_pref_org,
-    dst_scireg_ref,
-    ifin_ref, 
-    ifout_ref, 
-    ip_version, 
-    protocol,
-    src_as_name,
-    src_asn,
-    src_pub_asn,
-    src_continent,
-    src_country_name,
-    src_esdb_ipsvc_ref,
-    src_region_name,
-    src_region_iso_code,
-    src_pref_org,
-    src_scireg_ref,
-    traffic_class,
-    1 AS flow_count, 
-    num_bits, 
-    num_pkts
-FROM flow_edge_v2 
+    policy_scope,
+    toJSONString(
+        map(
+            'bgp_as_path_id', ext.bgp_as_path_id
+        )
+    ) as ext,
+    src_as_id,
+    dst_as_id,
+    device_id,
+    dictGetOrNull('meta_application_dict', 'id', protocol, application_port) AS application_id,
+    in_interface_id,
+    in_interface_ref,
+    out_interface_id,
+    out_interface_ref,
+    ip_version,
+    1 AS flow_count,
+    bit_count,
+    packet_count
+FROM data_flow
+WHERE 
+    true = (SELECT edge FROM meta_interface WHERE ref=data_flow.in_interface_ref)
+    OR true = (SELECT edge FROM meta_interface WHERE ref=data_flow.out_interface_ref)
 ```
 
 ## Materialized View: 5m_ip_version 
