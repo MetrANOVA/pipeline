@@ -145,7 +145,7 @@ class BaseClickHouseProcessor(BaseProcessor):
                 column_names.append(col_def[0])
         return column_names
 
-    def message_to_columns(self, message: dict) -> list:
+    def message_to_columns(self, message: dict, table_name: str) -> list:
         """Convert a message dict to a list of column values for insertion into ClickHouse"""
         column_values = []
         for col_def in self.column_defs:

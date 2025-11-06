@@ -306,6 +306,7 @@ class TestBaseMetadataProcessor(unittest.TestCase):
         """Test message_to_columns method."""
         
         # Test with valid message
+        table_name = "meta_test_table"
         message = {
             'id': 'test_id',
             'ref': 'test_ref',
@@ -314,7 +315,7 @@ class TestBaseMetadataProcessor(unittest.TestCase):
             'tag': []
         }
         
-        result = self.processor.message_to_columns(message)
+        result = self.processor.message_to_columns(message, table_name)
         expected = ['test_id', 'test_ref', 'test_hash', '{}', []]
         self.assertEqual(result, expected)
 
@@ -322,6 +323,7 @@ class TestBaseMetadataProcessor(unittest.TestCase):
         """Test message_to_columns with missing required field."""
         
         # Missing 'ref' field
+        table_name = "meta_test_table"
         message = {
             'id': 'test_id',
             'hash': 'test_hash',
@@ -330,7 +332,7 @@ class TestBaseMetadataProcessor(unittest.TestCase):
         }
         
         with self.assertRaises(ValueError) as context:
-            self.processor.message_to_columns(message)
+            self.processor.message_to_columns(message, table_name)
         self.assertIn("Missing column 'ref' in message", str(context.exception))
 
 
