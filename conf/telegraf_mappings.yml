@@ -1,5 +1,20 @@
 snmp_if:
   resource_type: interface
+  resource_id:
+    - type: field
+      format: short_hostname
+      path:
+        - tags
+        - device
+    - type: field
+      lookup: ifindex_to_ifname
+      path:
+        - tags
+        - oidIndex
+  resource_ref: meta_interface
+  # skip_tags:
+  #   - date
+  #   - routing_tag
   cache_lookup_table_builder:
     - name: ifindex_to_ifname
       key:

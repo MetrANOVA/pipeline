@@ -74,7 +74,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         temp_file.close()
         return temp_file.name
 
-    @patch.dict(os.environ, {'REDIS_TELEGRAF_MAPPINGS_PATH': '/path/to/snmp_mappings.yml'})
+    @patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': '/path/to/snmp_mappings.yml'})
     @patch('builtins.open')
     @patch('yaml.safe_load')
     def test_init_loads_yaml_successfully(self, mock_yaml_load, mock_open):
@@ -87,7 +87,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         mock_open.assert_called_once_with('/path/to/snmp_mappings.yml', 'r')
         mock_yaml_load.assert_called_once()
 
-    @patch.dict(os.environ, {'REDIS_TELEGRAF_MAPPINGS_PATH': '/path/to/missing.yml'})
+    @patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': '/path/to/missing.yml'})
     @patch('builtins.open', side_effect=FileNotFoundError())
     def test_init_handles_missing_yaml_file(self, mock_open):
         """Test that missing YAML file is handled gracefully."""
@@ -153,7 +153,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         temp_file = self.create_temp_yaml_file(self.test_config)
         
         try:
-            with patch.dict(os.environ, {'REDIS_TELEGRAF_MAPPINGS_PATH': temp_file}):
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
                 processor = LookupTableProcessor(self.mock_pipeline)
                 
                 test_value = {
@@ -177,7 +177,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         temp_file = self.create_temp_yaml_file(self.test_config)
         
         try:
-            with patch.dict(os.environ, {'REDIS_TELEGRAF_MAPPINGS_PATH': temp_file}):
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
                 processor = LookupTableProcessor(self.mock_pipeline)
                 
                 test_value = {
@@ -200,7 +200,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         temp_file = self.create_temp_yaml_file(self.test_config)
         
         try:
-            with patch.dict(os.environ, {'REDIS_TELEGRAF_MAPPINGS_PATH': temp_file}):
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
                 processor = LookupTableProcessor(self.mock_pipeline)
                 
                 test_value = {
@@ -220,7 +220,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         temp_file = self.create_temp_yaml_file(self.test_config)
         
         try:
-            with patch.dict(os.environ, {'REDIS_TELEGRAF_MAPPINGS_PATH': temp_file}):
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
                 processor = LookupTableProcessor(self.mock_pipeline)
                 
                 test_value = {
@@ -244,7 +244,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         temp_file = self.create_temp_yaml_file(self.test_config)
         
         try:
-            with patch.dict(os.environ, {'REDIS_TELEGRAF_MAPPINGS_PATH': temp_file}):
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
                 processor = LookupTableProcessor(self.mock_pipeline)
                 
                 test_value = {
@@ -268,7 +268,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         temp_file = self.create_temp_yaml_file(self.test_config)
         
         try:
-            with patch.dict(os.environ, {'REDIS_TELEGRAF_MAPPINGS_PATH': temp_file}):
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
                 processor = LookupTableProcessor(self.mock_pipeline)
                 processor.expires = 3600  # Set expires for testing
                 
@@ -299,7 +299,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         temp_file = self.create_temp_yaml_file(self.test_config)
         
         try:
-            with patch.dict(os.environ, {'REDIS_TELEGRAF_MAPPINGS_PATH': temp_file}):
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
                 processor = LookupTableProcessor(self.mock_pipeline)
                 processor.expires = 7200
                 
@@ -327,7 +327,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         temp_file = self.create_temp_yaml_file(self.test_config)
         
         try:
-            with patch.dict(os.environ, {'REDIS_TELEGRAF_MAPPINGS_PATH': temp_file}):
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
                 processor = LookupTableProcessor(self.mock_pipeline)
                 
                 test_value = {
@@ -347,7 +347,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         temp_file = self.create_temp_yaml_file(self.test_config)
         
         try:
-            with patch.dict(os.environ, {'REDIS_TELEGRAF_MAPPINGS_PATH': temp_file}):
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
                 processor = LookupTableProcessor(self.mock_pipeline)
                 
                 test_value = {
@@ -371,7 +371,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         temp_file = self.create_temp_yaml_file(self.test_config)
         
         try:
-            with patch.dict(os.environ, {'REDIS_TELEGRAF_MAPPINGS_PATH': temp_file}):
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
                 processor = LookupTableProcessor(self.mock_pipeline)
                 
                 test_value = {

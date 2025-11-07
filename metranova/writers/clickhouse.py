@@ -64,11 +64,13 @@ class ClickHouseBatcher:
         self.last_flush_time = time.time()
 
         # Prepare table and columns
-        self.create_table()
+        for table_name in self.processor.get_table_names():
+            self.batch[table_name] = []
+            self.create_table(table_name)
 
-    def create_table(self):
+    def create_table(self, table_name):
         """Create the target table if it doesn't exist"""
-        create_table_cmd = self.processor.create_table_command() # store for reference
+        create_table_cmd = self.processor.create_table_command(table_name=table_name) # store for reference
         if create_table_cmd is None:
             logger.info("No create_table_cmd defined, skipping table creation")
             return
@@ -143,7 +145,7 @@ class ClickHouseBatcher:
                 column_names=self.processor.column_names()
             )
 
-            self.logger.info(f"Successfully inserted {len(data_to_insert)} messages into ClickHouse table {table_name}")
+            self.logger.debug(f"Successfully inserted {len(data_to_insert)} messages into ClickHouse table {table_name}")
             
             # Clear batch and update flush time
             self.batch[table_name].clear()
@@ -151,7 +153,7 @@ class ClickHouseBatcher:
             
         except Exception as e:
             self.logger.error(f"Failed to insert batch into ClickHouse: {e}")
-            self.logger.debug(f"table= {self.processor.table}")
+            self.logger.debug(f"table= {table_name}")
             self.logger.debug(f"column_names= {self.processor.column_names()}")
             self.logger.debug(f"data_to_insert= {data_to_insert}")
     
