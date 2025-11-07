@@ -190,11 +190,12 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
         # Future: implement more formats as needed
         return value
 
-    def lookup_value(self, value: str, lookup_table: str | None) -> str:
+    def lookup_value(self, value: str, prefix_parts: list[str], lookup_table: str | None) -> str:
         """Lookup value in specified lookup table."""
         if lookup_table is None:
             return value
-        looked_up = self.pipeline.cacher("redis").lookup(lookup_table, value)
+        lookup_key = "::".join([*prefix_parts, value])
+        looked_up = self.pipeline.cacher("redis").lookup(lookup_table, lookup_key)
         return looked_up if looked_up is not None else value
 
     def find_resource_id(self, value, rule):
@@ -221,7 +222,7 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
                     format_type = rid_def.get('format', None)
                     current = self.format_value(str(current), format_type)
                     lookup_table = rid_def.get('lookup', None)
-                    current = self.lookup_value(current, lookup_table)
+                    current = self.lookup_value(current, resource_id_parts, lookup_table)
                     resource_id_parts.append(current)
 
         return '::'.join(resource_id_parts)
