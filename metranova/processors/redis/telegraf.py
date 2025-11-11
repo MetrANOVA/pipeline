@@ -19,7 +19,7 @@ class LookupTableProcessor(BaseRedisProcessor):
         self.expires = int(os.getenv('REDIS_TELEGRAF_LOOKUP_TABLE_EXPIRES', '86400'))  # default 1 day
 
         # Load YAML configuration file
-        yaml_path = os.getenv('REDIS_TELEGRAF_MAPPINGS_PATH', '/etc/metranova_pipeline/telegraf_mappings.yml')
+        yaml_path = os.getenv('TELEGRAF_MAPPINGS_PATH', '/etc/metranova_pipeline/telegraf_mappings.yml')
         try:
             with open(yaml_path, 'r') as file:
                 self.rules = yaml.safe_load(file)
@@ -51,7 +51,7 @@ class LookupTableProcessor(BaseRedisProcessor):
             return False
             
         rule = self.rules[name]
-        cache_builders = rule.get('cache_lookup_table_builder', [])
+        cache_builders = rule.get('resource_lookup_tables', [])
         
         # Check if at least one cache lookup table builder has valid key and value paths
         for builder in cache_builders:
@@ -99,7 +99,7 @@ class LookupTableProcessor(BaseRedisProcessor):
             return []
             
         rule = self.rules[name]
-        cache_builders = rule.get('cache_lookup_table_builder', [])
+        cache_builders = rule.get('resource_lookup_tables', [])
         results = []
         
         for builder in cache_builders:

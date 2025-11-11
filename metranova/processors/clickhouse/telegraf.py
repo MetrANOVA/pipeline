@@ -1,6 +1,10 @@
 import logging
 import os
 
+import orjson
+import yaml
+
+from metranova.processors.clickhouse.base import BaseDataGenericMetricProcessor
 from metranova.processors.clickhouse.interface import BaseInterfaceTrafficProcessor
 
 logger = logging.getLogger(__name__)
@@ -123,3 +127,203 @@ class IFMIBInterfaceTrafficProcessor(BaseInterfaceTrafficProcessor):
             formatted_record['oper_status'] = oper_status_map[formatted_record['oper_status']]
 
         return [formatted_record]
+
+class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        self.logger = logger
+        self.required_fields = [
+            ["timestamp"], 
+            ["fields"],
+            ["tags"]
+        ]
+        #tags to always skip - these are added to skip_tags in rules
+        self.default_skip_tags = ["date", "routing_tag", "collector"]
+        # Load YAML configuration file
+        yaml_path = os.getenv('TELEGRAF_MAPPINGS_PATH', '/etc/metranova_pipeline/telegraf_mappings.yml')
+        try:
+            with open(yaml_path, 'r') as file:
+                self.rules = yaml.safe_load(file)
+                self.logger.info(f"Loaded mappings from {yaml_path}")
+        except FileNotFoundError:
+            self.logger.error(f"Mappings file not found at {yaml_path}")
+            self.rules = {}
+        except yaml.YAMLError as e:
+            self.logger.error(f"Error parsing YAML file {yaml_path}: {e}")
+            self.rules = {}
+        for rule_name, rule in self.rules.items():
+            resource_type = rule.get('resource_type', None)
+            if resource_type is None:
+                self.logger.warning(f"Rule {rule_name} missing resource_type, skipping")
+                continue
+            # add to resource types if not already present
+            if resource_type not in self.resource_types:
+                self.resource_types.append(resource_type)
+        #rebuild table name map
+        self.table_name_map = {}
+        self.resource_type_map = {}
+        for resource_type in self.resource_types:
+            self.resource_type_map[resource_type] = True
+            for metric_type in self.metric_types:
+                table_name = self.get_table_name(resource_type, metric_type)
+                self.table_name_map[table_name] = True
+    
+    def match_message(self, value):
+        val_name = value.get('name', None)
+        if val_name is None:
+            return False
+        if self.rules.get(val_name, None) is None:
+            return False
+        if self.rules[val_name].get('resource_type', None) is None:
+            return False
+        #make sure it is a known resource type
+        if self.resource_type_map.get(self.rules[val_name]['resource_type'], None) is None:
+            return False
+        return super().match_message(value)
+
+    def format_value(self, value: str, format_type: str | None) -> str:
+        """Format value based on specified format type."""
+        if format_type is None:
+            return value
+        if format_type == 'short_hostname':
+            return value.split('.')[0]
+        # Future: implement more formats as needed
+        return value
+
+    def lookup_value(self, value: str, prefix_parts: list[str], lookup_table: str | None) -> str:
+        """Lookup value in specified lookup table."""
+        if lookup_table is None:
+            return value
+        lookup_key = "::".join([*prefix_parts, value])
+        looked_up = self.pipeline.cacher("redis").lookup(lookup_table, lookup_key)
+        return looked_up if looked_up is not None else value
+
+    def find_resource_id(self, value, rule):
+        #check rule
+        if rule is None:
+            return None
+        #get rules for building resource id
+        resource_id_rules = rule.get('resource_id', [])
+        if not resource_id_rules:
+            #check for default rules
+            resource_id_rules = self.rules.get("_default", {}).get('resource_id', [])
+        if not resource_id_rules:
+            return None
+        #build resource id parts
+        resource_id_parts = []
+        for rid_def in resource_id_rules:
+            if rid_def.get('type') == 'field':
+                # extract value from path
+                current = value
+                for key in rid_def.get('path', []):
+                    if not isinstance(current, dict) or key not in current:
+                        current = None
+                        break
+                    current = current[key]
+                if current is not None:
+                    # apply formatting if specified
+                    format_type = rid_def.get('format', None)
+                    current = self.format_value(str(current), format_type)
+                    lookup_table = rid_def.get('lookup', None)
+                    current = self.lookup_value(current, resource_id_parts, lookup_table)
+                    resource_id_parts.append(current)
+
+        return '::'.join(resource_id_parts)
+
+    def find_resource_ref(self, resource_id, rule):
+        # check rule
+        if rule is None:
+            return None
+        # get lookup table for resource ref
+        lookup_table = rule.get('resource_ref', None)
+        if lookup_table is None:
+            return None
+        # lookup resource ref
+        return self.pipeline.cacher("redis").lookup(lookup_table, resource_id)
+
+    def build_message(self, value, msg_metadata):
+        # check required fields
+        if not self.has_required_fields(value):
+            return []
+
+        #get rule for this telegraf name
+        name = value.get('name', '')
+        rule = self.rules.get(name, None)
+        if rule is None:
+            self.logger.debug(f"No rule found for telegraf name: {name}")
+            return []
+
+        #lookup resource id
+        resource_id = self.find_resource_id(value, rule)
+        if resource_id is None:
+            self.logger.debug("Resource ID could not be determined from message")
+            return []
+
+        #lookup resource ref
+        resource_ref = self.find_resource_ref(resource_id, rule)
+
+        #grab the timestamp
+        try:
+            observation_time = int(value.get('timestamp', 0)) * 1000
+        except (ValueError, TypeError):
+            self.logger.error("Invalid timestamp format")
+            return []
+
+        #build ext from tags
+        skip_tags = rule.get('skip_tags', []) + self.default_skip_tags
+        skip_tags_map = {tag: True for tag in skip_tags}
+        ext = {}
+        for tag_key, tag_value in value.get("tags", {}).items():
+            if skip_tags_map.get(tag_key, False):
+                continue
+            ext[tag_key] = tag_value
+        # build json here to save from doing it multiple times
+        ext_json = orjson.dumps(ext).decode('utf-8')
+
+        # build table name
+        resource_type = rule.get('resource_type', None)
+        if resource_type is None:
+            self.logger.debug("No resource_type defined in rule, cannot determine table name")
+            return []
+
+        # loop through fields and build messages
+        formatted_records = []
+        for field, field_value in value.get("fields", {}).items():
+            # we may have to change this so create var local to loop
+            tmp_ext_json = ext_json
+            table_name = None
+            # If it is an int, make it a counter, if it is a float, make it a gauge, otherwise make it a counter by setting value to 1 and adding value to ext
+            if isinstance(field_value, float):
+                table_name = self.get_table_name(resource_type, 'gauge')
+            elif not isinstance(field_value, int):
+                # For non-numeric, set to 1 and add original value to ext
+                table_name = self.get_table_name(resource_type, 'counter')
+                tmp_ext = ext.copy()
+                tmp_ext["metric_value"] = field_value
+                tmp_ext_json = orjson.dumps(tmp_ext).decode('utf-8')
+                field_value = 1
+            else:
+                table_name = self.get_table_name(resource_type, 'counter')
+
+            # verify table name is valid
+            if table_name not in self.table_name_map:
+                self.logger.debug(f"Table name {table_name} not recognized, skipping field {field}")
+                continue
+
+            # build formatted record
+            formatted_record = {
+                "_clickhouse_table": table_name,
+                "observation_time": observation_time,
+                "collector_id": value.get("tags", {}).get("collector", "unknown"),
+                "policy_originator": self.policy_originator,
+                "policy_level": self.policy_level,
+                "policy_scope": self.policy_scope,
+                "ext": tmp_ext_json,
+                "id": resource_id,
+                "ref": resource_ref,
+                "metric_name": field,
+                "metric_value": field_value
+            }
+            formatted_records.append(formatted_record)
+
+        return formatted_records

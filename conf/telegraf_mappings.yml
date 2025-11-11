@@ -1,6 +1,37 @@
+###
+# Set default resource id path to device:oidIndex for rules where not specified
+# Note: You can only set a defult resource_id. Any other options must be set per rule.
+_default:
+  resource_id:
+    - type: field
+      format: short_hostname
+      path:
+        - tags
+        - device
+    - type: field
+      path:
+        - tags
+        - oidIndex
+##
+# Define rules for mapping telegraf metrics to resources. The key must match the "name" field in the telegraf metric.
 snmp_if:
   resource_type: interface
-  cache_lookup_table_builder:
+  resource_id:
+    - type: field
+      format: short_hostname
+      path:
+        - tags
+        - device
+    - type: field
+      lookup: ifindex_to_ifname
+      path:
+        - tags
+        - oidIndex
+  resource_ref: meta_interface
+  # skip_tags:
+  #   - date
+  #   - routing_tag
+  resource_lookup_tables:
     - name: ifindex_to_ifname
       key:
         - type: field
@@ -19,8 +50,20 @@ snmp_if:
           - SNMP_IF-MIB::ifName
 
 snmp_timetra_vrtr:
-  type: interface
-  cache_lookup_table_builder:
+  resource_type: interface
+  resource_id:
+    - type: field
+      format: short_hostname
+      path:
+        - tags
+        - device
+    - type: field
+      lookup: vrtrifindex_to_ifname
+      path:
+        - tags
+        - oidIndex
+  resource_ref: meta_interface
+  resource_lookup_tables:
     - name: vrtrifindex_to_ifname
       key:
         - type: field
@@ -37,68 +80,33 @@ snmp_timetra_vrtr:
         path:
           - fields
           - SNMP_TIMETRA-VRTR-MIB::vRtrIfName
-    - name: sapindex_to_ifname
-      key:
-        - type: field
-          format: short_hostname
-          path:
-            - tags
-            - device
-        - type: field
-          path:
-            - fields
-            - SNMP_TIMETRA-VRTR-MIB::vRtrIfServiceId
-        - type: field
-          path:
-            - fields
-            - SNMP_TIMETRA-VRTR-MIB::vRtrIfPortID
-        - type: field
-          path:
-            - fields
-            - SNMP_TIMETRA-VRTR-MIB::vRtrIfEncapValue
-      value:
-        type: field
-        path:
-          - fields
-          - SNMP_TIMETRA-VRTR-MIB::vRtrIfName
 
 snmp_timetra_sap:
-  type: interface
-  cache_lookup_table_builder:
-    - name: sapindex_to_sapname
-      key:
-        - type: field
-          format: short_hostname
-          path:
-            - tags
-            - device
-        - type: field
-          path:
-            - tags
-            - oidIndex
-      value:
-        type: field
-        format: tmnxsapid
-        path:
-          - tags
-          - oidIndex
+  resource_type: interface
+  resource_ref: meta_interface
 
-snmp_timetra_lag:
-  type: interface
-  cache_lookup_table_builder:
-    - name: lagindex_to_ifindex
-      key:
-        - type: field
-          format: short_hostname
-          path:
-            - tags
-            - device
-        - type: field
-          path:
-            - tags
-            - oidIndex
-      value:
-        type: field
-        path:
-          - fields
-          - SNMP_TIMETRA-LAG-MIB::tLagIfIndex
+snmp_timetra_port_queue:
+  resource_type: interface
+  resource_ref: meta_interface
+
+snmp_timetra_chassis:
+  resource_type: chassis_part
+
+snmp_juniper:
+  resource_type: chassis_part
+
+snmp_alpha:
+  resource_type: pdu_outlet
+    
+snmp_sentry4:
+  resource_type: pdu_outlet
+
+snmp:
+  resource_type: device
+  resource_id:
+    - type: field
+      format: short_hostname
+      path:
+        - tags
+        - device
+  resource_ref: meta_device

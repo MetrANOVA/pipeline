@@ -1,3 +1,4 @@
+from collections import defaultdict
 import logging
 import os
 from platform import processor
@@ -57,16 +58,19 @@ class ClickHouseBatcher:
         self.flush_interval = float(os.getenv('CLICKHOUSE_FLUSH_INTERVAL', '0.1'))  # seconds
        
         # Batch state
-        self.batch: List[Dict[str, Any]] = []
+        # self.batch is a dict where key is table name and value is list of messages for that table
+        self.batch = defaultdict(list)
         self.batch_lock = threading.Lock()
         self.last_flush_time = time.time()
 
         # Prepare table and columns
-        self.create_table()
+        for table_name in self.processor.get_table_names():
+            self.batch[table_name] = []
+            self.create_table(table_name)
 
-    def create_table(self):
+    def create_table(self, table_name):
         """Create the target table if it doesn't exist"""
-        create_table_cmd = self.processor.create_table_command() # store for reference
+        create_table_cmd = self.processor.create_table_command(table_name=table_name) # store for reference
         if create_table_cmd is None:
             logger.info("No create_table_cmd defined, skipping table creation")
             return
@@ -87,10 +91,10 @@ class ClickHouseBatcher:
                 current_time = time.time()
                 
                 with self.batch_lock:
-                    if (self.batch and 
-                        current_time - self.last_flush_time >= self.batch_timeout):
-                        self.flush_batch()
-        
+                    if (current_time - self.last_flush_time) >= self.batch_timeout:
+                        for table_name in self.batch:
+                            self.flush_batch(table_name)
+
         timer_thread = threading.Thread(target=flush_timer, daemon=True)
         timer_thread.start()
         logger.info(f"Started batch flush timer (timeout: {self.batch_timeout}s)")
@@ -113,45 +117,49 @@ class ClickHouseBatcher:
         #append to batch
         with self.batch_lock:
             #Note: message_data is a list of dicts so += adds all elements
-            self.batch.extend(message_data)
+            for formatted_msg in message_data:
+                table_name = formatted_msg.get('_clickhouse_table', self.processor.table)
+                self.batch[table_name].append(formatted_msg)
             
             # Check if we need to flush
-            if len(self.batch) >= self.batch_size:
-                self.flush_batch()
-    
-    def flush_batch(self):
+            for table_name in self.batch:
+                if len(self.batch[table_name]) >= self.batch_size:
+                    self.flush_batch(table_name)
+
+    def flush_batch(self, table_name):
         """Flush current batch to ClickHouse"""
-        if not self.batch:
+        if not self.batch or not table_name or not self.batch.get(table_name, None):
+            #nothing to flush
             return
         
         try:
             # Prepare data for insertion
             data_to_insert = []
-            for msg in self.batch:
-                data_to_insert.append(self.processor.message_to_columns(msg))
+            for msg in self.batch[table_name]:
+                data_to_insert.append(self.processor.message_to_columns(msg, table_name))
             
             # Insert batch into ClickHouse
             self.client.insert(
-                table=self.processor.table,
+                table=table_name,
                 data=data_to_insert,
                 column_names=self.processor.column_names()
             )
-            
-            self.logger.debug(f"Successfully inserted {len(self.batch)} messages into ClickHouse")
+
+            self.logger.debug(f"Successfully inserted {len(data_to_insert)} messages into ClickHouse table {table_name}")
             
             # Clear batch and update flush time
-            self.batch.clear()
+            self.batch[table_name].clear()
             self.last_flush_time = time.time()
             
         except Exception as e:
             self.logger.error(f"Failed to insert batch into ClickHouse: {e}")
-            self.logger.debug(f"table= {self.processor.table}")
+            self.logger.debug(f"table= {table_name}")
             self.logger.debug(f"column_names= {self.processor.column_names()}")
             self.logger.debug(f"data_to_insert= {data_to_insert}")
     
     def close(self):
         with self.batch_lock:
-            if self.batch:
+            for table_name in self.batch:
                 self.logger.info("Flushing remaining messages before closing...")
-                self.flush_batch()
+                self.flush_batch(table_name)
 

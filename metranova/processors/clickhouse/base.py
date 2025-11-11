@@ -40,20 +40,30 @@ class BaseClickHouseProcessor(BaseProcessor):
         self.primary_keys = []
         self.order_by = []
 
-    def create_table_command(self) -> str:
+    def get_table_names(self) -> list:
+        """Return list of table names used by this processor. Override in child classes if multiple tables are used."""
+        return [self.table]
+    
+    def create_table_command(self, table_name=None) -> str:
         """Return the ClickHouse table creation command"""
         # first check that we have everything we need
-        if not self.table:
+        if not table_name and not self.table:
             raise ValueError("Table name is not set")
+        elif not table_name:
+            table_name = self.table
         if not self.column_defs:
             raise ValueError("Column definitions are not set")
         if not self.table_engine:
             raise ValueError("Table engine is not set")
 
         table_settings = { "index_granularity": self.table_granularity }
-        create_table_cmd =  "CREATE TABLE IF NOT EXISTS {} (".format(self.table)
+        create_table_cmd =  "CREATE TABLE IF NOT EXISTS {} (".format(table_name)
         has_columns = False
         for col_def in self.column_defs:
+            if len(col_def) > 3:
+                # the 4th item checks suffix of table name and skips if not match
+                if not table_name.endswith(f"_{col_def[3]}"):
+                    continue
             if has_columns:
                 create_table_cmd += ","
             # handle extension columns. This code is somewhat redundant with wrapping code but keeps things clearer
@@ -139,16 +149,23 @@ class BaseClickHouseProcessor(BaseProcessor):
     def column_names(self) -> list:
         """Return list of column names for insertion into ClickHouse"""
         column_names = []
+        columns_seen = {} #track columns seen so we don't add duplicates - can't use set since order matters
         for col_def in self.column_defs:
+            if columns_seen.get(col_def[0], False):
+                continue
             include_in_insert = col_def[2]
             if include_in_insert:
                 column_names.append(col_def[0])
+                columns_seen[col_def[0]] = True
         return column_names
 
-    def message_to_columns(self, message: dict) -> list:
+    def message_to_columns(self, message: dict, table_name: str) -> list:
         """Convert a message dict to a list of column values for insertion into ClickHouse"""
         column_values = []
+        columns_seen = {} #track columns seen so we don't add duplicates
         for col_def in self.column_defs:
+            if columns_seen.get(col_def[0], False):
+                continue
             col_name = col_def[0]
             include_in_insert = col_def[2]
             if not include_in_insert:
@@ -156,6 +173,8 @@ class BaseClickHouseProcessor(BaseProcessor):
             if col_name not in message.keys():
                 raise ValueError(f"Missing column '{col_name}' in message")
             column_values.append(message.get(col_name, None))
+            columns_seen[col_name] = True
+        # return as list
         return column_values
 
 class BaseMetadataProcessor(BaseClickHouseProcessor):
@@ -424,29 +443,45 @@ class BaseDataProcessor(BaseClickHouseProcessor):
 class BaseDataGenericMetricProcessor(BaseDataProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
-                #get resource name from environment variable
-        self.resource_name = os.getenv('CLICKHOUSE_METRIC_RESOURCE_NAME', None)
-        if not self.resource_name:
-            raise ValueError("CLICKHOUSE_METRIC_RESOURCE_NAME environment variable not set")
+        self.metric_types = ['counter', 'gauge']  # list of metric types to create tables for
+        #loads resource types from environment - this may be overriden by other methods in subclass
+        self.resource_types = self.load_resource_types()
+        #build map of table names
+        self.table_name_map = {}
+        for resource_type in self.resource_types:
+            for metric_type in self.metric_types:
+                table_name = self.get_table_name(resource_type, metric_type)
+                self.table_name_map[table_name] = True
+
         #add standard columns
-        id_field ="{}_id".format(self.resource_name)
-        ref_field ="{}_ref".format(self.resource_name)
         self.column_defs.insert(0, ["observation_time", "DateTime64(3, 'UTC') CODEC(Delta,ZSTD)", True])
-        self.column_defs.append([id_field, "LowCardinality(String)", True])
-        self.column_defs.append([ref_field, "Nullable(String)", True])
+        self.column_defs.append(["id", "LowCardinality(String)", True])
+        self.column_defs.append(["ref", "Nullable(String)", True])
         self.column_defs.append(["metric_name", "String", True])
+        # last two are metric value types - the item at index 3 is a marker to indicate which type it is
+        self.column_defs.append(["metric_value", "Float64", True, "gauge"])
+        self.column_defs.append(["metric_value", "UInt64 CODEC(Delta,ZSTD)", True, "counter"])
+
         # adjust other table settings
         self.partition_by = "toYYYYMMDD(observation_time)"
-        self.order_by = ("metric_name", id_field, "observation_time")
+        self.order_by = ("metric_name", "id", "observation_time")
 
-class DataCounterProcessor(BaseDataGenericMetricProcessor):
-    def __init__(self, pipeline):
-        super().__init__(pipeline)
-        self.table = "data_{}_counter".format(self.resource_name)
-        self.column_defs.append(["metric_value", "UInt64 CODEC(Delta,ZSTD)", True])
+    def load_resource_types(self) -> list:
+        """Load resource names from CLICKHOUSE_METRIC_RESOURCE_NAME environment variable"""
+        resource_str = os.getenv('CLICKHOUSE_METRIC_RESOURCE_NAME', None)
+        if not resource_str:
+            return []
+        resource_types= []
+        for res in resource_str.split(','):
+            res = res.strip()
+            if res:
+                resource_types.append(res)
+        if not resource_types:
+            return []
+        return resource_types
 
-class DataGaugeProcessor(BaseDataGenericMetricProcessor):
-    def __init__(self, pipeline):
-        super().__init__(pipeline)
-        self.table = "data_{}_gauge".format(self.resource_name)
-        self.column_defs.append(["metric_value", "Float64", True])
+    def get_table_name(self, resource_type: str, metric_type: str) -> str:
+        return f"data_{resource_type}_{metric_type}"
+
+    def get_table_names(self):
+        return self.table_name_map.keys()

@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 # Add the project root to the Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from metranova.processors.clickhouse.base import BaseMetadataProcessor, DataCounterProcessor, DataGaugeProcessor, BaseDataProcessor
+from metranova.processors.clickhouse.base import BaseMetadataProcessor, BaseDataProcessor
 
 
 class TestBaseMetadataProcessor(unittest.TestCase):
@@ -306,6 +306,7 @@ class TestBaseMetadataProcessor(unittest.TestCase):
         """Test message_to_columns method."""
         
         # Test with valid message
+        table_name = "meta_test_table"
         message = {
             'id': 'test_id',
             'ref': 'test_ref',
@@ -314,7 +315,7 @@ class TestBaseMetadataProcessor(unittest.TestCase):
             'tag': []
         }
         
-        result = self.processor.message_to_columns(message)
+        result = self.processor.message_to_columns(message, table_name)
         expected = ['test_id', 'test_ref', 'test_hash', '{}', []]
         self.assertEqual(result, expected)
 
@@ -322,6 +323,7 @@ class TestBaseMetadataProcessor(unittest.TestCase):
         """Test message_to_columns with missing required field."""
         
         # Missing 'ref' field
+        table_name = "meta_test_table"
         message = {
             'id': 'test_id',
             'hash': 'test_hash',
@@ -330,7 +332,7 @@ class TestBaseMetadataProcessor(unittest.TestCase):
         }
         
         with self.assertRaises(ValueError) as context:
-            self.processor.message_to_columns(message)
+            self.processor.message_to_columns(message, table_name)
         self.assertIn("Missing column 'ref' in message", str(context.exception))
 
 
@@ -516,162 +518,6 @@ class TestBaseDataProcessor(unittest.TestCase):
         
         processor = BaseDataProcessor(self.mock_pipeline)
         self.assertEqual(processor.policy_scope, [])
-
-
-class TestDataCounterProcessor(unittest.TestCase):
-    def setUp(self):
-        """Set up test fixtures before each test method."""
-        # Create a mock pipeline
-        self.mock_pipeline = Mock()
-        
-    @patch.dict(os.environ, {'CLICKHOUSE_METRIC_RESOURCE_NAME': 'interface'})
-    def test_create_table_command_data_counter(self):
-        """Test the create_table_command method for DataCounterProcessor."""
-        
-        # Create an instance of DataCounterProcessor
-        processor = DataCounterProcessor(self.mock_pipeline)
-        
-        # Call the method
-        result = processor.create_table_command()
-        
-        # Print the result for inspection
-        print("\n" + "="*80)
-        print("CREATE TABLE COMMAND OUTPUT (DataCounterProcessor):")
-        print("="*80)
-        print(result)
-        print("="*80)
-        
-        # Assertions to verify the command structure
-        self.assertIn("CREATE TABLE IF NOT EXISTS data_interface_counter", result)
-        self.assertIn("ENGINE = MergeTree()", result)
-        self.assertIn("PARTITION BY toYYYYMMDD(observation_time)", result)
-        self.assertIn("ORDER BY (`metric_name`,`interface_id`,`observation_time`)", result)
-        self.assertIn("SETTINGS index_granularity = 8192", result)
-        
-        # Check for specific columns
-        self.assertIn("`observation_time` DateTime64(3, 'UTC')", result)
-        self.assertIn("`insert_time` DateTime64(3, 'UTC') DEFAULT now64()", result)
-        self.assertIn("`collector_id` LowCardinality(String)", result)
-        self.assertIn("`policy_originator` LowCardinality(String)", result)
-        self.assertIn("`policy_level` LowCardinality(String)", result)
-        self.assertIn("`policy_scope` Array(LowCardinality(String))", result)
-        self.assertIn("`ext` JSON", result)
-        self.assertIn("`interface_id` LowCardinality(String)", result)
-        self.assertIn("`interface_ref` Nullable(String)", result)
-        self.assertIn("`metric_name` String", result)
-        self.assertIn("`metric_value` UInt64", result)
-        
-    @patch.dict(os.environ, {'CLICKHOUSE_METRIC_RESOURCE_NAME': 'device'})
-    def test_create_table_command_data_counter_different_resource(self):
-        """Test the create_table_command method for DataCounterProcessor with different resource name."""
-        
-        # Create an instance of DataCounterProcessor
-        processor = DataCounterProcessor(self.mock_pipeline)
-        
-        # Call the method
-        result = processor.create_table_command()
-        
-        # Print the result for inspection
-        print("\n" + "="*80)
-        print("CREATE TABLE COMMAND OUTPUT (DataCounterProcessor - Device):")
-        print("="*80)
-        print(result)
-        print("="*80)
-        
-        # Assertions to verify the command structure with different resource name
-        self.assertIn("CREATE TABLE IF NOT EXISTS data_device_counter", result)
-        self.assertIn("`device_id` LowCardinality(String)", result)
-        self.assertIn("`device_ref` Nullable(String)", result)
-        self.assertIn("ORDER BY (`metric_name`,`device_id`,`observation_time`)", result)
-        
-    def test_data_counter_processor_missing_env_var(self):
-        """Test that DataCounterProcessor raises error when environment variable is missing."""
-        
-        # Ensure the environment variable is not set
-        if 'CLICKHOUSE_METRIC_RESOURCE_NAME' in os.environ:
-            del os.environ['CLICKHOUSE_METRIC_RESOURCE_NAME']
-            
-        with self.assertRaises(ValueError) as context:
-            DataCounterProcessor(self.mock_pipeline)
-        self.assertIn("CLICKHOUSE_METRIC_RESOURCE_NAME environment variable not set", str(context.exception))
-
-
-class TestDataGaugeProcessor(unittest.TestCase):
-    def setUp(self):
-        """Set up test fixtures before each test method."""
-        # Create a mock pipeline
-        self.mock_pipeline = Mock()
-        
-    @patch.dict(os.environ, {'CLICKHOUSE_METRIC_RESOURCE_NAME': 'interface'})
-    def test_create_table_command_data_gauge(self):
-        """Test the create_table_command method for DataGaugeProcessor."""
-        
-        # Create an instance of DataGaugeProcessor
-        processor = DataGaugeProcessor(self.mock_pipeline)
-        
-        # Call the method
-        result = processor.create_table_command()
-        
-        # Print the result for inspection
-        print("\n" + "="*80)
-        print("CREATE TABLE COMMAND OUTPUT (DataGaugeProcessor):")
-        print("="*80)
-        print(result)
-        print("="*80)
-        
-        # Assertions to verify the command structure
-        self.assertIn("CREATE TABLE IF NOT EXISTS data_interface_gauge", result)
-        self.assertIn("ENGINE = MergeTree()", result)
-        self.assertIn("PARTITION BY toYYYYMMDD(observation_time)", result)
-        self.assertIn("ORDER BY (`metric_name`,`interface_id`,`observation_time`)", result)
-        self.assertIn("SETTINGS index_granularity = 8192", result)
-        
-        # Check for specific columns
-        self.assertIn("`observation_time` DateTime64(3, 'UTC')", result)
-        self.assertIn("`insert_time` DateTime64(3, 'UTC') DEFAULT now64()", result)
-        self.assertIn("`collector_id` LowCardinality(String)", result)
-        self.assertIn("`policy_originator` LowCardinality(String)", result)
-        self.assertIn("`policy_level` LowCardinality(String)", result)
-        self.assertIn("`policy_scope` Array(LowCardinality(String))", result)
-        self.assertIn("`ext` JSON", result)
-        self.assertIn("`interface_id` LowCardinality(String)", result)
-        self.assertIn("`interface_ref` Nullable(String)", result)
-        self.assertIn("`metric_name` String", result)
-        self.assertIn("`metric_value` Float64", result)
-        
-    @patch.dict(os.environ, {'CLICKHOUSE_METRIC_RESOURCE_NAME': 'server'})
-    def test_create_table_command_data_gauge_different_resource(self):
-        """Test the create_table_command method for DataGaugeProcessor with different resource name."""
-        
-        # Create an instance of DataGaugeProcessor
-        processor = DataGaugeProcessor(self.mock_pipeline)
-        
-        # Call the method
-        result = processor.create_table_command()
-        
-        # Print the result for inspection
-        print("\n" + "="*80)
-        print("CREATE TABLE COMMAND OUTPUT (DataGaugeProcessor - Server):")
-        print("="*80)
-        print(result)
-        print("="*80)
-        
-        # Assertions to verify the command structure with different resource name
-        self.assertIn("CREATE TABLE IF NOT EXISTS data_server_gauge", result)
-        self.assertIn("`server_id` LowCardinality(String)", result)
-        self.assertIn("`server_ref` Nullable(String)", result)
-        self.assertIn("ORDER BY (`metric_name`,`server_id`,`observation_time`)", result)
-        
-    def test_data_gauge_processor_missing_env_var(self):
-        """Test that DataGaugeProcessor raises error when environment variable is missing."""
-        
-        # Ensure the environment variable is not set
-        if 'CLICKHOUSE_METRIC_RESOURCE_NAME' in os.environ:
-            del os.environ['CLICKHOUSE_METRIC_RESOURCE_NAME']
-            
-        with self.assertRaises(ValueError) as context:
-            DataGaugeProcessor(self.mock_pipeline)
-        self.assertIn("CLICKHOUSE_METRIC_RESOURCE_NAME environment variable not set", str(context.exception))
 
 
 if __name__ == '__main__':
