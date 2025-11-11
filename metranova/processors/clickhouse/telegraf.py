@@ -205,6 +205,9 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
         #get rules for building resource id
         resource_id_rules = rule.get('resource_id', [])
         if not resource_id_rules:
+            #check for default rules
+            resource_id_rules = self.rules.get("_default", {}).get('resource_id', [])
+        if not resource_id_rules:
             return None
         #build resource id parts
         resource_id_parts = []
