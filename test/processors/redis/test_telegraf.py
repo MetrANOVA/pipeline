@@ -22,7 +22,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         self.test_config = {
             'snmp_if': {
                 'resource_type': 'interface',
-                'cache_lookup_table_builder': [
+                'resource_lookup_tables': [
                     {
                         'name': 'ifindex_to_ifname',
                         'key': [
@@ -44,7 +44,7 @@ class TestLookupTableProcessor(unittest.TestCase):
             },
             'snmp_timetra_sap': {
                 'type': 'interface',
-                'cache_lookup_table_builder': [
+                'resource_lookup_tables': [
                     {
                         'name': 'sapindex_to_sapname',
                         'key': [

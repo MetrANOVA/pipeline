@@ -51,7 +51,7 @@ class LookupTableProcessor(BaseRedisProcessor):
             return False
             
         rule = self.rules[name]
-        cache_builders = rule.get('cache_lookup_table_builder', [])
+        cache_builders = rule.get('resource_lookup_tables', [])
         
         # Check if at least one cache lookup table builder has valid key and value paths
         for builder in cache_builders:
@@ -99,7 +99,7 @@ class LookupTableProcessor(BaseRedisProcessor):
             return []
             
         rule = self.rules[name]
-        cache_builders = rule.get('cache_lookup_table_builder', [])
+        cache_builders = rule.get('resource_lookup_tables', [])
         results = []
         
         for builder in cache_builders:
