@@ -83,6 +83,17 @@ snmp_timetra_vrtr:
 
 snmp_timetra_sap:
   resource_type: interface
+  resource_id:
+    - type: field
+      format: short_hostname
+      path:
+        - tags
+        - device
+    - type: field
+      format: tmnxsapid
+      path:
+        - tags
+        - oidIndex
   resource_ref: meta_interface
 
 snmp_timetra_port_queue:

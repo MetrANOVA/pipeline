@@ -7,6 +7,7 @@ import yaml
 
 from metranova.processors.clickhouse.base import BaseDataGenericMetricProcessor
 from metranova.processors.clickhouse.interface import BaseInterfaceTrafficProcessor
+from metranova.utils.snmp import TmnxPortId
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +189,14 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
             return value
         if format_type == 'short_hostname':
             return value.split('.')[0]
+        elif format_type == 'tmnxsapid':
+            formatted_val = TmnxPortId.decode_sap(value, ext)
+            if formatted_val is not None:
+                return formatted_val
+        elif format_type == 'tmnxportid':
+            formatted_val = TmnxPortId.decode(value)
+            if formatted_val is not None:
+                return formatted_val
         elif format_type == 'regex':
             # this is a regex pattern with named groups - we want to extract the named group "value"
             # any additional groups should be added to the dict ext
