@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 
 import orjson
 import yaml
@@ -181,12 +182,31 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
             return False
         return super().match_message(value)
 
-    def format_value(self, value: str, format_type: str | None) -> str:
+    def format_value(self, value: str, format_type: str | None, format_opts: dict | None, ext: dict) -> str:
         """Format value based on specified format type."""
         if format_type is None:
             return value
         if format_type == 'short_hostname':
             return value.split('.')[0]
+        elif format_type == 'regex':
+            # this is a regex pattern with named groups - we want to extract the named group "value"
+            # any additional groups should be added to the dict ext
+            regex_pattern = format_opts.get('pattern', None)
+            if regex_pattern is None:
+                return value
+            match = re.match(regex_pattern, value)
+            if not match:
+                return value
+            # Extract the named group "value"
+            #if not present, return original value
+            if "value" not in match.groupdict():
+                return value
+            extracted_value = match.group("value")
+            # Add any additional named groups to the ext dict
+            add_ext = {k: v for k, v in match.groupdict().items() if k != "value"}
+            ext.update(add_ext)
+            return extracted_value
+            
         # Future: implement more formats as needed
         return value
 
@@ -198,7 +218,7 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
         looked_up = self.pipeline.cacher("redis").lookup(lookup_table, lookup_key)
         return looked_up if looked_up is not None else value
 
-    def find_resource_id(self, value, rule):
+    def find_resource_id(self, value, rule, ext):
         #check rule
         if rule is None:
             return None
@@ -223,7 +243,7 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
                 if current is not None:
                     # apply formatting if specified
                     format_type = rid_def.get('format', None)
-                    current = self.format_value(str(current), format_type)
+                    current = self.format_value(str(current), format_type, rid_def.get('format_opts', None), ext)
                     lookup_table = rid_def.get('lookup', None)
                     current = self.lookup_value(current, resource_id_parts, lookup_table)
                     resource_id_parts.append(current)
@@ -254,7 +274,8 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
             return []
 
         #lookup resource id
-        resource_id = self.find_resource_id(value, rule)
+        ext = {} # this may get additional fields during ID formatting
+        resource_id = self.find_resource_id(value, rule, ext)
         if resource_id is None:
             self.logger.debug("Resource ID could not be determined from message")
             return []
@@ -272,7 +293,6 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
         #build ext from tags
         skip_tags = rule.get('skip_tags', []) + self.default_skip_tags
         skip_tags_map = {tag: True for tag in skip_tags}
-        ext = {}
         for tag_key, tag_value in value.get("tags", {}).items():
             if skip_tags_map.get(tag_key, False):
                 continue

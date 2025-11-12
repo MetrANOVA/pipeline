@@ -87,6 +87,22 @@ snmp_timetra_sap:
 
 snmp_timetra_port_queue:
   resource_type: interface
+  resource_id:
+    - type: field
+      format: short_hostname
+      path:
+        - tags
+        - device
+    - type: field
+      format: regex
+      format_opts:
+        # note that "value" is special and will be assigned to this part of id
+        # any other named groups will be added to ext
+        pattern: '\d+\.(?P<value>\d+)\.(?P<queue_num>\d+)'
+      lookup: ifindex_to_ifname
+      path:
+        - tags
+        - oidIndex
   resource_ref: meta_interface
 
 snmp_timetra_chassis:
