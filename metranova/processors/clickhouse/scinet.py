@@ -10,17 +10,17 @@ class SCinetMetadataProcessor(BaseMetadataProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.table = os.getenv('CLICKHOUSE_SCINET_METADATA_TABLE', 'meta_ip_scinet')
-        self.val_id_field = ['booth_name']
+        self.val_id_field = ['resource_name']
         self.column_defs.extend([
             ['ip_subnet', 'Array(Tuple(IPv6,UInt8))', True],
             ['organization_name', 'Nullable(String)', True],
-            ['coordinate_x', 'Nullable(UInt16)', True],
-            ['coordinate_y', 'Nullable(UInt16)', True],
+            ['coordinate_x', 'Nullable(Float64)', True],
+            ['coordinate_y', 'Nullable(Float64)', True],
         ])
         self.required_fields = [
             ["addresses"],
             ["org_name"],
-            ["booth_name"]
+            ["resource_name"]
         ]
     
     def match_message(self, value):
@@ -48,8 +48,8 @@ class SCinetMetadataProcessor(BaseMetadataProcessor):
         formatted_record = {
             'ip_subnet': ip_subnets,
             'organization_name': value.get('org_name', None),
-            'coordinate_x': value.get('coordinate_x', None),
-            'coordinate_y': value.get('coordinate_y', None),
+            'coordinate_x': value.get('latitude', None),
+            'coordinate_y': value.get('longitude', None),
             'ext': '{}',
             'tag': []
         }
