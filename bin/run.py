@@ -3,6 +3,7 @@ import logging
 from metranova.pipelines.metadata import CRMetadataPipeline, IPGeoCSVMetadataPipeline, IPTrieMetadataPipeline, RCMetadataPipeline, FCMetadataPipeline, CAIDAOrgASMetadataPipeline
 from metranova.pipelines.krc import KRCPipeline
 from metranova.pipelines.json import KafkaToJSONPipeline
+from metranova.pipelines.scinet import SCinetMetadataPipeline
 from metranova.pipelines.scireg import ScienceRegistryPipeline
 
 # Configure logging
@@ -33,6 +34,8 @@ def main():
             pipeline = FCMetadataPipeline()
         elif pipeline_type == 'scireg':
             pipeline = ScienceRegistryPipeline()
+        elif pipeline_type == 'scinet':
+            pipeline = SCinetMetadataPipeline()
         elif pipeline_type == 'ip_metadata_import':
             pipeline = IPTrieMetadataPipeline()
         elif pipeline_type == 'metadata_caida_org_as':

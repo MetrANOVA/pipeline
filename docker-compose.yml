@@ -117,6 +117,22 @@ services:
     env_file:
       - .env
     restart: always
+  
+  metadata_pipeline_scinet:
+    image: metranova/pipeline:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PIPELINE_TYPE=scinet
+      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.scinet.SCinetMetadataProcessor
+      - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_SCINET_METADATA_TABLE}
+      - SCINET_FILE_CONSUMER_PATHS=/app/caches/booth_metadata.json
+    volumes:
+      - ./caches:/app/caches:ro
+    env_file:
+      - .env
+    restart: always
 
   cache_pipeline_redis:
     image: metranova/pipeline:latest
