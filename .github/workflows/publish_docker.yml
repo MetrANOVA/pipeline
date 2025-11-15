@@ -79,7 +79,7 @@ jobs:
     # Note that the tag at this phase includes the architecture name so that different architectures don't collide.
     - name: Extract Docker metadata
       id: meta
-      uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+      uses: docker/metadata-action@v5.9.0
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}
         flavor: |
@@ -118,7 +118,7 @@ jobs:
     steps:
     - name: Extract Docker metadata for manifest
       id: manifest_meta
-      uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+      uses: docker/metadata-action@v5.9.0
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}
         flavor: |
