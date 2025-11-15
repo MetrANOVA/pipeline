@@ -140,6 +140,11 @@ jobs:
       matrix:
         tags: ${{ fromJson(needs.manifest_metadata.outputs.manifest).tags }}
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+      attestations: write
+      id-token: write
     steps:
     # Login to registry
     - name: Log into registry ${{ env.REGISTRY }}
