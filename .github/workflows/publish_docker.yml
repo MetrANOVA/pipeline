@@ -52,7 +52,12 @@ jobs:
             suffix_tag: arm64
     # Runs-on set using a matrix variable since each architecture needs to run on an image using the same architecture as the target platform
     runs-on: ${{ matrix.runs_on }}
-
+    # set permissions so can push to registry
+    permissions:
+      packages: write
+      contents: read
+      attestations: write
+      id-token: write
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
     # Checkout the code from this repository
