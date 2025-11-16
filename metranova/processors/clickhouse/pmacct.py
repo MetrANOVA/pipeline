@@ -15,8 +15,6 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
 
         # Define required fields - these are examples, adjust as needed
         self.required_fields = [
-            ['timestamp_start'],
-            ['timestamp_end'],
             ['ip_src'], 
             ['ip_dst'],
             ['port_src'],
@@ -195,6 +193,20 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         # check required fields
         if not self.has_required_fields(value):
             return None
+        #check time fields:
+        # - nfacctd will have timestamp_start and timestamp_end
+        # - sfacctd will have timestamp_arrival
+        if value.get("timestamp_arrival", None) is not None and value.get("timestamp_start", None) is None:
+            # must be sfacctd, set start and end to arrival
+            value["timestamp_start"] = value["timestamp_arrival"]
+            value["timestamp_end"] = value["timestamp_arrival"]
+        elif value.get("timestamp_start", None) is None:
+            # if no start (and already checked for arrival), then we can't process this record
+            self.logger.debug("Missing timestamp fields in flow record")
+            return None
+        elif value.get("timestamp_end", None) is None:
+            #just in case end is not specified, set it to start - probably should not happen
+            value["timestamp_end"] = value["timestamp_start"]
 
         #Initialize formatted record
         formatted_record = {}
