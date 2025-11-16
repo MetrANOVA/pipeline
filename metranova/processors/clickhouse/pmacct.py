@@ -8,11 +8,10 @@ logger = logging.getLogger(__name__)
 class PMAcctFlowProcessor(BaseFlowProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
-
-        #default to netflow if not set
-        if self.flow_type == "unknown":
-            self.flow_type = "netflow"
-
+        self.flow_type_map = {
+            "nfacctd": "netflow",
+            "sfacctd": "sflow"
+        }
         # Define required fields - these are examples, adjust as needed
         self.required_fields = [
             ['ip_src'], 
@@ -215,6 +214,11 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             #just in case end is not specified, set it to start - probably should not happen
             value["timestamp_end"] = value["timestamp_start"]
 
+        # Determine flow type from writer_id if available, otherwise use default
+        flow_type = self.flow_type
+        if self.flow_type_map.get(value.get("writer_id", None), None):
+            flow_type = self.flow_type_map[value["writer_id"]]
+
         #Initialize formatted record
         formatted_record = {}
 
@@ -266,7 +270,7 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             "policy_originator": self.policy_originator,
             "policy_level": self.policy_level,
             "ext": orjson.dumps(ext).decode('utf-8'),
-            "flow_type": self.flow_type,
+            "flow_type": flow_type,
             "src_port": value.get("port_src", None),
             "dst_port": value.get("port_dst", None),
             "protocol": value.get("ip_proto", None),
