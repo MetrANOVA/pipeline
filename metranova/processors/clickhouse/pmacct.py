@@ -128,6 +128,13 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
     def lookup_ip_as_fields(self, ip_field: str, target_ip_field: str, as_field: str, target_as_field: str, value: dict, formatted_record: dict):
         """ Lookup IP address and AS fields in cache to get associated metadata. If AS not provided, try to get from IP cache."""
         formatted_record[target_ip_field] = value.get(ip_field, None)
+        #ignore if no IP provided including if empty string
+        if not formatted_record[target_ip_field]:
+            formatted_record[target_ip_field] = None
+            formatted_record[f"{target_ip_field}_ref"] = None
+            formatted_record[f"{target_as_field}_id"] = None
+            formatted_record[f"{target_as_field}_ref"] = None
+            return
         as_id_field = f"{target_as_field}_id"
         formatted_record[as_id_field] = value.get(as_field, None)
         ip_cache_result = self.pipeline.cacher("ip").lookup("meta_ip", formatted_record[target_ip_field])
