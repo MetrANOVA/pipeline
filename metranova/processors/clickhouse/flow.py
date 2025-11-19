@@ -75,6 +75,13 @@ class BaseFlowProcessor(BaseDataProcessor):
                     ["mpls_top_label_ip", "Nullable(IPv6)"],
                     ["mpls_top_label_type", "Nullable(UInt32)"],
                     ["mpls_vpn_rd", "LowCardinality(Nullable(String))"]
+                ],
+                "vlan": [
+                    ["vlan_id", "Nullable(UInt8)"],
+                    ["vlan_in_id", "Nullable(UInt8)"],
+                    ["vlan_out_id", "Nullable(UInt8)"],
+                    ["vlan_in_inner_id", "Nullable(UInt8)"],
+                    ["vlan_out_inner_id", "Nullable(UInt8)"],
                 ]
             }
         # determine columns to use from environment

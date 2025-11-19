@@ -151,6 +151,34 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         #set the as ref field
         formatted_record[f"{target_as_field}_ref"] = self.pipeline.cacher("clickhouse").lookup_dict_key("meta_as", formatted_record[as_id_field], "ref")
 
+    def add_vlan_extensions(self, value: dict, ext: dict):
+        # namespace: vlan, direction: in or out (optional), type: id or inner_id
+        if value.get("vlan", None) is not None:
+            try:
+                ext["vlan_id"] = int(value.get("vlan"))
+            except ValueError:
+                pass
+        if value.get("vlan_in", None) is not None:
+            try:
+                ext["vlan_in_id"] = int(value.get("vlan_in"))
+            except ValueError:
+                pass
+        if value.get("vlan_out", None) is not None:
+            try:
+                ext["vlan_out_id"] = int(value.get("vlan_out"))
+            except ValueError:
+                pass
+        if value.get("cvlan_in", None) is not None:
+            try:
+                ext["vlan_in_inner_id"] = int(value.get("cvlan_in"))
+            except ValueError:
+                pass
+        if value.get("cvlan_out", None) is not None:
+            try:
+                ext["vlan_out_inner_id"] = int(value.get("cvlan_out"))
+            except ValueError:
+                pass
+
     def lookup_interface(self, device_id: str, flow_index: Any, formatted_record: dict, direction: str) -> None:
         """ Lookup interface based on device_id and flow_index. Sets interface_id, interface_ref, and interface_edge in formatted_record."""
         #Initialize values
@@ -258,6 +286,7 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         self.add_ipv4_extensions(value, ext)
         self.add_ipv6_extensions(value, ext)
         self.add_mpls_extensions(value, ext)
+        self.add_vlan_extensions(value, ext)
         ext.update(self.lookup_ip_ref_extensions(formatted_record.get("src_ip", None), "src"))
         ext.update(self.lookup_ip_ref_extensions(formatted_record.get("dst_ip", None), "dst"))
 
