@@ -59,7 +59,6 @@ class ClickHouseConnector(BaseConnector):
                 port=self.port,
                 username=self.username,
                 password=self.password,
-                database=self.database,
                 secure=os.getenv('CLICKHOUSE_SECURE', 'false').lower() == 'true',
                 verify=False
             )
