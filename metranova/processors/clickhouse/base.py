@@ -67,7 +67,7 @@ class BaseClickHouseProcessor(BaseProcessor):
         table_settings = { "index_granularity": self.table_granularity }
         create_table_cmd =  "CREATE TABLE IF NOT EXISTS {} "
         if self.cluster_name:
-            create_table_cmd += f"ON CLUSTER {self.cluster_name} "
+            create_table_cmd += f"ON CLUSTER '{self.cluster_name}' "
         create_table_cmd += "(".format(table_name)
         has_columns = False
         for col_def in self.column_defs:
