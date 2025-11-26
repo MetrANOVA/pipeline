@@ -66,6 +66,7 @@ class ClickHouseConnector(BaseConnector):
             create_db_query = f"CREATE DATABASE IF NOT EXISTS {self.database}"
             if self.cluster_name:
                 create_db_query += f" ON CLUSTER {self.cluster_name}"
+            self.logger.debug(f"Creating database with query: {create_db_query}")
             client.command(create_db_query)
             self.logger.info(f"Database {self.database} is ready")
             client.close()
