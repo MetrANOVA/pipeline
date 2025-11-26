@@ -16,6 +16,7 @@ class ClickHouseConnector(BaseConnector):
         self.database = os.getenv('CLICKHOUSE_DATABASE', 'default')
         self.username = os.getenv('CLICKHOUSE_USERNAME', 'default')
         self.password = os.getenv('CLICKHOUSE_PASSWORD', '')
+        self.cluster_name = os.getenv('CLICKHOUSE_CLUSTER_NAME', None)
 
         #Create database
         skip_db_creation = os.getenv('CLICKHOUSE_SKIP_DB_CREATE', 'false').lower() in ['1', 'true', 'yes']
@@ -62,7 +63,10 @@ class ClickHouseConnector(BaseConnector):
                 secure=os.getenv('CLICKHOUSE_SECURE', 'false').lower() == 'true',
                 verify=False
             )
-            client.command(f"CREATE DATABASE IF NOT EXISTS {self.database}")
+            create_db_query = f"CREATE DATABASE IF NOT EXISTS {self.database}"
+            if self.cluster_name:
+                create_db_query += f" ON CLUSTER {self.cluster_name}"
+            client.command(create_db_query)
             self.logger.info(f"Database {self.database} is ready")
             client.close()
         except Exception as e:

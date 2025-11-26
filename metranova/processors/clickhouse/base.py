@@ -16,6 +16,10 @@ class BaseClickHouseProcessor(BaseProcessor):
         self.logger = logger
 
         # Defaults that are relatively common but can be overridden
+        self.cluster_name = os.getenv('CLICKHOUSE_CLUSTER_NAME', None)
+        self.replication = os.getenv('CLICKHOUSE_REPLICATION', 'false').lower() in ['1', 'true', 'yes']
+        self.replica_path = os.getenv('CLICKHOUSE_REPLICA_PATH', '/clickhouse/tables/{shard}/{database}/{table}')
+        self.replica_name = os.getenv('CLICKHOUSE_REPLICA_NAME', '{replica}')
         self.table_engine = "MergeTree()"
         self.table_granularity = 8192  # default ClickHouse index granularity
         self.extension_columns = {"ext": True}  # default extension column"}
@@ -55,9 +59,16 @@ class BaseClickHouseProcessor(BaseProcessor):
             raise ValueError("Column definitions are not set")
         if not self.table_engine:
             raise ValueError("Table engine is not set")
+        #lookup replicated version of table engine if replication enabled
+        table_engine = self.table_engine
+        if self.replication and table_engine.lower().endswith("mergetree()") and not table_engine.lower().startswith("replicated"):
+            table_engine = f"Replicated{table_engine}"
 
         table_settings = { "index_granularity": self.table_granularity }
-        create_table_cmd =  "CREATE TABLE IF NOT EXISTS {} (".format(table_name)
+        create_table_cmd =  "CREATE TABLE IF NOT EXISTS {} "
+        if self.cluster_name:
+            create_table_cmd += f"ON CLUSTER {self.cluster_name} "
+        create_table_cmd += "(".format(table_name)
         has_columns = False
         for col_def in self.column_defs:
             if len(col_def) > 3:
@@ -84,7 +95,10 @@ class BaseClickHouseProcessor(BaseProcessor):
                 create_table_cmd += "\n    `{}` {}".format(col_def[0], col_def[1])
             has_columns = True
         create_table_cmd += "\n) \n"
-        create_table_cmd += "ENGINE = {} \n".format(self.table_engine)
+        if self.replication:
+            create_table_cmd = "ENGINE = {}('{}', '{}')".format(table_engine, self.replica_path, self.replica_name)
+        else:
+            create_table_cmd += "ENGINE = {} \n".format(table_engine)
         if self.partition_by:
             create_table_cmd += "PARTITION BY {} \n".format(self.partition_by)
         if self.primary_keys:
