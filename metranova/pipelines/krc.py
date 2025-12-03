@@ -29,7 +29,7 @@ class KRCPipeline(BasePipeline):
 
         # Load clickhouse processors
         ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')
-        self.processors = self.load_processors(ch_processors_str, required_class=BaseClickHouseProcessor)
+        self.processors = self.load_classes(ch_processors_str, required_class=BaseClickHouseProcessor)
         if not self.processors:
             raise ValueError("At least one processor must be provided")
 
@@ -38,12 +38,12 @@ class KRCPipeline(BasePipeline):
 
         # Load Redis processors and set writer if any
         redis_processors_str = os.getenv('REDIS_PROCESSORS', '')
-        self.redis_processors = self.load_processors(redis_processors_str, required_class=BaseRedisProcessor)
+        self.redis_processors = self.load_classes(redis_processors_str, required_class=BaseRedisProcessor)
         if self.redis_processors:
             self.writers.append(RedisWriter(self.redis_processors))
 
         # Load Redis hash processors and set writer if any
         redis_hash_processors_str = os.getenv('REDIS_HASH_PROCESSORS', '')
-        self.redis_hash_processors = self.load_processors(redis_hash_processors_str, required_class=BaseRedisProcessor)
+        self.redis_hash_processors = self.load_classes(redis_hash_processors_str, required_class=BaseRedisProcessor)
         if self.redis_hash_processors:
             self.writers.append(RedisHashWriter(self.redis_hash_processors))

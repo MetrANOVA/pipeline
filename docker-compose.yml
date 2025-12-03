@@ -2,14 +2,27 @@ version: '3.8'
 
 services:
 
+  pipeline:
+    image: metranova/pipeline:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./certificates:/app/certificates:ro
+      - ./caches:/app/caches:ro
+      - ./pipelines:/app/pipelines:ro
+      - ./conf:/etc/metranova_pipeline:ro
+    restart: always
+
   data_pipeline_flow:
     image: metranova/pipeline:latest
     build:
       context: .
       dockerfile: Dockerfile
     environment:
-      - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=${PIPELINE_FLOW_CLICKHOUSE_PROCESSORS}
+      - PIPELINE_YAML=/app/pipelines/data_flow.yml
       - KAFKA_TOPIC=${PIPELINE_FLOW_KAFKA_TOPIC}
       - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_AS_METADATA_TABLE},${CLICKHOUSE_DEVICE_METADATA_TABLE}:@loopback_ip,${CLICKHOUSE_IF_METADATA_TABLE}:device_id:flow_index:edge
       - IP_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}
@@ -18,6 +31,7 @@ services:
     volumes:
       - ./certificates:/app/certificates:ro
       - ./caches:/app/caches:ro
+      - ./pipelines:/app/pipelines:ro
     restart: always
     deploy:
       mode: replicated

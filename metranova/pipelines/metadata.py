@@ -44,7 +44,7 @@ class RCMetadataPipeline(BasePipeline):
 
         # set processor to METADATA PROCESSORS
         ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')
-        self.processors = self.load_processors(ch_processors_str)
+        self.processors = self.load_classes(ch_processors_str)
         if not self.processors:
             raise ValueError("At least one processor must be provided for metadata pipeline")
 
@@ -68,7 +68,7 @@ class FCMetadataPipeline(BasePipeline):
 
         # set processor to METADATA PROCESSORS
         ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')
-        self.processors = self.load_processors(ch_processors_str)
+        self.processors = self.load_classes(ch_processors_str)
         if not self.processors:
             raise ValueError("At least one processor must be provided for metadata pipeline")
 
@@ -90,7 +90,7 @@ class CAIDAOrgASMetadataPipeline(BasePipeline):
 
         # set processor to METADATA PROCESSORS
         ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')
-        self.processors = self.load_processors(ch_processors_str)
+        self.processors = self.load_classes(ch_processors_str)
         if not self.processors:
             raise ValueError("At least one processor must be provided for metadata pipeline")
 
@@ -112,7 +112,7 @@ class IPGeoCSVMetadataPipeline(BasePipeline):
 
         # set processor to METADATA PROCESSORS
         ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')
-        self.processors = self.load_processors(ch_processors_str)
+        self.processors = self.load_classes(ch_processors_str)
         if not self.processors:
             raise ValueError("At least one processor must be provided for metadata pipeline")
 
@@ -133,7 +133,7 @@ class IPTrieMetadataPipeline(BasePipeline):
 
         # set processor to FILE PROCESSORS
         file_processors_str = os.getenv('FILE_PROCESSORS', '')
-        self.processors = self.load_processors(file_processors_str, required_class=BaseFileProcessor)
+        self.processors = self.load_classes(file_processors_str, required_class=BaseFileProcessor)
         if not self.processors:
             raise ValueError("At least one processor must be provided for metadata pipeline")
 

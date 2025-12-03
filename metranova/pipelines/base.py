@@ -1,6 +1,7 @@
 import importlib
 import logging
 import threading
+import yaml
 from typing import Dict, Optional, List
 from metranova.cachers.base import BaseCacher, NoOpCacher
 from metranova.consumers.base import BaseConsumer
@@ -46,34 +47,34 @@ class BasePipeline:
         for writer in self.writers:
             writer.process_message(msg, consumer_metadata)
     
-    def load_processors(self, processors_str: str, required_class=BaseProcessor) -> List[BaseProcessor]:
-        processors = []
-        if processors_str:
-            for processor_class in processors_str.split(','):
-                processor_class = processor_class.strip()
-                if not processor_class:
+    def load_classes(self, class_str: str, init_args={}, required_class=None) -> List:
+        classes = []
+        if class_str:
+            for class_name in class_str.split(','):
+                class_name = class_name.strip()
+                if not class_name:
                     continue
                 try:
-                    module_name, class_name = processor_class.rsplit('.', 1)
+                    module_name, class_name = class_name.rsplit('.', 1)
                     module = importlib.import_module(module_name)
                     cls = getattr(module, class_name)
                     
-                    if issubclass(cls, required_class):
-                        processors.append(cls(self))
+                    if required_class is None or issubclass(cls, required_class):
+                        classes.append(cls(**init_args))
                     else:
                         self.logger.warning(f"Class {class_name} is not a subclass of {required_class.__name__}, skipping")
                         
                 except (ImportError, AttributeError) as e:
-                    self.logger.error(f"Failed to load processor class {class_name}: {e}")
+                    self.logger.error(f"Failed to load class {class_name}: {e}")
         
-            if processors:
-                self.logger.info(f"Loaded {len(processors)} ClickHouse processors: {[type(p).__name__ for p in processors]}")
+            if classes:
+                self.logger.info(f"Loaded {len(classes)} classes: {[type(p).__name__ for p in classes]}")
             else: 
                 self.logger.warning("No valid ClickHouse processors loaded")
         else: 
             self.logger.warning("Processors string is empty") 
         
-        return processors
+        return classes
 
     def close(self):
         if self.consumers:
@@ -100,3 +101,64 @@ class BasePipeline:
             for cacher in self.cachers.values():
                 cacher.close()
             self.logger.info("Cachers closed")
+
+    def __str__(self):
+        #return a string that lists the consumers, cachers, and writer names and writer proccessor names
+        consumer_names = [type(c).__name__ for c in self.consumers]
+        cacher_names = [f"{name}:{type(c).__name__}" for name, c in self.cachers.items()]
+        writer_names = []
+        for w in self.writers:
+            processor_names = [type(p).__name__ for p in w.processors] if hasattr(w, 'processors') else []
+            writer_names.append(f"{type(w).__name__} (Processors: {processor_names})")
+        return f"Pipeline(Consumers: {consumer_names}, Cachers: {cacher_names}, Writers: {writer_names})"
+
+        
+class YAMLPipeline(BasePipeline):
+    def __init__(self, yaml_file: dict):
+        super().__init__()
+        self.yaml_file = yaml_file
+        self.logger = logger
+        
+        #load yaml content
+        yaml_config = None
+        try:
+            with open(self.yaml_file, 'r') as file:
+                yaml_config = yaml.safe_load(file)
+            self.logger.info(f"Loaded pipeline YAML configuration from {self.yaml_file}")
+            self.logger.info(f"YAML content: {yaml_config}")
+        except yaml.YAMLError as e:
+            self.logger.error(f"Error parsing YAML file: {e}")
+            raise e
+        if not yaml_config:
+            raise ValueError("YAML configuration is empty or invalid")
+ 
+        #load consumers
+        for consumer_cfg in yaml_config.get('consumers', []):
+            consumer_type = consumer_cfg.get('type')
+            if consumer_type:
+                self.consumers = self.load_classes(consumer_type, init_args={'pipeline': self}, required_class=BaseConsumer)
+        
+        #load cachers
+        for cacher_cfg in yaml_config.get('cachers', []):
+            cacher_type = cacher_cfg.get('type')
+            cacher_name = cacher_cfg.get('name', None)
+            if  cacher_type and cacher_name:
+                cacher_instances = self.load_classes(cacher_type, required_class=BaseCacher)
+                if cacher_instances:
+                    self.cachers[cacher_name] = cacher_instances[0]
+        
+        #load writers
+        for writer_cfg in yaml_config.get('writers', []):
+            #get writer type
+            writer_type = writer_cfg.get('type', None)
+            if not writer_type:
+                self.logger.warning("Writer type not specified in YAML, skipping")
+                continue
+            #load processors for writer if any
+            processor_list = []
+            for processor_type in writer_cfg.get('processors', []):
+                processor_instances = self.load_classes(processor_type, init_args={'pipeline': self}, required_class=BaseProcessor)
+                processor_list.extend(processor_instances)
+            #load writer with processors if any
+            writer_instances = self.load_classes(writer_type, init_args={'processors': processor_list}, required_class=BaseWriter)
+            self.writers.extend(writer_instances)

@@ -21,7 +21,7 @@ class ScienceRegistryPipeline(BasePipeline):
 
         # set processor to METADATA PROCESSORS
         ch_processors_str = os.getenv('CLICKHOUSE_PROCESSORS', '')
-        self.processors = self.load_processors(ch_processors_str)
+        self.processors = self.load_classes(ch_processors_str)
         if not self.processors:
             raise ValueError("At least one processor must be provided for metadata pipeline")
 
