@@ -96,7 +96,7 @@ class BaseClickHouseProcessor(BaseProcessor):
             has_columns = True
         create_table_cmd += "\n) \n"
         if self.replication:
-            create_table_cmd = "ENGINE = {}('{}', '{}')".format(table_engine, self.replica_path, self.replica_name)
+            create_table_cmd += "ENGINE = {}('{}', '{}')".format(table_engine, self.replica_path, self.replica_name)
         else:
             create_table_cmd += "ENGINE = {} \n".format(table_engine)
         if self.partition_by:
