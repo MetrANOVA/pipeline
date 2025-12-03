@@ -20,7 +20,7 @@ class BaseClickHouseProcessor(BaseProcessor):
         self.replication = os.getenv('CLICKHOUSE_REPLICATION', 'false').lower() in ['1', 'true', 'yes']
         self.replica_path = os.getenv('CLICKHOUSE_REPLICA_PATH', '/clickhouse/tables/{shard}/{database}/{table}')
         self.replica_name = os.getenv('CLICKHOUSE_REPLICA_NAME', '{replica}')
-        self.table_engine = "MergeTree()"
+        self.table_engine = "MergeTree"
         self.table_granularity = 8192  # default ClickHouse index granularity
         self.extension_columns = {"ext": True}  # default extension column"}
         self.table_ttl_column = "insert_time"
@@ -61,7 +61,7 @@ class BaseClickHouseProcessor(BaseProcessor):
             raise ValueError("Table engine is not set")
         #lookup replicated version of table engine if replication enabled
         table_engine = self.table_engine
-        if self.replication and table_engine.lower().endswith("mergetree()") and not table_engine.lower().startswith("replicated"):
+        if self.replication and table_engine.lower().endswith("mergetree") and not table_engine.lower().startswith("replicated"):
             table_engine = f"Replicated{table_engine}"
 
         table_settings = { "index_granularity": self.table_granularity }
@@ -98,7 +98,7 @@ class BaseClickHouseProcessor(BaseProcessor):
         if self.replication:
             create_table_cmd += "ENGINE = {}('{}', '{}')".format(table_engine, self.replica_path, self.replica_name)
         else:
-            create_table_cmd += "ENGINE = {} \n".format(table_engine)
+            create_table_cmd += "ENGINE = {}() \n".format(table_engine)
         if self.partition_by:
             create_table_cmd += "PARTITION BY {} \n".format(self.partition_by)
         if self.primary_keys:
