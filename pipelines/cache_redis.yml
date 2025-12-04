@@ -1,0 +1,5 @@
+consumers:
+  - type: metranova.consumers.clickhouse.MetadataClickHouseConsumer
+
+writers:
+  - type: metranova.writers.redis.RedisMetadataRefWriter

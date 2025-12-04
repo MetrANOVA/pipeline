@@ -125,7 +125,7 @@ class YAMLPipeline(BasePipeline):
             with open(self.yaml_file, 'r') as file:
                 yaml_config = yaml.safe_load(file)
             self.logger.info(f"Loaded pipeline YAML configuration from {self.yaml_file}")
-            self.logger.info(f"YAML content: {yaml_config}")
+            self.logger.debug(f"YAML content: {yaml_config}")
         except yaml.YAMLError as e:
             self.logger.error(f"Error parsing YAML file: {e}")
             raise e

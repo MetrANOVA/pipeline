@@ -16,8 +16,8 @@ from metranova.consumers.file import YAMLFileConsumer
 logger = logging.getLogger(__name__)
 
 class YAMLFileConsumer(YAMLFileConsumer):
-    def __init__(self, pipeline, env_prefix = ''):
-        super().__init__(pipeline, env_prefix)
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
         self.logger = logger
 
     def handle_file_data(self, file_path, data):

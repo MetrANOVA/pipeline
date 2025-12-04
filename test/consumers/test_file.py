@@ -48,22 +48,6 @@ class TestBaseFileConsumer(unittest.TestCase):
         
         self.assertEqual(consumer.file_paths, ['/path/to/file1.txt', '/path/to/file2.txt', '/path/to/file3.txt'])
 
-    @patch.dict(os.environ, {'PREFIX_FILE_CONSUMER_PATHS': '/prefixed/file.txt'})
-    def test_init_with_env_prefix(self):
-        """Test initialization with environment variable prefix."""
-        
-        consumer = BaseFileConsumer(self.mock_pipeline, env_prefix='PREFIX')
-        
-        self.assertEqual(consumer.file_paths, ['/prefixed/file.txt'])
-
-    @patch.dict(os.environ, {'PREFIX_FILE_CONSUMER_PATHS': '/prefixed/file.txt'})
-    def test_init_with_env_prefix_underscore(self):
-        """Test initialization with environment variable prefix that already has underscore."""
-        
-        consumer = BaseFileConsumer(self.mock_pipeline, env_prefix='PREFIX_')
-        
-        self.assertEqual(consumer.file_paths, ['/prefixed/file.txt'])
-
     @patch.dict(os.environ, {'FILE_CONSUMER_UPDATE_INTERVAL': '300'})
     def test_init_with_update_interval(self):
         """Test initialization with custom update interval."""

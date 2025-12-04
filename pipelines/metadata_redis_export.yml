@@ -1,0 +1,11 @@
+consumers:
+  - type: metranova.consumers.redis.RedisHashConsumer
+
+cachers:
+  - type: metranova.cachers.clickhouse.ClickHouseCacher
+    name: clickhouse
+
+writers:
+  - type: metranova.writers.clickhouse.ClickHouseWriter
+    processors:
+      - metranova.processors.clickhouse.interface.InterfaceMetadataProcessor

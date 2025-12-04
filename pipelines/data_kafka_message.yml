@@ -1,0 +1,7 @@
+consumers:
+  - type: metranova.consumers.kafka.KafkaConsumer
+
+writers:
+  - type: metranova.writers.clickhouse.ClickHouseWriter
+    processors:
+      - metranova.processors.clickhouse.raw_kafka.RawKafkaProcessor
