@@ -10,10 +10,10 @@ The MetrANOVA Pipeline implements a modular pipeline architecture that processes
 
 The system consists of several key components:
 
-- **Consumers**: Read data from various sources (Kafka, Redis, ClickHouse)
+- **Consumers**: Read data from various sources (e.g. Kafka, Files, Redis, ClickHouse, etc)
 - **Processors**: Transform and validate incoming data
-- **Writers**: Store processed data in target databases
-- **Cachers**: Provide efficient lookup mechanisms for metadata and metadata references
+- **Cachers**: Provide efficient lookup mechanisms for metadata during the processing phase
+- **Writers**: Writes processed data to target database our other output channel
 - **Connectors**: Provide standardized interfaces to underlying resources and can be used by any other component
 
 A **pipeline** is a specific configuration of these components to access and process data between the various resources.
@@ -22,8 +22,8 @@ A **pipeline** is a specific configuration of these components to access and pro
 
 The architecture supports three types of resources:
 
-- **Data Sources**: Systems that provide streaming or batch data input (e.g., Kafka topics)
-- **Data Stores**: Persistent storage systems for long-term data retention and analytics (e.g., ClickHouse databases)
+- **Data Sources**: Systems that provide streaming or batch data input (e.g. Files, Kafka topics)
+- **Data Stores**: Persistent storage systems for long-term data retention and analytics (e.g. ClickHouse databases)
 - **Caches**: High-performance, temporary storage for frequently accessed data and metadata lookups (e.g., Redis)
 
 Each resource type is accessed through dedicated connectors that provide consistent interfaces and handle connection management, authentication, and error handling across the pipeline components. 
@@ -33,21 +33,21 @@ Each resource type is accessed through dedicated connectors that provide consist
 ### Prerequisites
 
 1. Docker and Docker Compose
-2. SSL certificates for Kafka authentication (if using Kafka consumers)
-3. Access to ClickHouse and Redis instances
+2. SSL certificates for Kafka authentication (if using Kafka connectors)
+3. Access to ClickHouse (if using ClickHouse connectors)
 
 ### Setup
 
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd metranova-clickhouse-writer
+   cd pipeline
    ```
 
 2. **Configure environment variables**
    ```bash
-   cp env.example .env
-   # Edit .env with your specific configuration
+   cp -r conf.example/ conf/
+   # Edit conf/envs/base.env with clickhouse and kafka credentials if applicable
    ```
 
 3. **Set up SSL certificates** (for Kafka pipelines)
@@ -58,32 +58,22 @@ Each resource type is accessed through dedicated connectors that provide consist
    # - certificates/kafka_user.crt (User certificate) 
    # - certificates/kafka_user.key (User private key)
    ```
+4. Decide which pipeline you want to run and find its conifguration file in in `conf/envs/`. For example to run the flow pipeline we will use `conf/envs/data_flow.env`. Copy this to `.env` and make any edits:
+  ```bash
+  cp conf/envs/data_flow.env .env #replace data_flow.env with chosen pipeline.  
+  ```
+  *NOTE: You can alternatively set the PIPELINE_ENV_FILE environment variable to the path of the chosen file instead of copying to .env. EXAMPLE: PIPELINE_ENV_FILE=conf/envs/data_flow.env* 
 
 4. **Build and run the pipelines**
    ```bash
-   docker-compose up --build
+   docker compose up --build pipeline
    ```
 
-## Running Individual Pipelines
+## Running Pipelines in Development
 
-You can run individual pipelines using `docker compose run` for testing, debugging, or one-time operations:
-
-### Available Pipeline Services
-
-Based on the docker-compose.yml configuration, you can run any of these pipeline services:
-
-```bash
-# Run the flow pipeline (processes network flow data)
-docker compose run flow_pipeline
-
-# Run the interface pipeline (processes interface statistics and queue data)
-docker compose run interface_pipeline
-
-# Run the metadata export pipeline (exports Redis metadata to ClickHouse)
-docker compose run metadata_export_pipeline
-
-# Run the metadata import pipeline (imports ClickHouse metadata to Redis)
-docker compose run  metadata_import_pipeline
+You can run individual pipelines using `docker compose run` for testing, debugging, or one-time operations. You can also leverage the `PIPELINE_ENV_FILE` environment variable to easily switch between pipelines without changing .env. Example that runs the flow pipeline:
+```
+PIPELINE_ENV_FILE=conf/envs/data_flow.env docker compose run --rm --build pipeline
 ```
 
 ### Custom Pipeline Configurations
@@ -92,65 +82,14 @@ You can also override environment variables for custom pipeline configurations:
 
 ```bash
 # Run with debug logging enabled
-docker compose run -e DEBUG=true flow_pipeline
+docker compose run -e DEBUG=true pipeline
 
 # Run interface pipeline with specific processors only
-docker compose run -e CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface.InterfaceTrafficProcessor interface_pipeline
+docker compose run -e CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface.InterfaceTrafficProcessor pipeline
 
 # Run with a different Kafka topic
-docker compose run -e KAFKA_TOPIC=custom_topic flow_pipeline
-
-# Run pipeline with JSON output for debugging
-docker compose run -e PIPELINE_TYPE=json flow_pipeline
+docker compose run -e KAFKA_TOPIC=custom_topic pipeline
 ```
-
-## Pipeline Types
-
-### Flow Pipeline
-![Flow Pipeline Architecture](docs/images/flow_pipeline_architecture.png)
-
-Processes network flow data from Kafka and stores it in ClickHouse.
-
-**Configuration:**
-- `PIPELINE_TYPE=clickhouse`
-- `CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.flow.FlowProcessor`
-- `KAFKA_TOPIC=metranova_flow`
-
-**Data processed:** Network flow records with source/destination information, BGP data, and traffic metrics.
-
-### Interface Pipeline
-![Interface Pipeline Architecture](docs/images/interface_pipeline_architecture.png)
-
-Processes network interface statistics and queue data from Kafka, storing metrics in ClickHouse and metadata in Redis.
-
-**Configuration:**
-- `PIPELINE_TYPE=clickhouse`
-- `CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface.InterfaceTrafficProcessor,metranova.processors.clickhouse.interface.InterfaceSAPQueueProcessor,metranova.processors.clickhouse.interface.InterfacePortQueueProcessor`
-- `REDIS_HASH_PROCESSORS=metranova.processors.redis.interface.InterfaceMetadataProcessor`
-- `KAFKA_TOPIC=metranova_interface`
-
-**Data processed:** Interface traffic statistics, port queue metrics, SAP queue data, and interface metadata.
-
-### Metadata Export Pipeline
-![Metadata Exporter Pipeline Architecture](docs/images/metadata_exporter_pipeline_architecture.png)
-
-Periodically exports metadata from Redis to ClickHouse for long-term storage and analytics. This pipeline runs on a scheduled interval to dump all metadata currently loaded in Redis into ClickHouse tables.
-
-**Configuration:**
-- `PIPELINE_TYPE=metadata_export`
-- `CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.interface.InterfaceMetadataProcessor`
-
-**Data processed:** Interface metadata from Redis hash tables to ClickHouse tables.
-
-### Metadata Import Pipeline
-![Metadata Importer Pipeline Architecture](docs/images/metadata_importer_pipeline_architecture.png)
-
-Imports metadata from ClickHouse into Redis for fast lookup operations. This pipeline looks up ref fields which are used to point at other tables in ClickHouse and can be used for joins. This includes not only tables generated by external metadata collection systems, but also looks up the refs for interface metadata written by the interface pipeline itself.
-
-**Configuration:**
-- `PIPELINE_TYPE=metadata_import`
-
-**Data processed:** Reference data from ClickHouse tables to Redis for caching and fast lookups during data processing.
 
 ## Environment Variables
 
@@ -262,11 +201,20 @@ These variables are typically set in `docker-compose.yml` rather than `.env`:
 
 ## Development
 
+### Adding New Pipelines
+
+1. Define a new YAML file in `pipelines/` with the desired consumers, cacher, processors and writers. Should be named in format `pipelines/<pipeline_name>.yml` where `<pipeline_name>` is name of pipeline.
+2. Define a `conf/envs/<pipeline_name>.env` with a `PIPELINE_YAML=pipelines/<pipeline_name>.yml` environment variable and any other pipeline specific settings
+3. Run the pipeline by running `cp conf/envs/<pipeline_name>.env .env` or by setting the PIPELINE_ENV_FILE environment variable as follows:
+```bash
+PIPELINE_ENV_FILE=conf/envs/<pipeline_name>.env docker compose run pipeline
+```
+
 ### Adding New Processors
 
-1. Create processor class inheriting from `BaseClickHouseProcessor` or `BaseRedisProcessor`
-2. Implement required methods: `match_message()`, `build_message()`
-3. Add processor to appropriate environment variable in docker-compose.yml
+1. Create processor class inheriting from a base processor for the target output. Example: `BaseClickHouseProcessor`
+2. Implement required methods
+3. Add processor to appropriate file in `pipelines/` directory
 
 ## Performance Notes
 
