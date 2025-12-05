@@ -19,7 +19,7 @@ class LookupTableProcessor(BaseRedisProcessor):
         self.expires = int(os.getenv('REDIS_TELEGRAF_LOOKUP_TABLE_EXPIRES', '86400'))  # default 1 day
 
         # Load YAML configuration file
-        yaml_path = os.getenv('TELEGRAF_MAPPINGS_PATH', '/etc/metranova_pipeline/telegraf_mappings.yml')
+        yaml_path = os.getenv('TELEGRAF_MAPPINGS_PATH', '/app/conf/telegraf_mappings.yml')
         try:
             with open(yaml_path, 'r') as file:
                 self.rules = yaml.safe_load(file)

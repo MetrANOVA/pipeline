@@ -8,13 +8,12 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - envs/base.env
+      - conf/envs/base.env
       - ${PIPELINE_ENV_FILE:-.env}
     volumes:
-      - ./certificates:/app/certificates:ro
       - ./caches:/app/caches:rw
+      - ./conf:/app/conf:ro
       - ./pipelines:/app/pipelines:ro
-      - ./conf:/etc/metranova_pipeline:ro
     restart: always
     deploy:
       mode: replicated

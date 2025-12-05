@@ -104,7 +104,7 @@ class TestLookupTableProcessor(unittest.TestCase):
         processor = LookupTableProcessor(self.mock_pipeline)
         
         self.assertEqual(processor.rules, {})
-        mock_open.assert_called_once_with('/etc/metranova_pipeline/telegraf_mappings.yml', 'r')
+        mock_open.assert_called_once_with('/app/conf/telegraf_mappings.yml', 'r')
 
     def test_get_field_value_simple_path(self):
         """Test _get_field_value with simple path."""

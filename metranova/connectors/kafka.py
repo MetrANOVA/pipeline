@@ -21,9 +21,9 @@ class KafkaConnector(BaseConnector):
             client_id = f"ch-writer-{os.urandom(4).hex()}"
 
             # SSL configuration
-            ssl_ca_location = os.getenv('KAFKA_SSL_CA_LOCATION', '/app/certificates/ca-cert')
-            ssl_certificate_location = os.getenv('KAFKA_SSL_CERTIFICATE_LOCATION', '/app/certificates/client-cert')
-            ssl_key_location = os.getenv('KAFKA_SSL_KEY_LOCATION', '/app/certificates/client-key')
+            ssl_ca_location = os.getenv('KAFKA_SSL_CA_LOCATION', '/app/conf/certificates/ca-cert')
+            ssl_certificate_location = os.getenv('KAFKA_SSL_CERTIFICATE_LOCATION', '/app/conf/certificates/client-cert')
+            ssl_key_location = os.getenv('KAFKA_SSL_KEY_LOCATION', '/app/conf/certificates/client-key')
             ssl_key_password = os.getenv('KAFKA_SSL_KEY_PASSWORD')
             
             # Base consumer configuration

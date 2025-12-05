@@ -95,9 +95,9 @@ class TestKafkaConnector(unittest.TestCase):
     @patch('metranova.connectors.kafka.os.path.exists')
     @patch('metranova.connectors.kafka.os.urandom')
     @patch.dict(os.environ, {
-        'KAFKA_SSL_CA_LOCATION': '/app/certificates/ca-cert',
-        'KAFKA_SSL_CERTIFICATE_LOCATION': '/app/certificates/client-cert',
-        'KAFKA_SSL_KEY_LOCATION': '/app/certificates/client-key',
+        'KAFKA_SSL_CA_LOCATION': '/app/conf/certificates/ca-cert',
+        'KAFKA_SSL_CERTIFICATE_LOCATION': '/app/conf/certificates/client-cert',
+        'KAFKA_SSL_KEY_LOCATION': '/app/conf/certificates/client-key',
     })
     def test_initialization_ssl_config(self, mock_urandom, mock_exists, mock_consumer):
         """Test KafkaConnector initialization with SSL configuration."""
@@ -110,18 +110,18 @@ class TestKafkaConnector(unittest.TestCase):
         
         call_args = mock_consumer.call_args[0][0]
         self.assertEqual(call_args['security.protocol'], 'SSL')
-        self.assertEqual(call_args['ssl.ca.location'], '/app/certificates/ca-cert')
-        self.assertEqual(call_args['ssl.certificate.location'], '/app/certificates/client-cert')
-        self.assertEqual(call_args['ssl.key.location'], '/app/certificates/client-key')
+        self.assertEqual(call_args['ssl.ca.location'], '/app/conf/certificates/ca-cert')
+        self.assertEqual(call_args['ssl.certificate.location'], '/app/conf/certificates/client-cert')
+        self.assertEqual(call_args['ssl.key.location'], '/app/conf/certificates/client-key')
         self.assertEqual(call_args['ssl.endpoint.identification.algorithm'], 'https')
     
     @patch('metranova.connectors.kafka.Consumer')
     @patch('metranova.connectors.kafka.os.path.exists')
     @patch('metranova.connectors.kafka.os.urandom')
     @patch.dict(os.environ, {
-        'KAFKA_SSL_CA_LOCATION': '/app/certificates/ca-cert',
-        'KAFKA_SSL_CERTIFICATE_LOCATION': '/app/certificates/client-cert',
-        'KAFKA_SSL_KEY_LOCATION': '/app/certificates/client-key',
+        'KAFKA_SSL_CA_LOCATION': '/app/conf/certificates/ca-cert',
+        'KAFKA_SSL_CERTIFICATE_LOCATION': '/app/conf/certificates/client-cert',
+        'KAFKA_SSL_KEY_LOCATION': '/app/conf/certificates/client-key',
         'KAFKA_SSL_KEY_PASSWORD': 'secret123',
     })
     def test_initialization_ssl_with_password(self, mock_urandom, mock_exists, mock_consumer):
@@ -140,7 +140,7 @@ class TestKafkaConnector(unittest.TestCase):
     @patch('metranova.connectors.kafka.os.path.exists')
     @patch('metranova.connectors.kafka.os.urandom')
     @patch.dict(os.environ, {
-        'KAFKA_SSL_CA_LOCATION': '/app/certificates/ca-cert',
+        'KAFKA_SSL_CA_LOCATION': '/app/conf/certificates/ca-cert',
         'KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM': 'none',
     })
     def test_initialization_ssl_endpoint_algorithm(self, mock_urandom, mock_exists, mock_consumer):
@@ -175,7 +175,7 @@ class TestKafkaConnector(unittest.TestCase):
     @patch('metranova.connectors.kafka.os.path.exists')
     @patch('metranova.connectors.kafka.os.urandom')
     @patch.dict(os.environ, {
-        'KAFKA_SSL_CA_LOCATION': '/app/certificates/ca-cert',
+        'KAFKA_SSL_CA_LOCATION': '/app/conf/certificates/ca-cert',
     })
     @patch('metranova.connectors.kafka.logger')
     def test_initialization_ssl_cert_not_found(self, mock_logger, mock_urandom, mock_exists, mock_consumer):

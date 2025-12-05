@@ -52,11 +52,10 @@ Each resource type is accessed through dedicated connectors that provide consist
 
 3. **Set up SSL certificates** (for Kafka pipelines)
    ```bash
-   mkdir -p certificates/
    # Place your Kafka SSL certificates:
-   # - certificates/kafka_ca.crt (CA certificate)
-   # - certificates/kafka_user.crt (User certificate) 
-   # - certificates/kafka_user.key (User private key)
+   # - conf/certificates/kafka_ca.crt (CA certificate)
+   # - conf/certificates/kafka_user.crt (User certificate) 
+   # - conf/certificates/kafka_user.key (User private key)
    ```
 4. Decide which pipeline you want to run and find its conifguration file in in `conf/envs/`. For example to run the flow pipeline we will use `conf/envs/data_flow.env`. Copy this to `.env` and make any edits:
   ```bash

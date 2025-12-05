@@ -150,9 +150,9 @@ This document describes all environment variables used by the MetrANOVA Pipeline
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KAFKA_SSL_CA_LOCATION` | `/app/certificates/ca-cert` | Path to CA certificate file |
-| `KAFKA_SSL_CERTIFICATE_LOCATION` | `/app/certificates/client-cert` | Path to client certificate file |
-| `KAFKA_SSL_KEY_LOCATION` | `/app/certificates/client-key` | Path to client private key file |
+| `KAFKA_SSL_CA_LOCATION` | `/app/conf/certificates/ca-cert` | Path to CA certificate file |
+| `KAFKA_SSL_CERTIFICATE_LOCATION` | `/app/conf/certificates/client-cert` | Path to client certificate file |
+| `KAFKA_SSL_KEY_LOCATION` | `/app/conf/certificates/client-key` | Path to client private key file |
 | `KAFKA_SSL_KEY_PASSWORD` | (none) | Password for client private key |
 | `KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM` | `https` | SSL endpoint verification algorithm |
 
@@ -258,7 +258,7 @@ This document describes all environment variables used by the MetrANOVA Pipeline
 | `TELEGRAF_IFMIB_NAME` | `snmp_if` | Telegraf measurement name for IF-MIB data |
 | `TELEGRAF_IFMIB_IFNAME_LOOKUP_TABLE` | `ifindex_to_ifname` | Redis lookup table for ifIndex to ifName mapping |
 | `TELEGRAF_IFMIB_USE_SHORT_DEVICE_NAME` | `true` | Use short hostname for device names |
-| `TELEGRAF_MAPPINGS_PATH` | `/etc/metranova_pipeline/telegraf_mappings.yml` | Path to Telegraf field mappings YAML file |
+| `TELEGRAF_MAPPINGS_PATH` | /app/conf/metranova_pipeline/telegraf_mappings.yml` | Path to Telegraf field mappings YAML file |
 
 ## Environment Variable Prefixes
 

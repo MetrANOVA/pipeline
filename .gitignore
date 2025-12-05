@@ -5,7 +5,6 @@
 .vscode/
 .env*
 conf/
-certificates/
 caches/*.pickle
 venv/
 __pycache__/

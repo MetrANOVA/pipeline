@@ -142,7 +142,7 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
         #tags to always skip - these are added to skip_tags in rules
         self.default_skip_tags = ["date", "routing_tag", "collector"]
         # Load YAML configuration file
-        yaml_path = os.getenv('TELEGRAF_MAPPINGS_PATH', '/etc/metranova_pipeline/telegraf_mappings.yml')
+        yaml_path = os.getenv('TELEGRAF_MAPPINGS_PATH', '/app/conf/telegraf_mappings.yml')
         try:
             with open(yaml_path, 'r') as file:
                 self.rules = yaml.safe_load(file)
