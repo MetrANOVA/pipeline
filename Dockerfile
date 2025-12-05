@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the application code
 COPY bin/ ./bin/
 COPY metranova/ ./metranova/
+COPY pipelines/ ./pipelines/
 
 #Create a directory for storing cache files
 RUN mkdir caches
