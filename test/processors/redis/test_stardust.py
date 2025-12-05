@@ -159,7 +159,36 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         self.assertEqual(data["type"], "port")  # Default type
 
     def test_build_message_name_parsing_from_id(self):
-        """Test that name is parsed from id when missing (after required field validation)."""
+        """Test that name is parsed from id when missing - requires bypassing required fields check."""
+        
+        processor = InterfaceMetadataProcessor(self.mock_pipeline)
+        
+        # Temporarily remove name from required fields to test the parsing logic
+        original_required = processor.required_fields.copy()
+        processor.required_fields = [["meta", "id"], ["meta", "device"]]  # Remove name requirement
+        
+        try:
+            # Test where name is None - should parse from id
+            test_value = {
+                "meta": {
+                    "id": "device1::ethernet0/1",
+                    "name": None,  # Explicitly None
+                    "device": "router1"
+                }
+            }
+            
+            result = processor.build_message(test_value, {})
+            
+            self.assertIsNotNone(result)
+            data = result[0]["data"]
+            # Name should be parsed from id (the part after ::)
+            self.assertEqual(data["name"], "ethernet0/1")
+        finally:
+            # Restore original required fields
+            processor.required_fields = original_required
+
+    def test_build_message_name_not_overwritten_when_present(self):
+        """Test that name is not parsed from id when already present."""
         
         processor = InterfaceMetadataProcessor(self.mock_pipeline)
         
@@ -167,7 +196,7 @@ class TestInterfaceMetadataProcessor(unittest.TestCase):
         test_value = {
             "meta": {
                 "id": "device1::ethernet0/1",
-                "name": "original_name",  # This will be overwritten by parsing logic
+                "name": "original_name",  # This should remain
                 "device": "router1"
             }
         }
