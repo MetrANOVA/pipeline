@@ -40,7 +40,7 @@ Each resource type is accessed through dedicated connectors that provide consist
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/MetrANOVA/pipeline.git
    cd pipeline
    ```
 
@@ -64,7 +64,7 @@ Each resource type is accessed through dedicated connectors that provide consist
   ```
   *NOTE: You can alternatively set the PIPELINE_ENV_FILE environment variable to the path of the chosen file instead of copying to .env. EXAMPLE: PIPELINE_ENV_FILE=conf/envs/data_flow.env* 
 
-4. **Build and run the pipelines**
+5. **Build and run the pipelines**
    ```bash
    docker compose up --build pipeline
    ```
