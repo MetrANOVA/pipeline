@@ -4,6 +4,7 @@
 .*.swp
 .vscode/
 .env*
+conf/
 certificates/
 caches/*.pickle
 venv/

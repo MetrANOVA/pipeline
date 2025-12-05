@@ -1,0 +1,19 @@
+consumers:
+  - type: metranova.consumers.kafka.KafkaConsumer
+
+cachers:
+  - type: metranova.cachers.redis.RedisCacher
+    name: redis
+
+writers:
+  - type: metranova.writers.clickhouse.ClickHouseWriter
+    processors:
+      - metranova.processors.clickhouse.telegraf.IFMIBInterfaceTrafficProcessor
+      - metranova.processors.clickhouse.telegraf.DataGenericMetricProcessor
+  - type: metranova.writers.redis.RedisWriter
+    processors:
+      - metranova.processors.redis.telegraf.LookupTableProcessor
+  # Enbable if want to build interface metadata caching in Redis
+  # - type: metranova.writers.redis.RedisHashWriter
+  #   processors:
+  #     - metranova.processors.redis.telegraf.InterfaceMetadataProcessor

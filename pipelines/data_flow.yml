@@ -1,0 +1,13 @@
+consumers:
+  - type: metranova.consumers.kafka.KafkaConsumer
+
+cachers:
+  - type: metranova.cachers.clickhouse.ClickHouseCacher
+    name: clickhouse
+  - type: metranova.cachers.ip.IPCacher
+    name: ip
+
+writers:
+  - type: metranova.writers.clickhouse.ClickHouseWriter
+    processors:
+      - metranova.processors.clickhouse.pmacct.PMAcctFlowProcessor

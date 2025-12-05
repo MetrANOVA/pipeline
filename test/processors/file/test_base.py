@@ -444,6 +444,178 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         self.assertEqual(trie['2001:db8::1/128'], {'ref': 'host-ref-2'})
         self.assertEqual(trie['2001:db8::/64'], {'ref': 'common-ipv6-ref'})
 
+    def test_build_message_with_additional_columns(self):
+        """Test build_message processes additional columns beyond id, ref, ip_subnet."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
+        
+        input_data = {
+            'table': 'meta_ip_with_extra_cols',
+            'column_names': ['id', 'ref', 'ip_subnet', 'latest_as_id', 'latest_country', 'latest_org_name'],
+            'rows': [
+                ['ip-block-1', 'ref-1', [['192.168.1.0', 24]], 65001, 'US', 'Organization A'],
+                ['ip-block-2', 'ref-2', [['10.0.0.0', 8]], 65002, 'CA', 'Organization B']
+            ]
+        }
+        
+        result = list(processor.build_message(input_data, {}))
+        output = result[0]
+        trie = output['data']
+        
+        # Verify additional fields are included in lookup values
+        lookup_value_1 = trie['192.168.1.0/24']
+        self.assertEqual(lookup_value_1['ref'], 'ref-1')
+        self.assertEqual(lookup_value_1['as_id'], 65001)
+        self.assertEqual(lookup_value_1['country'], 'US')
+        self.assertEqual(lookup_value_1['org_name'], 'Organization A')
+        
+        lookup_value_2 = trie['10.0.0.0/8']
+        self.assertEqual(lookup_value_2['ref'], 'ref-2')
+        self.assertEqual(lookup_value_2['as_id'], 65002)
+        self.assertEqual(lookup_value_2['country'], 'CA')
+        self.assertEqual(lookup_value_2['org_name'], 'Organization B')
+
+    def test_build_message_strips_latest_prefix_from_column_names(self):
+        """Test build_message removes 'latest_' prefix from column names."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
+        
+        input_data = {
+            'table': 'meta_ip_with_latest_prefix',
+            'column_names': ['id', 'ref', 'ip_subnet', 'latest_as_id', 'latest_country'],
+            'rows': [
+                ['ip-block-1', 'ref-1', [['192.168.1.0', 24]], 65001, 'US']
+            ]
+        }
+        
+        result = list(processor.build_message(input_data, {}))
+        output = result[0]
+        trie = output['data']
+        
+        lookup_value = trie['192.168.1.0/24']
+        # Column names should have 'latest_' prefix removed
+        self.assertIn('as_id', lookup_value)
+        self.assertIn('country', lookup_value)
+        self.assertNotIn('latest_as_id', lookup_value)
+        self.assertNotIn('latest_country', lookup_value)
+
+    def test_build_message_handles_ipv4_mapped_ipv6_addresses(self):
+        """Test build_message converts IPv4-mapped IPv6 addresses to IPv4."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
+        
+        input_data = {
+            'table': 'meta_ip_mapped',
+            'column_names': ['id', 'ref', 'ip_subnet'],
+            'rows': [
+                ['mapped-ipv4', 'ref-mapped', [['::ffff:192.168.1.0', 24]]]
+            ]
+        }
+        
+        result = list(processor.build_message(input_data, {}))
+        output = result[0]
+        trie = output['data']
+        
+        # Should be converted to plain IPv4
+        self.assertEqual(trie['192.168.1.0/24'], {'ref': 'ref-mapped'})
+
+    def test_build_message_with_invalid_subnet_tuple_format(self):
+        """Test build_message handles invalid subnet tuple formats."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
+        
+        input_data = {
+            'table': 'meta_ip_invalid_tuples',
+            'column_names': ['id', 'ref', 'ip_subnet'],
+            'rows': [
+                ['valid-block', 'ref-valid', [['192.168.1.0', 24]]],  # Valid
+                ['empty-tuple', 'ref-empty', [[]]],  # Empty tuple
+                ['single-element', 'ref-single', [['192.168.2.0']]],  # Missing prefix
+                ['null-address', 'ref-null-addr', [[None, 24]]],  # Null address
+                ['null-prefix', 'ref-null-prefix', [['192.168.3.0', None]]],  # Null prefix
+                ['not-tuple', 'ref-not-tuple', ['not-a-tuple']],  # Not a tuple
+                ['valid-block-2', 'ref-valid-2', [['10.0.0.0', 8]]]  # Valid
+            ]
+        }
+        
+        with patch.object(processor.logger, 'warning') as mock_warning, \
+             patch.object(processor.logger, 'debug') as mock_debug:
+            
+            result = list(processor.build_message(input_data, {}))
+            
+            # Should log warnings for invalid formats
+            self.assertGreater(mock_warning.call_count, 0)
+            # Should log debug for null values
+            self.assertGreater(mock_debug.call_count, 0)
+        
+        output = result[0]
+        trie = output['data']
+        
+        # Only valid blocks should be in trie
+        self.assertEqual(trie['192.168.1.0/24'], {'ref': 'ref-valid'})
+        self.assertEqual(trie['10.0.0.0/8'], {'ref': 'ref-valid-2'})
+        
+        # Invalid entries should not be in trie
+        with self.assertRaises(KeyError):
+            _ = trie['192.168.2.0/24']
+        with self.assertRaises(KeyError):
+            _ = trie['192.168.3.0/24']
+
+    def test_build_message_with_use_simple_table_name_false(self):
+        """Test build_message filename generation with use_simple_table_name=False."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
+        processor.use_simple_table_name = False
+        
+        input_data = {
+            'table': 'meta_ip:some_variant',
+            'column_names': ['id', 'ref', 'ip_subnet'],
+            'rows': [
+                ['ip-block-1', 'ref-1', [['192.168.1.0', 24]]]
+            ]
+        }
+        
+        result = list(processor.build_message(input_data, {}))
+        output = result[0]
+        
+        # Should replace : with . when use_simple_table_name is False
+        self.assertEqual(output['name'], 'ip_trie_meta_ip.some_variant.pickle')
+
+    def test_build_message_with_use_simple_table_name_true(self):
+        """Test build_message filename generation with use_simple_table_name=True."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
+        processor.use_simple_table_name = True
+        
+        input_data = {
+            'table': 'meta_ip:some_variant',
+            'column_names': ['id', 'ref', 'ip_subnet'],
+            'rows': [
+                ['ip-block-1', 'ref-1', [['192.168.1.0', 24]]]
+            ]
+        }
+        
+        result = list(processor.build_message(input_data, {}))
+        output = result[0]
+        
+        # Should only use part before : when use_simple_table_name is True
+        self.assertEqual(output['name'], 'ip_trie_meta_ip.pickle')
+
+    @patch.dict(os.environ, {'IP_FILE_USE_SIMPLE_FILE_NAME': 'false'})
+    def test_init_use_simple_table_name_from_env_false(self):
+        """Test initialization reads use_simple_table_name from environment variable (false)."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
+        
+        self.assertFalse(processor.use_simple_table_name)
+
+    @patch.dict(os.environ, {'IP_FILE_USE_SIMPLE_FILE_NAME': '0'})
+    def test_init_use_simple_table_name_from_env_zero(self):
+        """Test initialization reads use_simple_table_name from environment variable (0)."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
+        
+        self.assertFalse(processor.use_simple_table_name)
+
+    @patch.dict(os.environ, {'IP_FILE_USE_SIMPLE_FILE_NAME': 'no'})
+    def test_init_use_simple_table_name_from_env_no(self):
+        """Test initialization reads use_simple_table_name from environment variable (no)."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
+        
+        self.assertFalse(processor.use_simple_table_name)
+
 
 if __name__ == '__main__':
     unittest.main()

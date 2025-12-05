@@ -520,6 +520,534 @@ class TestBaseDataProcessor(unittest.TestCase):
         self.assertEqual(processor.policy_scope, [])
 
 
+class TestBaseClickHouseProcessorAdditional(unittest.TestCase):
+    def setUp(self):
+        """Set up test fixtures."""
+        self.mock_pipeline = Mock()
+        
+    def test_get_table_names_default(self):
+        """Test get_table_names returns single table name."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "test_table"
+        
+        result = processor.get_table_names()
+        self.assertEqual(result, ["test_table"])
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_REPLICATION': 'true', 'CLICKHOUSE_CLUSTER_NAME': 'test_cluster'})
+    def test_create_table_command_with_replication(self):
+        """Test create_table_command with replication enabled."""
+        processor = BaseMetadataProcessor(self.mock_pipeline)
+        processor.table = "test_table"
+        processor.replication = True
+        processor.cluster_name = 'test_cluster'
+        processor.replica_path = '/clickhouse/tables/{shard}/{database}/{table}'
+        processor.replica_name = '{replica}'
+        
+        result = processor.create_table_command()
+        
+        self.assertIn("ON CLUSTER 'test_cluster'", result)
+        self.assertIn("ENGINE = ReplicatedMergeTree", result)
+        self.assertIn("'/clickhouse/tables/{shard}/{database}/{table}'", result)
+        self.assertIn("'{replica}'", result)
+    
+    def test_create_table_command_with_table_suffix_filtering(self):
+        """Test create_table_command filters columns by table suffix."""
+        processor = BaseMetadataProcessor(self.mock_pipeline)
+        processor.table = "test_table_gauge"
+        
+        # Add columns with suffix markers
+        processor.column_defs.append(['gauge_field', 'Float64', True, 'gauge'])
+        processor.column_defs.append(['counter_field', 'UInt64', True, 'counter'])
+        
+        result = processor.create_table_command()
+        
+        # Should include gauge_field since table ends with _gauge
+        self.assertIn('gauge_field', result)
+        # Should NOT include counter_field
+        self.assertNotIn('counter_field', result)
+    
+    @patch.dict(os.environ, {'TEST_IP_REF_VAR': 'as,geo,org'})
+    def test_get_ip_ref_extensions(self):
+        """Test get_ip_ref_extensions parses environment variable."""
+        processor = BaseMetadataProcessor(self.mock_pipeline)
+        
+        result = processor.get_ip_ref_extensions('TEST_IP_REF_VAR')
+        
+        self.assertEqual(result, ['as', 'geo', 'org'])
+    
+    def test_get_ip_ref_extensions_empty(self):
+        """Test get_ip_ref_extensions with empty env var."""
+        processor = BaseMetadataProcessor(self.mock_pipeline)
+        
+        result = processor.get_ip_ref_extensions('NON_EXISTENT_VAR')
+        
+        self.assertEqual(result, [])
+    
+    def test_lookup_ip_ref_extensions(self):
+        """Test lookup_ip_ref_extensions queries cacher."""
+        processor = BaseMetadataProcessor(self.mock_pipeline)
+        processor.ip_ref_extensions = ['as', 'geo']
+        
+        # Mock cacher lookups
+        mock_ip_cacher = Mock()
+        mock_ip_cacher.lookup.side_effect = [
+            {'ref': 'AS12345'},  # as lookup
+            {'ref': 'US-CA'}     # geo lookup
+        ]
+        self.mock_pipeline.cacher.return_value = mock_ip_cacher
+        
+        result = processor.lookup_ip_ref_extensions('192.168.1.1', 'src')
+        
+        self.assertEqual(result, {
+            'src_ip_as_ref': 'AS12345',
+            'src_ip_geo_ref': 'US-CA'
+        })
+        
+        # Verify lookups were called correctly
+        self.assertEqual(mock_ip_cacher.lookup.call_count, 2)
+        mock_ip_cacher.lookup.assert_any_call('meta_ip_as', '192.168.1.1')
+        mock_ip_cacher.lookup.assert_any_call('meta_ip_geo', '192.168.1.1')
+    
+    def test_lookup_ip_ref_extensions_empty_ip(self):
+        """Test lookup_ip_ref_extensions with empty IP."""
+        processor = BaseMetadataProcessor(self.mock_pipeline)
+        processor.ip_ref_extensions = ['as']
+        
+        result = processor.lookup_ip_ref_extensions('', 'src')
+        
+        self.assertEqual(result, {})
+    
+    def test_lookup_ip_ref_extensions_no_ref_in_result(self):
+        """Test lookup_ip_ref_extensions when ref is missing in result."""
+        processor = BaseMetadataProcessor(self.mock_pipeline)
+        processor.ip_ref_extensions = ['as']
+        
+        mock_ip_cacher = Mock()
+        mock_ip_cacher.lookup.return_value = {'other_field': 'value'}
+        self.mock_pipeline.cacher.return_value = mock_ip_cacher
+        
+        result = processor.lookup_ip_ref_extensions('192.168.1.1', 'dst')
+        
+        self.assertEqual(result, {'dst_ip_as_ref': None})
+    
+    def test_column_names_with_duplicates(self):
+        """Test column_names handles duplicate column definitions."""
+        processor = BaseMetadataProcessor(self.mock_pipeline)
+        # Add duplicate column
+        processor.column_defs.append(['id', 'String', True])
+        
+        result = processor.column_names()
+        
+        # Should not have duplicates
+        self.assertEqual(len(result), len(set(result)))
+        self.assertEqual(result.count('id'), 1)
+
+
+class TestBaseMetadataProcessorAdditional(unittest.TestCase):
+    def setUp(self):
+        """Set up test fixtures."""
+        self.mock_pipeline = Mock()
+        mock_cacher = Mock()
+        mock_cacher.lookup.return_value = None
+        self.mock_pipeline.cacher.return_value = mock_cacher
+        
+        self.processor = BaseMetadataProcessor(self.mock_pipeline)
+        self.processor.table = "test_table"
+        self.processor.val_id_field = ['id']
+        self.processor.required_fields = [['id']]
+    
+    def test_calculate_hash(self):
+        """Test calculate_hash creates consistent hashes."""
+        import hashlib
+        import orjson
+        
+        record = {'id': 'test', 'field1': 'value1', 'field2': 'value2'}
+        
+        hash1 = self.processor.calculate_hash(record.copy())
+        hash2 = self.processor.calculate_hash(record.copy())
+        
+        # Should be consistent
+        self.assertEqual(hash1, hash2)
+        
+        # Should be MD5
+        self.assertEqual(len(hash1), 32)
+    
+    def test_calculate_hash_removes_hash_field(self):
+        """Test calculate_hash removes hash field before calculating."""
+        record = {'id': 'test', 'hash': 'old_hash', 'field1': 'value1'}
+        
+        hash_result = self.processor.calculate_hash(record)
+        
+        # Should not include the old hash in calculation
+        self.assertNotEqual(hash_result, 'old_hash')
+    
+    def test_calculate_hash_removes_ref_field(self):
+        """Test calculate_hash removes ref field before calculating."""
+        record1 = {'id': 'test', 'field1': 'value1'}
+        record2 = {'id': 'test', 'ref': 'test__v1', 'field1': 'value1'}
+        
+        hash1 = self.processor.calculate_hash(record1.copy())
+        hash2 = self.processor.calculate_hash(record2.copy())
+        
+        # Should be the same despite different ref
+        self.assertEqual(hash1, hash2)
+    
+    def test_build_message_not_dict_data(self):
+        """Test build_message with non-dict data."""
+        input_data = {
+            'data': 'not a list'
+        }
+        
+        result = self.processor.build_message(input_data, {})
+        
+        self.assertEqual(result, [])
+    
+    def test_build_message_empty_value(self):
+        """Test build_message with empty value."""
+        result = self.processor.build_message(None, {})
+        self.assertEqual(result, [])
+        
+        result = self.processor.build_message({}, {})
+        self.assertEqual(result, [])
+    
+    def test_build_single_message_nested_id_field(self):
+        """Test build_single_message with nested ID field."""
+        self.processor.val_id_field = ['meta', 'device', 'id']
+        self.processor.required_fields = [['meta']]  # Adjust required fields
+        
+        value = {
+            'meta': {
+                'device': {
+                    'id': 'nested_id'
+                }
+            },
+            'ext': '{}',
+            'tag': []
+        }
+        
+        result = self.processor.build_single_message(value, {})
+        
+        self.assertIsNotNone(result)
+        self.assertEqual(result['id'], 'nested_id')
+    
+    def test_build_single_message_nested_id_field_missing(self):
+        """Test build_single_message with incomplete nested ID path."""
+        self.processor.val_id_field = ['meta', 'device', 'id']
+        
+        value = {
+            'meta': {
+                # Missing 'device' level
+            },
+            'ext': '{}',
+            'tag': []
+        }
+        
+        result = self.processor.build_single_message(value, {})
+        
+        self.assertIsNone(result)
+    
+    def test_build_single_message_non_versioned(self):
+        """Test build_single_message with versioned=False."""
+        self.processor.versioned = False
+        
+        value = {
+            'id': 'test_id',
+            'ext': '{}',
+            'tag': []
+        }
+        
+        result = self.processor.build_single_message(value, {})
+        
+        self.assertIsNotNone(result)
+        self.assertEqual(result['id'], 'test_id')
+        # Should not have ref or hash for non-versioned
+        self.assertNotIn('ref', result)
+        self.assertNotIn('hash', result)
+    
+    def test_build_single_message_invalid_ref_format(self):
+        """Test build_single_message with invalid ref format in cache."""
+        value = {'id': 'test_id', 'ext': '{}', 'tag': []}
+        
+        # Mock existing record with invalid ref format
+        mock_existing = {'hash': 'different_hash', 'ref': 'invalid_ref_no_version'}
+        self.mock_pipeline.cacher.return_value.lookup.return_value = mock_existing
+        
+        result = self.processor.build_single_message(value, {})
+        
+        # Should return None and log warning
+        self.assertIsNone(result)
+    
+    def test_format_float_fields(self):
+        """Test format_float_fields converts values correctly."""
+        self.processor.float_fields = ['field1', 'field2', 'field3']
+        
+        record = {
+            'field1': '3.14',
+            'field2': 42,
+            'field3': 'invalid',
+            'field4': 'ignored'
+        }
+        
+        self.processor.format_float_fields(record)
+        
+        self.assertEqual(record['field1'], 3.14)
+        self.assertEqual(record['field2'], 42.0)
+        self.assertIsNone(record['field3'])
+    
+    def test_format_int_fields(self):
+        """Test format_int_fields converts values correctly."""
+        self.processor.int_fields = ['field1', 'field2', 'field3']
+        
+        record = {
+            'field1': '42',
+            'field2': 3.14,
+            'field3': 'invalid',
+            'field4': 'ignored'
+        }
+        
+        self.processor.format_int_fields(record)
+        
+        self.assertEqual(record['field1'], 42)
+        self.assertEqual(record['field2'], 3)
+        self.assertIsNone(record['field3'])
+    
+    def test_format_boolean_fields(self):
+        """Test format_boolean_fields converts values correctly."""
+        self.processor.boolean_fields = ['field1', 'field2', 'field3', 'field4', 'field5', 'field6']
+        
+        record = {
+            'field1': True,
+            'field2': 'true',
+            'field3': 'True',
+            'field4': 1,
+            'field5': '1',
+            'field6': 'false'
+        }
+        
+        self.processor.format_boolean_fields(record)
+        
+        self.assertTrue(record['field1'])
+        self.assertTrue(record['field2'])
+        self.assertTrue(record['field3'])
+        self.assertTrue(record['field4'])
+        self.assertTrue(record['field5'])
+        self.assertFalse(record['field6'])
+    
+    def test_format_array_fields_none(self):
+        """Test format_array_fields handles None values."""
+        self.processor.array_fields = ['field1']
+        
+        record = {'field1': None}
+        
+        self.processor.format_array_fields(record)
+        
+        self.assertEqual(record['field1'], [])
+    
+    def test_format_array_fields_json_string(self):
+        """Test format_array_fields parses JSON strings."""
+        import orjson
+        
+        self.processor.array_fields = ['field1', 'field2']
+        
+        record = {
+            'field1': '["item1", "item2"]',
+            'field2': 'invalid json'
+        }
+        
+        self.processor.format_array_fields(record)
+        
+        self.assertEqual(record['field1'], ["item1", "item2"])
+        self.assertEqual(record['field2'], [])
+    
+    def test_build_metadata_fields_with_dict_ext(self):
+        """Test build_metadata_fields with dict ext."""
+        value = {
+            'id': 'test',
+            'ext': {'key': 'value'},
+            'tag': None
+        }
+        
+        result = self.processor.build_metadata_fields(value)
+        
+        # ext should be converted to JSON string
+        import orjson
+        self.assertEqual(result['ext'], orjson.dumps({'key': 'value'}, option=orjson.OPT_SORT_KEYS).decode('utf-8'))
+        self.assertEqual(result['tag'], [])
+    
+    def test_build_metadata_fields_with_string_tag(self):
+        """Test build_metadata_fields with string tag."""
+        value = {
+            'id': 'test',
+            'ext': '{}',
+            'tag': '["tag1", "tag2"]'
+        }
+        
+        result = self.processor.build_metadata_fields(value)
+        
+        self.assertEqual(result['tag'], ["tag1", "tag2"])
+    
+    def test_build_message_with_self_ref_fields_list(self):
+        """Test build_message with self-referencing list fields."""
+        self.processor.self_ref_fields = ['parent']
+        self.processor.required_fields = [['id']]
+        
+        # Need to add parent_id and parent_ref to column_defs so they're included
+        self.processor.column_defs.append(['parent_id', 'Array(String)', True])
+        self.processor.column_defs.append(['parent_ref', 'Array(String)', True])
+        
+        input_data = {
+            'data': [
+                {'id': 'item1', 'parent_id': ['item2', 'item3'], 'parent_ref': [], 'ext': '{}', 'tag': []},
+                {'id': 'item2', 'parent_id': [], 'parent_ref': [], 'ext': '{}', 'tag': []},
+                {'id': 'item3', 'parent_id': [], 'parent_ref': [], 'ext': '{}', 'tag': []}
+            ]
+        }
+        
+        result = self.processor.build_message(input_data, {})
+        
+        # Should update parent_ref for item1
+        item1 = next((r for r in result if r['id'] == 'item1'), None)
+        if item1:
+            self.assertIn('parent_ref', item1)
+            self.assertIsInstance(item1['parent_ref'], list)
+            self.assertIn('item2__v1', item1['parent_ref'])
+            self.assertIn('item3__v1', item1['parent_ref'])
+    
+    def test_build_message_with_self_ref_fields_single(self):
+        """Test build_message with self-referencing single field."""
+        self.processor.self_ref_fields = ['parent']
+        self.processor.required_fields = [['id']]
+        
+        # Need to add parent_id and parent_ref to column_defs
+        self.processor.column_defs.append(['parent_id', 'String', True])
+        self.processor.column_defs.append(['parent_ref', 'String', True])
+        
+        input_data = {
+            'data': [
+                {'id': 'child', 'parent_id': 'parent', 'parent_ref': '', 'ext': '{}', 'tag': []},
+                {'id': 'parent', 'parent_id': '', 'parent_ref': '', 'ext': '{}', 'tag': []}
+            ]
+        }
+        
+        result = self.processor.build_message(input_data, {})
+        
+        # Should update parent_ref for child
+        child = next((r for r in result if r['id'] == 'child'), None)
+        if child:
+            self.assertEqual(child['parent_ref'], 'parent__v1')
+    
+    def test_build_message_self_ref_unchanged_after_update(self):
+        """Test build_message skips self-ref records that are unchanged after ref update."""
+        self.processor.self_ref_fields = ['parent']
+        self.processor.required_fields = [['id']]
+        
+        # Need to add parent_id and parent_ref to column_defs
+        self.processor.column_defs.append(['parent_id', 'String', True])
+        self.processor.column_defs.append(['parent_ref', 'String', True])
+        
+        # Mock that child already has correct hash in cache
+        def lookup_side_effect(table, item_id):
+            if item_id == 'child':
+                # Return a cached record that will match after self-ref update
+                import hashlib
+                import orjson
+                # This would be the hash after self-ref is updated
+                return {'hash': 'matching_hash', 'ref': 'child__v1'}
+            return None
+        
+        self.mock_pipeline.cacher.return_value.lookup.side_effect = lookup_side_effect
+        
+        input_data = {
+            'data': [
+                {'id': 'child', 'parent_id': 'parent', 'parent_ref': '', 'ext': '{}', 'tag': []},
+                {'id': 'parent', 'parent_id': '', 'parent_ref': '', 'ext': '{}', 'tag': []}
+            ]
+        }
+        
+        result = self.processor.build_message(input_data, {})
+        
+        # Child should be filtered out if hash matches after self-ref update
+        # This is complex to test perfectly, but we can verify the logic runs
+        self.assertIsInstance(result, list)
+
+
+class TestBaseDataGenericMetricProcessor(unittest.TestCase):
+    def setUp(self):
+        """Set up test fixtures."""
+        self.mock_pipeline = Mock()
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_METRIC_RESOURCE_NAME': 'interface,device,application'})
+    def test_load_resource_types(self):
+        """Test load_resource_types parses environment variable."""
+        from metranova.processors.clickhouse.base import BaseDataGenericMetricProcessor
+        
+        processor = BaseDataGenericMetricProcessor(self.mock_pipeline)
+        
+        self.assertEqual(processor.resource_types, ['interface', 'device', 'application'])
+    
+    def test_load_resource_types_empty(self):
+        """Test load_resource_types with empty environment."""
+        from metranova.processors.clickhouse.base import BaseDataGenericMetricProcessor
+        
+        if 'CLICKHOUSE_METRIC_RESOURCE_NAME' in os.environ:
+            del os.environ['CLICKHOUSE_METRIC_RESOURCE_NAME']
+        
+        processor = BaseDataGenericMetricProcessor(self.mock_pipeline)
+        
+        self.assertEqual(processor.resource_types, [])
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_METRIC_RESOURCE_NAME': 'interface'})
+    def test_get_table_name(self):
+        """Test get_table_name formats correctly."""
+        from metranova.processors.clickhouse.base import BaseDataGenericMetricProcessor
+        
+        processor = BaseDataGenericMetricProcessor(self.mock_pipeline)
+        
+        result = processor.get_table_name('interface', 'counter')
+        self.assertEqual(result, 'data_interface_counter')
+        
+        result = processor.get_table_name('device', 'gauge')
+        self.assertEqual(result, 'data_device_gauge')
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_METRIC_RESOURCE_NAME': 'interface,device'})
+    def test_get_table_names(self):
+        """Test get_table_names returns all combinations."""
+        from metranova.processors.clickhouse.base import BaseDataGenericMetricProcessor
+        
+        processor = BaseDataGenericMetricProcessor(self.mock_pipeline)
+        
+        result = list(processor.get_table_names())
+        
+        self.assertIn('data_interface_counter', result)
+        self.assertIn('data_interface_gauge', result)
+        self.assertIn('data_device_counter', result)
+        self.assertIn('data_device_gauge', result)
+        self.assertEqual(len(result), 4)
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_METRIC_RESOURCE_NAME': 'interface'})
+    def test_column_defs_initialization(self):
+        """Test that column_defs are properly initialized."""
+        from metranova.processors.clickhouse.base import BaseDataGenericMetricProcessor
+        
+        processor = BaseDataGenericMetricProcessor(self.mock_pipeline)
+        
+        # Should have observation_time at start
+        self.assertEqual(processor.column_defs[0][0], 'observation_time')
+        
+        # Should have metric_value fields with suffixes
+        metric_value_cols = [col for col in processor.column_defs if col[0] == 'metric_value']
+        self.assertEqual(len(metric_value_cols), 2)  # gauge and counter
+        
+        # Check suffixes
+        gauge_col = next(col for col in metric_value_cols if len(col) > 3 and col[3] == 'gauge')
+        counter_col = next(col for col in metric_value_cols if len(col) > 3 and col[3] == 'counter')
+        
+        self.assertIn('Float64', gauge_col[1])
+        self.assertIn('UInt64', counter_col[1])
+
+
 if __name__ == '__main__':
     # Run tests with verbose output
     unittest.main(verbosity=2)

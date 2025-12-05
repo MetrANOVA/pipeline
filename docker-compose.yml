@@ -2,166 +2,23 @@ version: '3.8'
 
 services:
 
-  data_pipeline_flow:
+  pipeline:
     image: metranova/pipeline:latest
     build:
       context: .
       dockerfile: Dockerfile
-    environment:
-      - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=${PIPELINE_FLOW_CLICKHOUSE_PROCESSORS}
-      - KAFKA_TOPIC=${PIPELINE_FLOW_KAFKA_TOPIC}
-      - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_AS_METADATA_TABLE},${CLICKHOUSE_DEVICE_METADATA_TABLE}:@loopback_ip,${CLICKHOUSE_IF_METADATA_TABLE}:device_id:flow_index:edge
-      - IP_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}
     env_file:
-      - .env
+      - envs/base.env
+      - ${PIPELINE_ENV_FILE:-.env}
     volumes:
       - ./certificates:/app/certificates:ro
-      - ./caches:/app/caches:ro
-    restart: always
-    deploy:
-      mode: replicated
-      replicas: 10
-  
-  data_pipeline_interface:
-    image: metranova/pipeline:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - PIPELINE_TYPE=clickhouse
-      - CLICKHOUSE_PROCESSORS=${PIPELINE_IF_CLICKHOUSE_PROCESSORS}
-      - REDIS_PROCESSORS=${PIPELINE_IF_REDIS_PROCESSORS}
-      - REDIS_HASH_PROCESSORS=${PIPELINE_IF_REDIS_HASH_PROCESSORS}
-      - KAFKA_TOPIC=${PIPELINE_IF_KAFKA_TOPIC}
-    env_file:
-      - .env
-    volumes:
-      - ./certificates:/app/certificates:ro
-      - ./conf:/etc/metranova_pipeline:ro
-    restart: always
-    deploy:
-      mode: replicated
-      replicas: 10
-
-  metadata_pipeline_redis_export:
-    image: metranova/pipeline:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - PIPELINE_TYPE=metadata_export
-      - CLICKHOUSE_PROCESSORS=${PIPELINE_METADATA_REDIS_EXPORT_CLICKHOUSE_PROCESSORS}
-      - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_IF_METADATA_TABLE}
-      - REDIS_CONSUMER_TABLES=${REDIS_IF_METADATA_TABLE}
-    env_file:
-      - .env
-    restart: always
-
-  metadata_pipeline_file_export:
-    image: metranova/pipeline:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - PIPELINE_TYPE=metadata_file_export
-      - CLICKHOUSE_PROCESSORS=${PIPELINE_METADATA_FILE_EXPORT_CLICKHOUSE_PROCESSORS}
-      - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_IF_METADATA_TABLE},${CLICKHOUSE_DEVICE_METADATA_TABLE},${CLICKHOUSE_ORGANIZATION_METADATA_TABLE},${CLICKHOUSE_CIRCUIT_METADATA_TABLE},${CLICKHOUSE_AS_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}
-      - FILE_CONSUMER_PATHS=${PIPELINE_METADATA_FILE_EXPORT_PATHS}
-    volumes:
-      - ./conf:/etc/metranova_pipeline:ro
-    env_file:
-      - .env
-    restart: always
-
-  metadata_pipeline_caida_org_as:
-    image: metranova/pipeline:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - PIPELINE_TYPE=metadata_caida_org_as
-      - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_ORGANIZATION_METADATA_TABLE},${CLICKHOUSE_AS_METADATA_TABLE}
-      - CLICKHOUSE_PROCESSORS=${PIPELINE_METADATA_CAIDA_ORG_AS_CLICKHOUSE_PROCESSORS}
-      - CLICKHOUSE_AS_METADATA_EXTENSIONS=peeringdb
-    env_file:
-      - .env
-    volumes:
-      - ./caches:/app/caches:ro
-    restart: always
-
-  metadata_pipeline_ip_geo:
-    image: metranova/pipeline:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - PIPELINE_TYPE=metadata_ip_geo
-      - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_AS_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}
-      - CLICKHOUSE_PROCESSORS=${PIPELINE_METADATA_IP_GEO_CLICKHOUSE_PROCESSORS}
-    env_file:
-      - .env
-    volumes:
-      - ./caches:/app/caches:ro
-    restart: always
-
-  metadata_pipeline_scireg:
-    image: metranova/pipeline:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - PIPELINE_TYPE=scireg
-      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.scireg.ScienceRegistryProcessor
-      - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE}
-    env_file:
-      - .env
-    restart: always
-  
-  metadata_pipeline_scinet:
-    image: metranova/pipeline:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - PIPELINE_TYPE=scinet
-      - CLICKHOUSE_PROCESSORS=metranova.processors.clickhouse.scinet.SCinetMetadataProcessor
-      - CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_SCINET_METADATA_TABLE}
-      - SCINET_FILE_CONSUMER_PATHS=/app/caches/booth_metadata.json
-    volumes:
-      - ./caches:/app/caches:ro
-    env_file:
-      - .env
-    restart: always
-
-  cache_pipeline_redis:
-    image: metranova/pipeline:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - PIPELINE_TYPE=metadata_import
-      - CLICKHOUSE_CONSUMER_TABLES=${METADATA_IMPORT_CLICKHOUSE_CONSUMER_TABLES}
-      - CLICKHOUSE_CONSUMER_UPDATE_INTERVAL=${REDIS_CACHE_CLICKHOUSE_CONSUMER_UPDATE_INTERVAL}
-    env_file:
-      - .env
-    restart: always
-
-  cache_pipeline_ip_trie:
-    image: metranova/pipeline:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - PIPELINE_TYPE=ip_metadata_import
-      - CLICKHOUSE_CONSUMER_TABLES=${CLICKHOUSE_SCIREG_METADATA_TABLE},${CLICKHOUSE_IP_METADATA_TABLE}:as_id
-      - FILE_PROCESSORS=metranova.processors.file.base.IPTriePickleFileProcessor
-      - CLICKHOUSE_CONSUMER_UPDATE_INTERVAL=${IP_TRIE_CACHE_CLICKHOUSE_CONSUMER_UPDATE_INTERVAL}
-    env_file:
-      - .env
-    volumes:
       - ./caches:/app/caches:rw
+      - ./pipelines:/app/pipelines:ro
+      - ./conf:/etc/metranova_pipeline:ro
     restart: always
+    deploy:
+      mode: replicated
+      replicas: ${PIPELINE_REPLICAS:-1}
 
   redis:
     image: redis:8.2.1

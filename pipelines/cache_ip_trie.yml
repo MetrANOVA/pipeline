@@ -1,0 +1,7 @@
+consumers:
+  - type: metranova.consumers.clickhouse.IPMetadataClickHouseConsumer
+
+writers:
+  - type: metranova.writers.file.PickleFileWriter
+    processors:
+      - metranova.processors.file.base.IPTriePickleFileProcessor

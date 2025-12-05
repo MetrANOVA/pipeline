@@ -390,6 +390,311 @@ class TestLookupTableProcessor(unittest.TestCase):
         finally:
             os.unlink(temp_file)
 
+    @patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': '/path/to/invalid.yml'})
+    @patch('yaml.safe_load', side_effect=yaml.YAMLError("Invalid YAML"))
+    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='')
+    def test_init_handles_yaml_error(self, mock_open, mock_yaml_load):
+        """Test that YAMLError is handled gracefully."""
+        
+        processor = LookupTableProcessor(self.mock_pipeline)
+        
+        self.assertEqual(processor.rules, {})
+
+    def test_format_value_with_none_format(self):
+        """Test format_value when format_type is None."""
+        with patch.object(LookupTableProcessor, '__init__', lambda x, y: None):
+            processor = LookupTableProcessor(None)
+            
+            result = processor.format_value('test_value', None)
+            self.assertEqual(result, 'test_value')
+
+    def test_format_value_with_short_hostname(self):
+        """Test format_value with short_hostname format."""
+        with patch.object(LookupTableProcessor, '__init__', lambda x, y: None):
+            processor = LookupTableProcessor(None)
+            
+            result = processor.format_value('hostname.domain.com', 'short_hostname')
+            self.assertEqual(result, 'hostname')
+
+    def test_format_value_with_unknown_format(self):
+        """Test format_value with unknown format type (should return original value)."""
+        with patch.object(LookupTableProcessor, '__init__', lambda x, y: None):
+            processor = LookupTableProcessor(None)
+            
+            result = processor.format_value('test_value', 'unknown_format')
+            self.assertEqual(result, 'test_value')
+
+    def test_build_message_skip_builder_on_partial_key(self):
+        """Test that builder is skipped when not all key parts are available."""
+        config = {
+            'test_measurement': {
+                'resource_lookup_tables': [
+                    {
+                        'name': 'test_table',
+                        'key': [
+                            {
+                                'type': 'field',
+                                'path': ['tags', 'device']
+                            },
+                            {
+                                'type': 'field',
+                                'path': ['tags', 'missing_field']  # This will be missing
+                            }
+                        ],
+                        'value': {
+                            'type': 'field',
+                            'path': ['fields', 'value']
+                        }
+                    }
+                ]
+            }
+        }
+        
+        temp_file = self.create_temp_yaml_file(config)
+        
+        try:
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
+                processor = LookupTableProcessor(self.mock_pipeline)
+                
+                test_value = {
+                    'name': 'test_measurement',
+                    'tags': {
+                        'device': 'router1'
+                        # missing_field is not present
+                    },
+                    'fields': {
+                        'value': 'test_val'
+                    }
+                }
+                
+                result = processor.build_message(test_value, {})
+                # Should be empty because one of the key parts is missing
+                self.assertEqual(result, [])
+        finally:
+            os.unlink(temp_file)
+
+    def test_build_message_with_key_format(self):
+        """Test build_message with format specified in key configuration."""
+        config = {
+            'test_measurement': {
+                'resource_lookup_tables': [
+                    {
+                        'name': 'formatted_key_table',
+                        'key': [
+                            {
+                                'type': 'field',
+                                'path': ['tags', 'hostname'],
+                                'format': 'short_hostname'
+                            }
+                        ],
+                        'value': {
+                            'type': 'field',
+                            'path': ['fields', 'value']
+                        }
+                    }
+                ]
+            }
+        }
+        
+        temp_file = self.create_temp_yaml_file(config)
+        
+        try:
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
+                processor = LookupTableProcessor(self.mock_pipeline)
+                processor.expires = 3600
+                
+                test_value = {
+                    'name': 'test_measurement',
+                    'tags': {
+                        'hostname': 'server.example.com'
+                    },
+                    'fields': {
+                        'value': 'test_val'
+                    }
+                }
+                
+                result = processor.build_message(test_value, {})
+                
+                self.assertEqual(len(result), 1)
+                self.assertEqual(result[0]['key'], 'server')  # Should be shortened
+                self.assertEqual(result[0]['value'], 'test_val')
+        finally:
+            os.unlink(temp_file)
+
+    def test_build_message_all_keys_present_but_value_missing(self):
+        """Test the case where all key parts exist but the lookup value is missing."""
+        config = {
+            'test_measurement': {
+                'resource_lookup_tables': [
+                    {
+                        'name': 'test_table',
+                        'key': [
+                            {
+                                'type': 'field',
+                                'path': ['tags', 'device']
+                            }
+                        ],
+                        'value': {
+                            'type': 'field',
+                            'path': ['fields', 'missing_value']  # This doesn't exist
+                        }
+                    }
+                ]
+            }
+        }
+        
+        temp_file = self.create_temp_yaml_file(config)
+        
+        try:
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
+                processor = LookupTableProcessor(self.mock_pipeline)
+                
+                test_value = {
+                    'name': 'test_measurement',
+                    'tags': {
+                        'device': 'router1'  # Key exists
+                    },
+                    'fields': {
+                        'other_field': 'value'  # But the value field we want doesn't exist
+                    }
+                }
+                
+                result = processor.build_message(test_value, {})
+                # Should return empty list because lookup_value is None
+                self.assertEqual(result, [])
+        finally:
+            os.unlink(temp_file)
+
+    def test_build_message_with_non_field_value_type(self):
+        """Test the case where value type is not 'field'."""
+        config = {
+            'test_measurement': {
+                'resource_lookup_tables': [
+                    {
+                        'name': 'test_table',
+                        'key': [
+                            {
+                                'type': 'field',
+                                'path': ['tags', 'device']
+                            }
+                        ],
+                        'value': {
+                            'type': 'constant',  # Not 'field'
+                            'path': ['fields', 'value']
+                        }
+                    }
+                ]
+            }
+        }
+        
+        temp_file = self.create_temp_yaml_file(config)
+        
+        try:
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
+                processor = LookupTableProcessor(self.mock_pipeline)
+                
+                test_value = {
+                    'name': 'test_measurement',
+                    'tags': {
+                        'device': 'router1'
+                    },
+                    'fields': {
+                        'value': 'test_value'
+                    }
+                }
+                
+                result = processor.build_message(test_value, {})
+                # Should return empty list because value_config type is not 'field', so lookup_value stays None
+                self.assertEqual(result, [])
+        finally:
+            os.unlink(temp_file)
+
+    def test_build_message_name_not_in_rules(self):
+        """Test build_message when name exists but is not in rules - line 99."""
+        config = {
+            'known_measurement': {
+                'resource_lookup_tables': []
+            }
+        }
+        
+        temp_file = self.create_temp_yaml_file(config)
+        
+        try:
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
+                processor = LookupTableProcessor(self.mock_pipeline)
+                
+                test_value = {
+                    'name': 'unknown_measurement',  # Not in rules
+                    'tags': {
+                        'device': 'router1'
+                    }
+                }
+                
+                result = processor.build_message(test_value, {})
+                # Should return empty list because name is not in rules
+                self.assertEqual(result, [])
+        finally:
+            os.unlink(temp_file)
+
+    def test_build_message_builder_without_name(self):
+        """Test build_message with a builder that has no 'name' field - line 108."""
+        config = {
+            'test_measurement': {
+                'resource_lookup_tables': [
+                    {
+                        # Missing 'name' field
+                        'key': [
+                            {
+                                'type': 'field',
+                                'path': ['tags', 'device']
+                            }
+                        ],
+                        'value': {
+                            'type': 'field',
+                            'path': ['fields', 'value']
+                        }
+                    },
+                    {
+                        'name': 'valid_table',
+                        'key': [
+                            {
+                                'type': 'field',
+                                'path': ['tags', 'device']
+                            }
+                        ],
+                        'value': {
+                            'type': 'field',
+                            'path': ['fields', 'value']
+                        }
+                    }
+                ]
+            }
+        }
+        
+        temp_file = self.create_temp_yaml_file(config)
+        
+        try:
+            with patch.dict(os.environ, {'TELEGRAF_MAPPINGS_PATH': temp_file}):
+                processor = LookupTableProcessor(self.mock_pipeline)
+                processor.expires = 3600
+                
+                test_value = {
+                    'name': 'test_measurement',
+                    'tags': {
+                        'device': 'router1'
+                    },
+                    'fields': {
+                        'value': 'test_value'
+                    }
+                }
+                
+                result = processor.build_message(test_value, {})
+                # Should skip the first builder (no name) and process the second
+                self.assertEqual(len(result), 1)
+                self.assertEqual(result[0]['table'], 'valid_table')
+        finally:
+            os.unlink(temp_file)
+
 
 if __name__ == '__main__':
     # Run tests with verbose output

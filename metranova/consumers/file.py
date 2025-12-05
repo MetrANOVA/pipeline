@@ -8,13 +8,16 @@ from metranova.pipelines.base import BasePipeline
 logger = logging.getLogger(__name__)
 
 class BaseFileConsumer(TimedIntervalConsumer):
-    def __init__(self, pipeline: BasePipeline, env_prefix: str = ''):
+    def __init__(self, pipeline: BasePipeline):
         super().__init__(pipeline)
         # Initial values
         self.logger = logger
         self.datasource = None  # No external datasource needed for file reading
         self.file_paths = []
         
+        #get env_prefix from the environment variable if exists
+        env_prefix = os.getenv('FILE_CONSUMER_ENV_PREFIX', '')
+
         # Append underscore if prefix is provided
         if env_prefix and not env_prefix.endswith('_'):
             env_prefix += '_'

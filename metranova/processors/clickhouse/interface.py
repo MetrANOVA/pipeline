@@ -63,7 +63,7 @@ class InterfaceMetadataProcessor(BaseMetadataProcessor):
         # Call parent to build initial record
         formatted_record = super().build_metadata_fields(value)
 
-        # lookup ref fields from redis cacher
+        # lookup ref fields from clickhouse cacher
         ref_fields = [
             ('device', 'device'), 
             ('peer_as', 'as'), 

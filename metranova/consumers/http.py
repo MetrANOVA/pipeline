@@ -8,14 +8,15 @@ from requests.exceptions import ConnectionError, HTTPError, RequestException
 logger = logging.getLogger(__name__)
 
 class HTTPConsumer(TimedIntervalConsumer):
-    def __init__(self, pipeline: BasePipeline, env_prefix: str = ''):
+    def __init__(self, pipeline: BasePipeline):
         super().__init__(pipeline)
         #Iniial values
         self.logger = logger
         self.datasource = HTTPConnector()
         self.urls = []
-        
-        #append undescore if prefix is provided
+
+        # get env_prefix and append undescore if prefix is provided
+        env_prefix = os.getenv('HTTP_CONSUMER_ENV_PREFIX', '')
         if env_prefix and not env_prefix.endswith('_'):
             env_prefix += '_'
         # grab update interval from env

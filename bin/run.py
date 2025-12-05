@@ -1,10 +1,7 @@
+import argparse
 import os
 import logging
-from metranova.pipelines.metadata import CRMetadataPipeline, IPGeoCSVMetadataPipeline, IPTrieMetadataPipeline, RCMetadataPipeline, FCMetadataPipeline, CAIDAOrgASMetadataPipeline
-from metranova.pipelines.krc import KRCPipeline
-from metranova.pipelines.json import KafkaToJSONPipeline
-from metranova.pipelines.scinet import SCinetMetadataPipeline
-from metranova.pipelines.scireg import ScienceRegistryPipeline
+from metranova.pipelines.base import YAMLPipeline
 
 # Configure logging
 log_level = logging.INFO
@@ -22,28 +19,17 @@ def main():
     logger.info("Starting MetrANOVA Pipeline")
     pipeline = None
     try:
-        #determine output method
-        pipeline_type = os.getenv('PIPELINE_TYPE', 'json').lower()
-        if pipeline_type == 'clickhouse':
-            pipeline = KRCPipeline()
-        elif pipeline_type == 'metadata_import':
-            pipeline = CRMetadataPipeline()
-        elif pipeline_type == 'metadata_export':
-            pipeline = RCMetadataPipeline()
-        elif pipeline_type == 'metadata_file_export':
-            pipeline = FCMetadataPipeline()
-        elif pipeline_type == 'scireg':
-            pipeline = ScienceRegistryPipeline()
-        elif pipeline_type == 'scinet':
-            pipeline = SCinetMetadataPipeline()
-        elif pipeline_type == 'ip_metadata_import':
-            pipeline = IPTrieMetadataPipeline()
-        elif pipeline_type == 'metadata_caida_org_as':
-            pipeline = CAIDAOrgASMetadataPipeline()
-        elif pipeline_type == 'metadata_ip_geo':
-            pipeline = IPGeoCSVMetadataPipeline()
-        else:
-            pipeline = KafkaToJSONPipeline()
+        #Get YAML file from args or env
+        parser = argparse.ArgumentParser(description="MetrANOVA Pipeline Runner")
+        parser.add_argument('--pipeline', type=str, required=False, help='YAML file defining the pipeline configuration')
+        args = parser.parse_args()
+        pipeline_yaml = args.pipeline or os.getenv('PIPELINE_YAML', None)
+        if not pipeline_yaml:
+            raise ValueError("Pipeline YAML configuration file must be provided via --pipeline argument or PIPELINE_YAML environment variable")
+
+        #Load pipeline from YAML
+        pipeline = YAMLPipeline(yaml_file=pipeline_yaml)
+        logger.info(f"Loaded pipeline {pipeline}")
 
         # Start the pipeline
         pipeline.start()

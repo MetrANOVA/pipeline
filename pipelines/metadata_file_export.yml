@@ -1,0 +1,17 @@
+consumers:
+  - type: metranova.consumers.metadata.YAMLFileConsumer
+
+cachers:
+  - type: metranova.cachers.clickhouse.ClickHouseCacher
+    name: clickhouse
+
+writers:
+  - type: metranova.writers.clickhouse.ClickHouseWriter
+    processors:
+      - metranova.processors.clickhouse.application.ApplicationMetadataProcessor
+      - metranova.processors.clickhouse.interface.InterfaceMetadataProcessor
+      - metranova.processors.clickhouse.device.DeviceMetadataProcessor
+      - metranova.processors.clickhouse.organization.OrganizationMetadataProcessor
+      - metranova.processors.clickhouse.circuit.CircuitMetadataProcessor
+      - metranova.processors.clickhouse.as.ASMetadataProcessor
+      - metranova.processors.clickhouse.ip.IPMetadataProcessor
