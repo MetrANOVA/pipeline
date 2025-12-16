@@ -1,6 +1,7 @@
 
 from collections import defaultdict
 import csv
+import gzip
 import logging
 import time
 import orjson
@@ -8,6 +9,9 @@ import pycountry
 import pycountry_convert
 import pytricia
 import os
+import requests
+from datetime import datetime, timedelta
+from io import BytesIO
 
 import yaml
 from metranova.consumers.base import TimedIntervalConsumer
@@ -41,7 +45,15 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
         #load table name from env
         self.as_table = os.getenv('CAIDA_ORG_AS_CONSUMER_AS_TABLE', 'meta_as')
         self.org_table = os.getenv('CAIDA_ORG_AS_CONSUMER_ORG_TABLE', 'meta_organization')
-        #load files from env
+        
+        # Determine whether to use URLs or local files
+        self.use_url = os.getenv('CAIDA_ORG_AS_CONSUMER_USE_URL', 'true').lower() in ['true', '1', 'yes']
+        
+        # URL configurations
+        self.as2org_url_template = os.getenv('CAIDA_ORG_AS_CONSUMER_AS2ORG_URL', 'https://publicdata.caida.org/datasets/as-organizations/{date}.as-org2info.jsonl.gz')
+        self.peeringdb_url_template = os.getenv('CAIDA_ORG_AS_CONSUMER_PEERINGDB_URL', 'https://publicdata.caida.org/datasets/peeringdb/{year}/{month}/peeringdb_2_dump_{year}_{month}_{day}.json')
+        
+        #load files from env (fallback to local files)
         self.as2org_file = os.getenv('CAIDA_ORG_AS_CONSUMER_AS2ORG_FILE', '/app/caches/caida_as_org2info.jsonl')
         self.peeringdb_file = os.getenv('CAIDA_ORG_AS_CONSUMER_PEERINGDB_FILE', '/app/caches/caida_peeringdb.json')
         self.custom_org_file = os.getenv('CAIDA_ORG_AS_CONSUMER_CUSTOM_ORG_FILE', None)  # Optional custom additions
@@ -79,58 +91,164 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
         except Exception as e:
             self.logger.error(f"Error looking up subdivision name for code {country_code}-{subdivision_code}: {e}")
             return None
+    
+    def _download_file_with_fallback(self, url, max_retries=3):
+        """Download a file from a URL with retries"""
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, timeout=30)
+                if response.status_code == 200:
+                    return response.content
+                elif response.status_code == 404:
+                    self.logger.warning(f"File not found at {url}")
+                    return None
+                else:
+                    self.logger.warning(f"Attempt {attempt + 1}/{max_retries}: Got status {response.status_code} from {url}")
+            except requests.exceptions.RequestException as e:
+                self.logger.warning(f"Attempt {attempt + 1}/{max_retries}: Error downloading from {url}: {e}")
+        
+        return None
+    
+    def _get_caida_as2org_url(self, date):
+        """Generate CAIDA AS2Org URL for a given date"""
+        date_str = date.strftime('%Y%m%d')
+        return self.as2org_url_template.format(date=date_str)
+    
+    def _get_peeringdb_url(self, date):
+        """Generate PeeringDB URL for a given date"""
+        return self.peeringdb_url_template.format(
+            year=date.strftime('%Y'),
+            month=date.strftime('%m'),
+            day=date.strftime('%d')
+        )
+    
+    def _fetch_caida_data_from_url(self):
+        """Fetch CAIDA AS2Org data from URL with monthly fallback"""
+        now = datetime.now()
+        # Try current month (1st day) first, then previous month
+        for months_back in range(2):
+            target_date = (now.replace(day=1) - timedelta(days=months_back * 30)).replace(day=1)
+            url = self._get_caida_as2org_url(target_date)
+            self.logger.info(f"Attempting to download CAIDA AS2Org data from {url}")
+            
+            content = self._download_file_with_fallback(url)
+            if content:
+                try:
+                    # Decompress gzip data
+                    decompressed = gzip.decompress(content)
+                    return decompressed.decode('utf-8')
+                except Exception as e:
+                    self.logger.error(f"Error decompressing CAIDA data from {url}: {e}")
+        
+        self.logger.error("Failed to fetch CAIDA AS2Org data from URL after trying current and previous month")
+        return None
+    
+    def _fetch_peeringdb_data_from_url(self):
+        """Fetch PeeringDB data from URL with daily fallback"""
+        now = datetime.now()
+        # Try today, yesterday, and day before
+        for days_back in range(3):
+            target_date = now - timedelta(days=days_back)
+            url = self._get_peeringdb_url(target_date)
+            self.logger.info(f"Attempting to download PeeringDB data from {url}")
+            
+            content = self._download_file_with_fallback(url)
+            if content:
+                try:
+                    return orjson.loads(content)
+                except Exception as e:
+                    self.logger.error(f"Error parsing PeeringDB JSON from {url}: {e}")
+        
+        self.logger.error("Failed to fetch PeeringDB data from URL after trying last 3 days")
+        return None
 
     def _load_caida_data(self, as_objs, org_objs):
-        """Load CAIDA AS to Org mapping data"""
+        """Load CAIDA AS to Org mapping data from URL or local file"""
+        data_content = None
+        
+        # Try to load from URL if configured
+        if self.use_url:
+            data_content = self._fetch_caida_data_from_url()
+            if data_content:
+                self.logger.info("Successfully fetched CAIDA AS2Org data from URL")
+        
+        # Fallback to local file if URL fetch failed or not configured
+        if not data_content:
+            self.logger.info(f"Loading CAIDA AS2Org data from local file: {self.as2org_file}")
+            try:
+                with open(self.as2org_file, 'r') as f:
+                    data_content = f.read()
+            except FileNotFoundError as e:
+                self.logger.error(f"AS to Org file not found: {self.as2org_file}. Error: {e}")
+                return
+            except Exception as e:
+                self.logger.error(f"Error reading AS to Org file {self.as2org_file}: {e}")
+                return
+        
+        # Process the data (same logic regardless of source)
+        if not data_content:
+            self.logger.error("No CAIDA AS2Org data available to process")
+            return
+        
         try:
-            with open(self.as2org_file, 'r') as f:
-                for line in f:
-                    line_json = orjson.loads(line)
-                    if line_json.get('type') == 'Organization':
-                        if line_json.get('organizationId', None) is None:
-                            continue
-                        org_id = f"caida:{line_json['organizationId']}"
-                        org_objs[org_id] = {
-                            'id': org_id,
-                            'name': line_json.get('name', "Delegated"),  # when CAIDA doesn't have a name then mark "Delegated" - this is meaning of @del tag in orgId
-                            'ext': {"data_source": ["CAIDA"]}
-                        }
-                        if line_json.get('country', None):
-                            org_objs[org_id]['country_code'] = line_json['country']
-                            country_name = self._lookup_country_name(line_json['country'])
-                            if country_name:
-                                org_objs[org_id]['country_name'] = country_name
-                            continent_name = self._lookup_continent_name(line_json['country'])
-                            if continent_name:
-                                org_objs[org_id]['continent_name'] = continent_name
-                    elif line_json.get('type') == 'ASN':
-                        if line_json.get('asn', None) is None or line_json.get('organizationId', None) is None or line_json.get('name', None) is None:
-                            continue
-                        try:
-                            as_id = int(line_json['asn'])
-                        except ValueError:
-                            continue
-                        as_objs[as_id] = {
-                            'id': as_id,
-                            'organization_id': f"caida:{line_json['organizationId']}",
-                            'name': line_json.get('name', None),
-                            'ext': {"data_source": ["CAIDA"]}
-                        }
-        except FileNotFoundError as e:
-            self.logger.error(f"AS to Org file not found: {self.as2org_file}. Error: {e}")
+            for line in data_content.splitlines():
+                if not line.strip():
+                    continue
+                line_json = orjson.loads(line)
+                if line_json.get('type') == 'Organization':
+                    if line_json.get('organizationId', None) is None:
+                        continue
+                    org_id = f"caida:{line_json['organizationId']}"
+                    org_objs[org_id] = {
+                        'id': org_id,
+                        'name': line_json.get('name', "Delegated"),  # when CAIDA doesn't have a name then mark "Delegated" - this is meaning of @del tag in orgId
+                        'ext': {"data_source": ["CAIDA"]}
+                    }
+                    if line_json.get('country', None):
+                        org_objs[org_id]['country_code'] = line_json['country']
+                        country_name = self._lookup_country_name(line_json['country'])
+                        if country_name:
+                            org_objs[org_id]['country_name'] = country_name
+                        continent_name = self._lookup_continent_name(line_json['country'])
+                        if continent_name:
+                            org_objs[org_id]['continent_name'] = continent_name
+                elif line_json.get('type') == 'ASN':
+                    if line_json.get('asn', None) is None or line_json.get('organizationId', None) is None or line_json.get('name', None) is None:
+                        continue
+                    try:
+                        as_id = int(line_json['asn'])
+                    except ValueError:
+                        continue
+                    as_objs[as_id] = {
+                        'id': as_id,
+                        'organization_id': f"caida:{line_json['organizationId']}",
+                        'name': line_json.get('name', None),
+                        'ext': {"data_source": ["CAIDA"]}
+                    }
         except Exception as e:
-            self.logger.error(f"Error processing AS to Org file {self.as2org_file}: {e}")
+            self.logger.error(f"Error processing CAIDA AS2Org data: {e}")
 
     def _load_peeringdb_data(self):
-        """Load PeeringDB data from file"""
+        """Load PeeringDB data from URL or local file"""
         peeringdb_data = None
-        try:
-            with open(self.peeringdb_file, 'r') as f:
-                peeringdb_data = orjson.loads(f.read())
-        except FileNotFoundError as e:
-            self.logger.error(f"PeeringDB file not found: {self.peeringdb_file}. Error: {e}")
-        except Exception as e:
-            self.logger.error(f"Error processing PeeringDB file {self.peeringdb_file}: {e}")
+        
+        # Try to load from URL if configured
+        if self.use_url:
+            peeringdb_data = self._fetch_peeringdb_data_from_url()
+            if peeringdb_data:
+                self.logger.info("Successfully fetched PeeringDB data from URL")
+        
+        # Fallback to local file if URL fetch failed or not configured
+        if not peeringdb_data:
+            self.logger.info(f"Loading PeeringDB data from local file: {self.peeringdb_file}")
+            try:
+                with open(self.peeringdb_file, 'r') as f:
+                    peeringdb_data = orjson.loads(f.read())
+            except FileNotFoundError as e:
+                self.logger.error(f"PeeringDB file not found: {self.peeringdb_file}. Error: {e}")
+            except Exception as e:
+                self.logger.error(f"Error processing PeeringDB file {self.peeringdb_file}: {e}")
+        
         return peeringdb_data
 
     def _process_peeringdb_organizations(self, peeringdb_data):

@@ -1,12 +1,14 @@
 import os
 import tempfile
 import unittest
-from unittest.mock import Mock, patch, mock_open
+from unittest.mock import Mock, patch, mock_open, MagicMock
 from collections import defaultdict
 import orjson
 import json
 import csv
+import gzip
 from io import StringIO
+from datetime import datetime, timedelta
 
 from metranova.consumers.metadata import YAMLFileConsumer, CAIDAOrgASConsumer, IPGeolocationCSVConsumer
 
@@ -299,15 +301,15 @@ class TestCAIDAOrgASConsumer(unittest.TestCase):
     @patch.object(CAIDAOrgASConsumer, '_lookup_continent_name')
     def test_load_caida_data_organizations(self, mock_continent_lookup, mock_country_lookup, mock_file):
         """Test _load_caida_data with organization records."""
+        # Disable URL fetching for this test
+        self.consumer.use_url = False
+        
         # Mock the lookup functions to return predictable values
         mock_country_lookup.return_value = 'United States'
         mock_continent_lookup.return_value = 'North America'
         
-        caida_data = [
-            '{"type": "Organization", "organizationId": "org1", "name": "Test Org 1", "country": "US"}',
-            '{"type": "Organization", "organizationId": "org2", "name": "Test Org 2", "country": "CA"}'
-        ]
-        mock_file.return_value.__iter__ = lambda self: iter(caida_data)
+        caida_data = '{"type": "Organization", "organizationId": "org1", "name": "Test Org 1", "country": "US"}\n{"type": "Organization", "organizationId": "org2", "name": "Test Org 2", "country": "CA"}'
+        mock_file.return_value.read.return_value = caida_data
         
         as_objs = defaultdict(dict)
         org_objs = defaultdict(dict)
@@ -329,11 +331,11 @@ class TestCAIDAOrgASConsumer(unittest.TestCase):
     @patch('builtins.open', new_callable=mock_open)
     def test_load_caida_data_asns(self, mock_file):
         """Test _load_caida_data with ASN records."""
-        caida_data = [
-            '{"type": "ASN", "asn": "65001", "organizationId": "org1", "name": "Test AS 1"}',
-            '{"type": "ASN", "asn": "65002", "organizationId": "org2", "name": "Test AS 2"}'
-        ]
-        mock_file.return_value.__iter__ = lambda self: iter(caida_data)
+        # Disable URL fetching for this test
+        self.consumer.use_url = False
+        
+        caida_data = '{"type": "ASN", "asn": "65001", "organizationId": "org1", "name": "Test AS 1"}\n{"type": "ASN", "asn": "65002", "organizationId": "org2", "name": "Test AS 2"}'
+        mock_file.return_value.read.return_value = caida_data
         
         as_objs = defaultdict(dict)
         org_objs = defaultdict(dict)
@@ -353,6 +355,9 @@ class TestCAIDAOrgASConsumer(unittest.TestCase):
     @patch('builtins.open', new_callable=mock_open)
     def test_load_caida_data_file_not_found(self, mock_file):
         """Test _load_caida_data with file not found error."""
+        # Disable URL fetching for this test
+        self.consumer.use_url = False
+        
         mock_file.side_effect = FileNotFoundError("File not found")
         
         as_objs = defaultdict(dict)
@@ -366,6 +371,9 @@ class TestCAIDAOrgASConsumer(unittest.TestCase):
     @patch('builtins.open', new_callable=mock_open)
     def test_load_peeringdb_data_success(self, mock_file):
         """Test _load_peeringdb_data with successful file load."""
+        # Disable URL fetching for this test
+        self.consumer.use_url = False
+        
         peeringdb_data = {
             "org": {
                 "data": [
@@ -388,6 +396,9 @@ class TestCAIDAOrgASConsumer(unittest.TestCase):
     @patch('builtins.open', new_callable=mock_open)
     def test_load_peeringdb_data_file_not_found(self, mock_file):
         """Test _load_peeringdb_data with file not found error."""
+        # Disable URL fetching for this test
+        self.consumer.use_url = False
+        
         mock_file.side_effect = FileNotFoundError("File not found")
         
         with patch.object(self.consumer.logger, 'error') as mock_error:
@@ -1400,6 +1411,397 @@ class TestIPGeolocationCSVConsumer(unittest.TestCase):
         
         self.assertEqual(ip_data['id'], '192.168.1.0/24')
         self.assertEqual(ip_data['ip_subnet'], [('192.168.1.0', 24)])
+
+
+class TestCAIDAOrgASConsumerURLFunctionality(unittest.TestCase):
+    """Unit tests for URL loading functionality in CAIDAOrgASConsumer."""
+
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.mock_pipeline = Mock()
+        self.mock_pipeline.process_message = Mock()
+        self.mock_pipeline.cacher = Mock()
+        self.mock_cacher = Mock()
+        self.mock_cacher.prime = Mock()
+        self.mock_pipeline.cacher.return_value = self.mock_cacher
+        
+        # Patch environment variables with URL loading enabled
+        self.env_patcher = patch.dict(os.environ, {
+            'CAIDA_ORG_AS_CONSUMER_UPDATE_INTERVAL': '3600',
+            'CAIDA_ORG_AS_CONSUMER_USE_URL': 'true',
+            'CAIDA_ORG_AS_CONSUMER_AS_TABLE': 'test_meta_as',
+            'CAIDA_ORG_AS_CONSUMER_ORG_TABLE': 'test_meta_organization',
+            'CAIDA_ORG_AS_CONSUMER_AS2ORG_FILE': '/test/caida_as_org2info.jsonl',
+            'CAIDA_ORG_AS_CONSUMER_PEERINGDB_FILE': '/test/caida_peeringdb.json'
+        })
+        self.env_patcher.start()
+        
+        self.consumer = CAIDAOrgASConsumer(self.mock_pipeline)
+
+    def tearDown(self):
+        """Clean up after each test."""
+        self.env_patcher.stop()
+
+    def test_init_with_url_enabled(self):
+        """Test that the consumer initializes with URL loading enabled by default."""
+        self.assertTrue(self.consumer.use_url)
+        self.assertEqual(
+            self.consumer.as2org_url_template,
+            'https://publicdata.caida.org/datasets/as-organizations/{date}.as-org2info.jsonl.gz'
+        )
+        self.assertEqual(
+            self.consumer.peeringdb_url_template,
+            'https://publicdata.caida.org/datasets/peeringdb/{year}/{month}/peeringdb_2_dump_{year}_{month}_{day}.json'
+        )
+
+    @patch.dict(os.environ, {'CAIDA_ORG_AS_CONSUMER_USE_URL': 'false'})
+    def test_init_with_url_disabled(self):
+        """Test that URL loading can be disabled via environment variable."""
+        consumer = CAIDAOrgASConsumer(self.mock_pipeline)
+        self.assertFalse(consumer.use_url)
+
+    @patch.dict(os.environ, {'CAIDA_ORG_AS_CONSUMER_USE_URL': '0'})
+    def test_init_with_url_disabled_zero(self):
+        """Test that URL loading recognizes '0' as false."""
+        consumer = CAIDAOrgASConsumer(self.mock_pipeline)
+        self.assertFalse(consumer.use_url)
+
+    @patch.dict(os.environ, {'CAIDA_ORG_AS_CONSUMER_USE_URL': '1'})
+    def test_init_with_url_enabled_one(self):
+        """Test that URL loading recognizes '1' as true."""
+        consumer = CAIDAOrgASConsumer(self.mock_pipeline)
+        self.assertTrue(consumer.use_url)
+
+    def test_get_caida_as2org_url(self):
+        """Test _get_caida_as2org_url generates correct URL format."""
+        test_date = datetime(2025, 12, 1)
+        url = self.consumer._get_caida_as2org_url(test_date)
+        expected_url = 'https://publicdata.caida.org/datasets/as-organizations/20251201.as-org2info.jsonl.gz'
+        self.assertEqual(url, expected_url)
+
+    def test_get_peeringdb_url(self):
+        """Test _get_peeringdb_url generates correct URL format."""
+        test_date = datetime(2025, 12, 15)
+        url = self.consumer._get_peeringdb_url(test_date)
+        expected_url = 'https://publicdata.caida.org/datasets/peeringdb/2025/12/peeringdb_2_dump_2025_12_15.json'
+        self.assertEqual(url, expected_url)
+
+    @patch('requests.get')
+    def test_download_file_with_fallback_success(self, mock_get):
+        """Test _download_file_with_fallback with successful download."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.content = b'test content'
+        mock_get.return_value = mock_response
+        
+        result = self.consumer._download_file_with_fallback('http://test.com/file')
+        
+        self.assertEqual(result, b'test content')
+        mock_get.assert_called_once_with('http://test.com/file', timeout=30)
+
+    @patch('requests.get')
+    def test_download_file_with_fallback_404(self, mock_get):
+        """Test _download_file_with_fallback with 404 error."""
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_get.return_value = mock_response
+        
+        with patch.object(self.consumer.logger, 'warning') as mock_warning:
+            result = self.consumer._download_file_with_fallback('http://test.com/file')
+            
+            self.assertIsNone(result)
+            self.assertIn('File not found', mock_warning.call_args[0][0])
+
+    @patch('requests.get')
+    def test_download_file_with_fallback_retries(self, mock_get):
+        """Test _download_file_with_fallback retries on failure."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_get.return_value = mock_response
+        
+        with patch.object(self.consumer.logger, 'warning') as mock_warning:
+            result = self.consumer._download_file_with_fallback('http://test.com/file', max_retries=3)
+            
+            self.assertIsNone(result)
+            self.assertEqual(mock_get.call_count, 3)
+            self.assertEqual(mock_warning.call_count, 3)
+
+    @patch('requests.get')
+    def test_download_file_with_fallback_timeout(self, mock_get):
+        """Test _download_file_with_fallback handles timeout errors."""
+        import requests.exceptions
+        mock_get.side_effect = requests.exceptions.Timeout("Timeout")
+        
+        with patch.object(self.consumer.logger, 'warning') as mock_warning:
+            result = self.consumer._download_file_with_fallback('http://test.com/file', max_retries=2)
+            
+            self.assertIsNone(result)
+            self.assertEqual(mock_get.call_count, 2)
+
+    @patch('requests.get')
+    @patch('gzip.decompress')
+    def test_fetch_caida_data_from_url_success(self, mock_decompress, mock_get):
+        """Test _fetch_caida_data_from_url with successful download and decompression."""
+        compressed_data = b'compressed data'
+        decompressed_data = b'{"type": "Organization", "organizationId": "org1"}'
+        
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.content = compressed_data
+        mock_get.return_value = mock_response
+        mock_decompress.return_value = decompressed_data
+        
+        result = self.consumer._fetch_caida_data_from_url()
+        
+        self.assertIsNotNone(result)
+        self.assertEqual(result, decompressed_data.decode('utf-8'))
+        mock_decompress.assert_called_once_with(compressed_data)
+
+    @patch('requests.get')
+    def test_fetch_caida_data_from_url_fallback_to_previous_month(self, mock_get):
+        """Test _fetch_caida_data_from_url falls back to previous month."""
+        # First call returns 404, second call succeeds
+        mock_response_404 = Mock()
+        mock_response_404.status_code = 404
+        
+        mock_response_200 = Mock()
+        mock_response_200.status_code = 200
+        mock_response_200.content = gzip.compress(b'test data')
+        
+        mock_get.side_effect = [mock_response_404, mock_response_200]
+        
+        with patch.object(self.consumer.logger, 'info') as mock_info:
+            result = self.consumer._fetch_caida_data_from_url()
+            
+            self.assertIsNotNone(result)
+            self.assertEqual(result, 'test data')
+            # Should try twice (current month and previous month)
+            self.assertEqual(mock_get.call_count, 2)
+
+    @patch('requests.get')
+    def test_fetch_caida_data_from_url_all_attempts_fail(self, mock_get):
+        """Test _fetch_caida_data_from_url when all attempts fail."""
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_get.return_value = mock_response
+        
+        with patch.object(self.consumer.logger, 'error') as mock_error:
+            result = self.consumer._fetch_caida_data_from_url()
+            
+            self.assertIsNone(result)
+            self.assertIn('Failed to fetch CAIDA AS2Org data', mock_error.call_args[0][0])
+
+    @patch('requests.get')
+    @patch('gzip.decompress')
+    def test_fetch_caida_data_from_url_decompression_error(self, mock_decompress, mock_get):
+        """Test _fetch_caida_data_from_url handles decompression errors."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.content = b'invalid gzip data'
+        mock_get.return_value = mock_response
+        mock_decompress.side_effect = Exception("Decompression error")
+        
+        with patch.object(self.consumer.logger, 'error') as mock_error:
+            result = self.consumer._fetch_caida_data_from_url()
+            
+            self.assertIsNone(result)
+            # Should log both decompression error and final failure message
+            self.assertGreaterEqual(mock_error.call_count, 2)
+            # Check that at least one error mentions decompression
+            error_messages = [call[0][0] for call in mock_error.call_args_list]
+            self.assertTrue(any('Error decompressing CAIDA data' in msg for msg in error_messages))
+
+    @patch('requests.get')
+    def test_fetch_peeringdb_data_from_url_success(self, mock_get):
+        """Test _fetch_peeringdb_data_from_url with successful download."""
+        peeringdb_data = {
+            "org": {"data": [{"id": 1, "name": "Test Org"}]},
+            "net": {"data": [{"asn": 65001, "org_id": 1}]}
+        }
+        
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.content = orjson.dumps(peeringdb_data)
+        mock_get.return_value = mock_response
+        
+        result = self.consumer._fetch_peeringdb_data_from_url()
+        
+        self.assertIsNotNone(result)
+        self.assertEqual(result["org"]["data"][0]["name"], "Test Org")
+
+    @patch('requests.get')
+    def test_fetch_peeringdb_data_from_url_fallback_to_previous_day(self, mock_get):
+        """Test _fetch_peeringdb_data_from_url falls back to previous day."""
+        # First call returns 404, second call succeeds
+        mock_response_404 = Mock()
+        mock_response_404.status_code = 404
+        
+        peeringdb_data = {"org": {"data": []}, "net": {"data": []}}
+        mock_response_200 = Mock()
+        mock_response_200.status_code = 200
+        mock_response_200.content = orjson.dumps(peeringdb_data)
+        
+        mock_get.side_effect = [mock_response_404, mock_response_200]
+        
+        result = self.consumer._fetch_peeringdb_data_from_url()
+        
+        self.assertIsNotNone(result)
+        # Should try twice (today and yesterday)
+        self.assertEqual(mock_get.call_count, 2)
+
+    @patch('requests.get')
+    def test_fetch_peeringdb_data_from_url_all_attempts_fail(self, mock_get):
+        """Test _fetch_peeringdb_data_from_url when all attempts fail."""
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_get.return_value = mock_response
+        
+        with patch.object(self.consumer.logger, 'error') as mock_error:
+            result = self.consumer._fetch_peeringdb_data_from_url()
+            
+            self.assertIsNone(result)
+            self.assertIn('Failed to fetch PeeringDB data', mock_error.call_args[0][0])
+            # Should try 3 times (today, yesterday, day before)
+            self.assertEqual(mock_get.call_count, 3)
+
+    @patch('requests.get')
+    def test_fetch_peeringdb_data_from_url_json_parse_error(self, mock_get):
+        """Test _fetch_peeringdb_data_from_url handles JSON parse errors."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.content = b'invalid json'
+        mock_get.return_value = mock_response
+        
+        with patch.object(self.consumer.logger, 'error') as mock_error:
+            result = self.consumer._fetch_peeringdb_data_from_url()
+            
+            self.assertIsNone(result)
+            # Should log both JSON parse errors and final failure message
+            self.assertGreaterEqual(mock_error.call_count, 3)
+            # Check that at least one error mentions JSON parsing
+            error_messages = [call[0][0] for call in mock_error.call_args_list]
+            self.assertTrue(any('Error parsing PeeringDB JSON' in msg for msg in error_messages))
+
+    @patch.object(CAIDAOrgASConsumer, '_fetch_caida_data_from_url')
+    def test_load_caida_data_from_url_success(self, mock_fetch):
+        """Test _load_caida_data loads from URL when use_url is True."""
+        caida_data = '{"type": "Organization", "organizationId": "org1", "name": "Test Org"}\n{"type": "ASN", "asn": "65001", "organizationId": "org1", "name": "Test AS"}'
+        mock_fetch.return_value = caida_data
+        
+        as_objs = defaultdict(dict)
+        org_objs = defaultdict(dict)
+        
+        with patch.object(self.consumer.logger, 'info') as mock_info:
+            self.consumer._load_caida_data(as_objs, org_objs)
+            
+            self.assertIn(65001, as_objs)
+            self.assertIn('caida:org1', org_objs)
+            mock_fetch.assert_called_once()
+
+    @patch.object(CAIDAOrgASConsumer, '_fetch_caida_data_from_url')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_load_caida_data_fallback_to_file(self, mock_file, mock_fetch):
+        """Test _load_caida_data falls back to file when URL fetch fails."""
+        mock_fetch.return_value = None
+        
+        caida_data = '{"type": "Organization", "organizationId": "org1", "name": "Test Org"}'
+        mock_file.return_value.read.return_value = caida_data
+        
+        as_objs = defaultdict(dict)
+        org_objs = defaultdict(dict)
+        
+        with patch.object(self.consumer.logger, 'info') as mock_info:
+            self.consumer._load_caida_data(as_objs, org_objs)
+            
+            self.assertIn('caida:org1', org_objs)
+            mock_fetch.assert_called_once()
+            mock_file.assert_called_once()
+
+    @patch.object(CAIDAOrgASConsumer, '_fetch_peeringdb_data_from_url')
+    def test_load_peeringdb_data_from_url_success(self, mock_fetch):
+        """Test _load_peeringdb_data loads from URL when use_url is True."""
+        peeringdb_data = {
+            "org": {"data": [{"id": 1, "name": "Test Org"}]},
+            "net": {"data": []}
+        }
+        mock_fetch.return_value = peeringdb_data
+        
+        with patch.object(self.consumer.logger, 'info') as mock_info:
+            result = self.consumer._load_peeringdb_data()
+            
+            self.assertIsNotNone(result)
+            self.assertEqual(result["org"]["data"][0]["name"], "Test Org")
+            mock_fetch.assert_called_once()
+
+    @patch.object(CAIDAOrgASConsumer, '_fetch_peeringdb_data_from_url')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_load_peeringdb_data_fallback_to_file(self, mock_file, mock_fetch):
+        """Test _load_peeringdb_data falls back to file when URL fetch fails."""
+        mock_fetch.return_value = None
+        
+        peeringdb_data = {"org": {"data": []}, "net": {"data": []}}
+        mock_file.return_value.read.return_value = orjson.dumps(peeringdb_data)
+        
+        with patch.object(self.consumer.logger, 'info') as mock_info:
+            result = self.consumer._load_peeringdb_data()
+            
+            self.assertIsNotNone(result)
+            mock_fetch.assert_called_once()
+            mock_file.assert_called_once()
+
+    @patch.dict(os.environ, {'CAIDA_ORG_AS_CONSUMER_USE_URL': 'false'})
+    @patch('builtins.open', new_callable=mock_open)
+    def test_load_caida_data_uses_file_when_url_disabled(self, mock_file):
+        """Test _load_caida_data uses file when use_url is False."""
+        consumer = CAIDAOrgASConsumer(self.mock_pipeline)
+        
+        caida_data = '{"type": "Organization", "organizationId": "org1", "name": "Test Org"}'
+        mock_file.return_value.read.return_value = caida_data
+        
+        as_objs = defaultdict(dict)
+        org_objs = defaultdict(dict)
+        
+        with patch.object(consumer, '_fetch_caida_data_from_url') as mock_fetch:
+            consumer._load_caida_data(as_objs, org_objs)
+            
+            # Should not call URL fetch when use_url is False
+            mock_fetch.assert_not_called()
+            mock_file.assert_called_once()
+
+    @patch.dict(os.environ, {'CAIDA_ORG_AS_CONSUMER_USE_URL': 'false'})
+    @patch('builtins.open', new_callable=mock_open)
+    def test_load_peeringdb_data_uses_file_when_url_disabled(self, mock_file):
+        """Test _load_peeringdb_data uses file when use_url is False."""
+        consumer = CAIDAOrgASConsumer(self.mock_pipeline)
+        
+        peeringdb_data = {"org": {"data": []}, "net": {"data": []}}
+        mock_file.return_value.read.return_value = orjson.dumps(peeringdb_data)
+        
+        with patch.object(consumer, '_fetch_peeringdb_data_from_url') as mock_fetch:
+            result = consumer._load_peeringdb_data()
+            
+            # Should not call URL fetch when use_url is False
+            mock_fetch.assert_not_called()
+            mock_file.assert_called_once()
+
+    @patch.dict(os.environ, {
+        'CAIDA_ORG_AS_CONSUMER_AS2ORG_URL': 'https://custom.com/{date}.jsonl.gz',
+        'CAIDA_ORG_AS_CONSUMER_PEERINGDB_URL': 'https://custom.com/{year}/{month}/{day}.json'
+    })
+    def test_custom_url_templates(self):
+        """Test that custom URL templates can be configured."""
+        consumer = CAIDAOrgASConsumer(self.mock_pipeline)
+        
+        self.assertEqual(consumer.as2org_url_template, 'https://custom.com/{date}.jsonl.gz')
+        self.assertEqual(consumer.peeringdb_url_template, 'https://custom.com/{year}/{month}/{day}.json')
+        
+        # Test URL generation with custom templates
+        test_date = datetime(2025, 12, 15)
+        caida_url = consumer._get_caida_as2org_url(test_date)
+        peeringdb_url = consumer._get_peeringdb_url(test_date)
+        
+        self.assertEqual(caida_url, 'https://custom.com/20251215.jsonl.gz')
+        self.assertEqual(peeringdb_url, 'https://custom.com/2025/12/15.json')
 
 
 if __name__ == '__main__':
