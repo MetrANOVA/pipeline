@@ -340,7 +340,7 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
             return None
         elif (cached_record and cached_record['hash'] != record_md5) or self.force_update:
             #change so update
-            self.logger.info(f"Record {id} changed, updating")
+            self.logger.debug(f"Record {id} changed, updating")
             #get latest version number from end of existing ref suffix ov __v{version_num} which may be multiple digits
             latest_ref = cached_record.get(self.db_ref_field, '')
             #use regex to extract version number

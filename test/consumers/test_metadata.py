@@ -1413,6 +1413,272 @@ class TestIPGeolocationCSVConsumer(unittest.TestCase):
         self.assertEqual(ip_data['ip_subnet'], [('192.168.1.0', 24)])
 
 
+class TestIPGeolocationCSVConsumerMaxMindDownload(unittest.TestCase):
+    """Unit tests for MaxMind download functionality in IPGeolocationCSVConsumer."""
+
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.mock_pipeline = Mock()
+        self.mock_pipeline.process_message = Mock()
+        
+        # Patch environment variables with MaxMind credentials
+        self.env_patcher = patch.dict(os.environ, {
+            'IP_GEO_CSV_CONSUMER_UPDATE_INTERVAL': '3600',
+            'IP_GEO_CSV_CONSUMER_USE_MAXMIND_DOWNLOAD': 'true',
+            'IP_GEO_CSV_CONSUMER_MAXMIND_ACCOUNT_ID': 'test_account',
+            'IP_GEO_CSV_CONSUMER_MAXMIND_LICENSE_KEY': 'test_license',
+            'IP_GEO_CSV_CONSUMER_CACHE_DIR': '/test/cache'
+        })
+        self.env_patcher.start()
+        
+        self.consumer = IPGeolocationCSVConsumer(self.mock_pipeline)
+
+    def tearDown(self):
+        """Clean up after each test."""
+        self.env_patcher.stop()
+
+    def test_init_with_maxmind_download_enabled(self):
+        """Test that consumer initializes with MaxMind download enabled."""
+        self.assertTrue(self.consumer.use_maxmind_download)
+        self.assertEqual(self.consumer.maxmind_account_id, 'test_account')
+        self.assertEqual(self.consumer.maxmind_license_key, 'test_license')
+        self.assertEqual(self.consumer.cache_dir, '/test/cache')
+
+    @patch.dict(os.environ, {'IP_GEO_CSV_CONSUMER_USE_MAXMIND_DOWNLOAD': 'false'})
+    def test_init_with_maxmind_download_disabled(self):
+        """Test that MaxMind download can be disabled."""
+        consumer = IPGeolocationCSVConsumer(self.mock_pipeline)
+        self.assertFalse(consumer.use_maxmind_download)
+
+    @patch('requests.get')
+    def test_download_maxmind_file_success(self, mock_get):
+        """Test successful download of MaxMind file."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.iter_content = Mock(return_value=[b'test data chunk 1', b'test data chunk 2'])
+        mock_get.return_value = mock_response
+        
+        with patch('builtins.open', mock_open()) as mock_file:
+            result = self.consumer._download_maxmind_file('GeoLite2-ASN-CSV')
+            
+            self.assertIsNotNone(result)
+            self.assertEqual(result, '/test/cache/GeoLite2-ASN-CSV.zip')
+            mock_get.assert_called_once()
+            
+            # Verify authentication was used
+            call_kwargs = mock_get.call_args[1]
+            self.assertEqual(call_kwargs['auth'], ('test_account', 'test_license'))
+
+    @patch('requests.get')
+    def test_download_maxmind_file_auth_failure(self, mock_get):
+        """Test MaxMind download with authentication failure."""
+        mock_response = Mock()
+        mock_response.status_code = 401
+        mock_get.return_value = mock_response
+        
+        with patch.object(self.consumer.logger, 'error') as mock_error:
+            result = self.consumer._download_maxmind_file('GeoLite2-ASN-CSV')
+            
+            self.assertIsNone(result)
+            self.assertIn('authentication failed', mock_error.call_args[0][0].lower())
+
+    @patch('requests.get')
+    def test_download_maxmind_file_no_credentials(self, mock_get):
+        """Test MaxMind download without credentials."""
+        self.consumer.maxmind_account_id = None
+        self.consumer.maxmind_license_key = None
+        
+        with patch.object(self.consumer.logger, 'error') as mock_error:
+            result = self.consumer._download_maxmind_file('GeoLite2-ASN-CSV')
+            
+            self.assertIsNone(result)
+            mock_get.assert_not_called()
+            self.assertIn('credentials not configured', mock_error.call_args[0][0].lower())
+
+    @patch('zipfile.ZipFile')
+    @patch('shutil.copy2')
+    @patch('shutil.rmtree')
+    @patch('os.remove')
+    @patch('glob.glob')
+    def test_extract_maxmind_zip(self, mock_glob, mock_remove, mock_rmtree, mock_copy, mock_zipfile):
+        """Test extraction of MaxMind zip file."""
+        mock_glob.return_value = ['/test/cache/GeoLite2-ASN-CSV/GeoLite2-ASN-CSV_20231215']
+        
+        mock_zip = Mock()
+        mock_zipfile.return_value.__enter__ = Mock(return_value=mock_zip)
+        mock_zipfile.return_value.__exit__ = Mock(return_value=False)
+        
+        file_mappings = {
+            'GeoLite2-ASN-Blocks-IPv4.csv': '/test/cache/GeoLite2-ASN-Blocks-IPv4.csv',
+            'GeoLite2-ASN-Blocks-IPv6.csv': '/test/cache/GeoLite2-ASN-Blocks-IPv6.csv'
+        }
+        
+        with patch('os.path.exists', return_value=True):
+            result = self.consumer._extract_maxmind_zip(
+                '/test/cache/GeoLite2-ASN-CSV.zip',
+                'GeoLite2-ASN-CSV',
+                file_mappings
+            )
+        
+        self.assertTrue(result)
+        self.assertEqual(mock_copy.call_count, 2)
+        mock_remove.assert_called_once_with('/test/cache/GeoLite2-ASN-CSV.zip')
+        mock_rmtree.assert_called_once()
+
+    @patch('zipfile.ZipFile')
+    @patch('glob.glob')
+    def test_extract_maxmind_zip_no_versioned_dir(self, mock_glob, mock_zipfile):
+        """Test extraction fails when no versioned directory found."""
+        mock_glob.return_value = []
+        
+        mock_zip = Mock()
+        mock_zipfile.return_value.__enter__ = Mock(return_value=mock_zip)
+        mock_zipfile.return_value.__exit__ = Mock(return_value=False)
+        
+        with patch.object(self.consumer.logger, 'error') as mock_error:
+            result = self.consumer._extract_maxmind_zip(
+                '/test/cache/GeoLite2-ASN-CSV.zip',
+                'GeoLite2-ASN-CSV',
+                {}
+            )
+        
+        self.assertFalse(result)
+        self.assertIn('no versioned subdirectory', mock_error.call_args[0][0].lower())
+
+    @patch.object(IPGeolocationCSVConsumer, '_download_maxmind_file')
+    @patch.object(IPGeolocationCSVConsumer, '_extract_maxmind_zip')
+    def test_download_maxmind_asn_data_success(self, mock_extract, mock_download):
+        """Test successful download of ASN data."""
+        mock_download.return_value = '/test/cache/GeoLite2-ASN-CSV.zip'
+        mock_extract.return_value = True
+        
+        result = self.consumer._download_maxmind_asn_data()
+        
+        self.assertTrue(result)
+        mock_download.assert_called_once_with('GeoLite2-ASN-CSV')
+        mock_extract.assert_called_once()
+
+    @patch.object(IPGeolocationCSVConsumer, '_download_maxmind_file')
+    def test_download_maxmind_asn_data_download_failure(self, mock_download):
+        """Test ASN data download handles download failure."""
+        mock_download.return_value = None
+        
+        result = self.consumer._download_maxmind_asn_data()
+        
+        self.assertFalse(result)
+
+    @patch.object(IPGeolocationCSVConsumer, '_download_maxmind_file')
+    @patch.object(IPGeolocationCSVConsumer, '_extract_maxmind_zip')
+    def test_download_maxmind_city_data_success(self, mock_extract, mock_download):
+        """Test successful download of City data."""
+        mock_download.return_value = '/test/cache/GeoLite2-City-CSV.zip'
+        mock_extract.return_value = True
+        
+        result = self.consumer._download_maxmind_city_data()
+        
+        self.assertTrue(result)
+        mock_download.assert_called_once_with('GeoLite2-City-CSV')
+        mock_extract.assert_called_once()
+        
+        # Verify correct files are mapped
+        call_args = mock_extract.call_args[0]
+        file_mappings = call_args[2]
+        self.assertIn('GeoLite2-City-Blocks-IPv4.csv', file_mappings)
+        self.assertIn('GeoLite2-City-Blocks-IPv6.csv', file_mappings)
+        self.assertIn('GeoLite2-City-Locations-en.csv', file_mappings)
+
+    @patch.object(IPGeolocationCSVConsumer, '_download_maxmind_asn_data')
+    @patch.object(IPGeolocationCSVConsumer, '_download_maxmind_city_data')
+    @patch('os.makedirs')
+    def test_ensure_maxmind_data_success(self, mock_makedirs, mock_city, mock_asn):
+        """Test _ensure_maxmind_data with successful downloads."""
+        mock_asn.return_value = True
+        mock_city.return_value = True
+        
+        result = self.consumer._ensure_maxmind_data()
+        
+        self.assertTrue(result)
+        mock_makedirs.assert_called_once_with('/test/cache', exist_ok=True)
+        mock_asn.assert_called_once()
+        mock_city.assert_called_once()
+
+    @patch.object(IPGeolocationCSVConsumer, '_download_maxmind_asn_data')
+    @patch('os.makedirs')
+    def test_ensure_maxmind_data_asn_failure(self, mock_makedirs, mock_asn):
+        """Test _ensure_maxmind_data when ASN download fails."""
+        mock_asn.return_value = False
+        
+        result = self.consumer._ensure_maxmind_data()
+        
+        self.assertFalse(result)
+        mock_asn.assert_called_once()
+
+    @patch.object(IPGeolocationCSVConsumer, '_download_maxmind_asn_data')
+    @patch.object(IPGeolocationCSVConsumer, '_download_maxmind_city_data')
+    @patch('os.makedirs')
+    def test_ensure_maxmind_data_city_failure(self, mock_makedirs, mock_city, mock_asn):
+        """Test _ensure_maxmind_data when City download fails."""
+        mock_asn.return_value = True
+        mock_city.return_value = False
+        
+        result = self.consumer._ensure_maxmind_data()
+        
+        self.assertFalse(result)
+        mock_asn.assert_called_once()
+        mock_city.assert_called_once()
+
+    @patch.dict(os.environ, {'IP_GEO_CSV_CONSUMER_USE_MAXMIND_DOWNLOAD': 'false'})
+    def test_ensure_maxmind_data_disabled(self):
+        """Test _ensure_maxmind_data when download is disabled."""
+        consumer = IPGeolocationCSVConsumer(self.mock_pipeline)
+        
+        with patch.object(consumer, '_download_maxmind_asn_data') as mock_asn:
+            result = consumer._ensure_maxmind_data()
+            
+            self.assertTrue(result)
+            mock_asn.assert_not_called()
+
+    def test_ensure_maxmind_data_no_credentials(self):
+        """Test _ensure_maxmind_data without credentials uses local files."""
+        self.consumer.maxmind_account_id = None
+        self.consumer.maxmind_license_key = None
+        
+        with patch.object(self.consumer, '_download_maxmind_asn_data') as mock_asn:
+            result = self.consumer._ensure_maxmind_data()
+            
+            self.assertTrue(result)
+            mock_asn.assert_not_called()
+
+    @patch.object(IPGeolocationCSVConsumer, '_ensure_maxmind_data')
+    @patch.object(IPGeolocationCSVConsumer, '_load_asn_data')
+    @patch.object(IPGeolocationCSVConsumer, '_load_location_data')
+    @patch.object(IPGeolocationCSVConsumer, '_load_custom_ip_data')
+    @patch.object(IPGeolocationCSVConsumer, '_process_ip_block_files')
+    def test_consume_messages_calls_ensure_maxmind_data(self, mock_process, mock_custom, 
+                                                         mock_location, mock_asn, mock_ensure):
+        """Test consume_messages calls _ensure_maxmind_data."""
+        mock_ensure.return_value = True
+        mock_asn.return_value = {}
+        mock_location.return_value = {}
+        mock_custom.return_value = {}
+        mock_process.return_value = {}
+        
+        self.consumer.consume_messages()
+        
+        mock_ensure.assert_called_once()
+
+    @patch.object(IPGeolocationCSVConsumer, '_ensure_maxmind_data')
+    def test_consume_messages_stops_if_ensure_fails(self, mock_ensure):
+        """Test consume_messages stops if _ensure_maxmind_data fails."""
+        mock_ensure.return_value = False
+        
+        with patch.object(self.consumer, '_load_asn_data') as mock_asn:
+            self.consumer.consume_messages()
+            
+            mock_ensure.assert_called_once()
+            mock_asn.assert_not_called()
+
+
 class TestCAIDAOrgASConsumerURLFunctionality(unittest.TestCase):
     """Unit tests for URL loading functionality in CAIDAOrgASConsumer."""
 

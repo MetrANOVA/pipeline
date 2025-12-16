@@ -12,6 +12,9 @@ import os
 import requests
 from datetime import datetime, timedelta
 from io import BytesIO
+import zipfile
+import shutil
+import glob
 
 import yaml
 from metranova.consumers.base import TimedIntervalConsumer
@@ -432,6 +435,17 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
         self.update_interval = int(os.getenv(f'IP_GEO_CSV_CONSUMER_UPDATE_INTERVAL', -1))
         #load table name from env
         self.table = os.getenv('IP_GEO_CSV_CONSUMER_TABLE', 'meta_ip')
+        
+        # Determine whether to download from MaxMind or use local files
+        self.use_maxmind_download = os.getenv('IP_GEO_CSV_CONSUMER_USE_MAXMIND_DOWNLOAD', 'true').lower() in ['true', '1', 'yes']
+        
+        # MaxMind credentials
+        self.maxmind_account_id = os.getenv('IP_GEO_CSV_CONSUMER_MAXMIND_ACCOUNT_ID', None)
+        self.maxmind_license_key = os.getenv('IP_GEO_CSV_CONSUMER_MAXMIND_LICENSE_KEY', None)
+        
+        # Cache directory for downloads
+        self.cache_dir = os.getenv('IP_GEO_CSV_CONSUMER_CACHE_DIR', '/app/caches')
+        
         #load files from env
         self.asn_files = self.parse_file_list(os.getenv('IP_GEO_CSV_CONSUMER_ASN_FILES', '/app/caches/ip_geo_asn.csv'))
         self.location_files = self.parse_file_list(os.getenv('IP_GEO_CSV_CONSUMER_LOCATION_FILES', '/app/caches/ip_geo_location.csv'))
@@ -443,6 +457,138 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
         if not file_list_str:
             return []
         return [file_path.strip() for file_path in file_list_str.split(',') if file_path.strip()]
+    
+    def _download_maxmind_file(self, database_name):
+        """Download a MaxMind GeoLite2 database file"""
+        if not self.maxmind_account_id or not self.maxmind_license_key:
+            self.logger.error(f"MaxMind credentials not configured for {database_name}")
+            return None
+        
+        url = f'https://download.maxmind.com/geoip/databases/{database_name}/download?suffix=zip'
+        zip_path = os.path.join(self.cache_dir, f'{database_name}.zip')
+        
+        self.logger.info(f"Downloading {database_name} from MaxMind...")
+        
+        try:
+            response = requests.get(
+                url,
+                auth=(self.maxmind_account_id, self.maxmind_license_key),
+                timeout=300,  # 5 minute timeout for large files
+                stream=True
+            )
+            
+            if response.status_code == 200:
+                with open(zip_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                self.logger.info(f"Successfully downloaded {database_name} to {zip_path}")
+                return zip_path
+            elif response.status_code == 401:
+                self.logger.error(f"MaxMind authentication failed for {database_name}. Check credentials.")
+                return None
+            else:
+                self.logger.error(f"Failed to download {database_name}: HTTP {response.status_code}")
+                return None
+        except Exception as e:
+            self.logger.error(f"Error downloading {database_name}: {e}")
+            return None
+    
+    def _extract_maxmind_zip(self, zip_path, database_name, file_mappings):
+        """Extract specific files from MaxMind zip archive"""
+        extract_dir = os.path.join(self.cache_dir, database_name)
+        
+        try:
+            # Extract zip file
+            self.logger.info(f"Extracting {zip_path} to {extract_dir}")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+            
+            # Find the versioned directory (e.g., GeoLite2-ASN-CSV_20231215)
+            subdirs = glob.glob(os.path.join(extract_dir, f'{database_name}_*'))
+            if not subdirs:
+                self.logger.error(f"No versioned subdirectory found in {extract_dir}")
+                return False
+            
+            versioned_dir = subdirs[0]
+            self.logger.info(f"Found versioned directory: {versioned_dir}")
+            
+            # Copy files to target locations
+            for source_filename, target_path in file_mappings.items():
+                source_path = os.path.join(versioned_dir, source_filename)
+                if os.path.exists(source_path):
+                    shutil.copy2(source_path, target_path)
+                    self.logger.info(f"Copied {source_filename} to {target_path}")
+                else:
+                    self.logger.warning(f"File not found: {source_path}")
+            
+            # Cleanup: remove zip and extracted directory
+            os.remove(zip_path)
+            shutil.rmtree(extract_dir)
+            self.logger.info(f"Cleaned up temporary files for {database_name}")
+            
+            return True
+        except Exception as e:
+            self.logger.error(f"Error extracting {database_name}: {e}")
+            return False
+    
+    def _download_maxmind_asn_data(self):
+        """Download and extract MaxMind GeoLite2 ASN data"""
+        database_name = 'GeoLite2-ASN-CSV'
+        zip_path = self._download_maxmind_file(database_name)
+        
+        if not zip_path:
+            return False
+        
+        file_mappings = {
+            'GeoLite2-ASN-Blocks-IPv4.csv': os.path.join(self.cache_dir, 'GeoLite2-ASN-Blocks-IPv4.csv'),
+            'GeoLite2-ASN-Blocks-IPv6.csv': os.path.join(self.cache_dir, 'GeoLite2-ASN-Blocks-IPv6.csv')
+        }
+        
+        return self._extract_maxmind_zip(zip_path, database_name, file_mappings)
+    
+    def _download_maxmind_city_data(self):
+        """Download and extract MaxMind GeoLite2 City data"""
+        database_name = 'GeoLite2-City-CSV'
+        zip_path = self._download_maxmind_file(database_name)
+        
+        if not zip_path:
+            return False
+        
+        file_mappings = {
+            'GeoLite2-City-Blocks-IPv4.csv': os.path.join(self.cache_dir, 'GeoLite2-City-Blocks-IPv4.csv'),
+            'GeoLite2-City-Blocks-IPv6.csv': os.path.join(self.cache_dir, 'GeoLite2-City-Blocks-IPv6.csv'),
+            'GeoLite2-City-Locations-en.csv': os.path.join(self.cache_dir, 'GeoLite2-City-Locations-en.csv')
+        }
+        
+        return self._extract_maxmind_zip(zip_path, database_name, file_mappings)
+    
+    def _ensure_maxmind_data(self):
+        """Ensure MaxMind data files are available, downloading if necessary"""
+        if not self.use_maxmind_download:
+            self.logger.info("MaxMind download disabled, using existing local files")
+            return True
+        
+        if not self.maxmind_account_id or not self.maxmind_license_key:
+            self.logger.warning("MaxMind credentials not configured, using existing local files")
+            return True
+        
+        # Create cache directory if it doesn't exist
+        os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # Download ASN data
+        self.logger.info("Downloading MaxMind ASN data...")
+        if not self._download_maxmind_asn_data():
+            self.logger.error("Failed to download MaxMind ASN data")
+            return False
+        
+        # Download City data
+        self.logger.info("Downloading MaxMind City data...")
+        if not self._download_maxmind_city_data():
+            self.logger.error("Failed to download MaxMind City data")
+            return False
+        
+        self.logger.info("Successfully downloaded and extracted all MaxMind data files")
+        return True
 
     def ip_subnet_to_str(self, ip_subnet: list):
         if not ip_subnet:
@@ -580,6 +726,11 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
 
     def consume_messages(self):
         """Main method to consume and process IP geolocation data from CSV files"""
+        # Ensure MaxMind data is available (download if configured)
+        if not self._ensure_maxmind_data():
+            self.logger.error("Failed to ensure MaxMind data availability")
+            return
+        
         # Load ASN data
         ip_to_asn_trie = self._load_asn_data()
         
