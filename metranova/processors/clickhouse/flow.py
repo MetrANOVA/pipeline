@@ -70,7 +70,7 @@ class BaseFlowProcessor(BaseDataProcessor):
                 "mpls": [
                     ["mpls_bottom_label", "Nullable(UInt32)"],
                     ["mpls_exp", "Array(UInt8)"],
-                    ["mpls_labels", "Array(UInt32)"],
+                    ["mpls_label", "Array(UInt32)"],
                     ["mpls_pw", "Nullable(UInt32)"],
                     ["mpls_top_label_ip", "Nullable(IPv6)"],
                     ["mpls_top_label_type", "Nullable(UInt32)"],

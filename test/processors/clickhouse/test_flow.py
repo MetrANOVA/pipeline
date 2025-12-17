@@ -148,7 +148,7 @@ class TestBaseFlowProcessor(unittest.TestCase):
         self.assertIn("`ext` JSON(", result)
         self.assertIn("`mpls_bottom_label` Nullable(UInt32)", result)
         self.assertIn("`mpls_exp` Array(UInt8)", result)
-        self.assertIn("`mpls_labels` Array(UInt32)", result)
+        self.assertIn("`mpls_label` Array(UInt32)", result)
         self.assertIn("`mpls_pw` Nullable(UInt32)", result)
         self.assertIn("`mpls_top_label_ip` Nullable(IPv6)", result)
         self.assertIn("`mpls_top_label_type` Nullable(UInt32)", result)
@@ -191,7 +191,7 @@ class TestBaseFlowProcessor(unittest.TestCase):
         # MPLS columns
         self.assertIn("`mpls_bottom_label` Nullable(UInt32)", result)
         self.assertIn("`mpls_exp` Array(UInt8)", result)
-        self.assertIn("`mpls_labels` Array(UInt32)", result)
+        self.assertIn("`mpls_label` Array(UInt32)", result)
         self.assertIn("`mpls_pw` Nullable(UInt32)", result)
         self.assertIn("`mpls_top_label_ip` Nullable(IPv6)", result)
         self.assertIn("`mpls_top_label_type` Nullable(UInt32)", result)
@@ -319,7 +319,7 @@ class TestBaseFlowProcessor(unittest.TestCase):
         self.assertIn("`bgp_community` Array(LowCardinality(String))", result)
         
         # Check for MPLS extensions
-        self.assertIn("`mpls_labels` Array(UInt32)", result)
+        self.assertIn("`mpls_label` Array(UInt32)", result)
         self.assertIn("`mpls_vpn_rd` LowCardinality(Nullable(String))", result)
 
     def test_default_configuration_values(self):

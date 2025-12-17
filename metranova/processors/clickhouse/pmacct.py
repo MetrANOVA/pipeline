@@ -89,12 +89,12 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
                     break
         #if that didn't work, try the single string field
         if not mpls_labels:
-            mpls_labels_str = value.get("mpls_labels", None)
+            mpls_labels_str = value.get("mpls_label", None)
             if mpls_labels_str:
                 mpls_labels = mpls_labels_str.split("_")
         # now that we have the labels they are each hex string with hyphens, convert to integers
         if mpls_labels:
-            ext["mpls_labels"] = []
+            ext["mpls_label"] = []
             ext["mpls_exp"] = []
             for raw_label in mpls_labels:
                 try:
@@ -102,7 +102,7 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
                     label_int = int(hex_label, 16)
                     label = label_int >> 4
                     exp = (label_int & 0b1110) >> 1
-                    ext["mpls_labels"].append(label)
+                    ext["mpls_label"].append(label)
                     ext["mpls_exp"].append(exp)
                     # last non-zero label processed will be bottom label
                     if label != 0:

@@ -84,7 +84,7 @@ class FlowProcessor(BaseFlowProcessor):
             ext.update({
                 "mpls_bottom_label": value.get("meta", {}).get("mpls", {}).get("bottom_label", None),
                 "mpls_exp": mpls_exp,
-                "mpls_labels": value.get("meta", {}).get("mpls", {}).get("labels", []),
+                "mpls_label": value.get("meta", {}).get("mpls", {}).get("labels", []),
                 "mpls_pw": value.get("meta", {}).get("mpls", {}).get("pw_id", None),
                 "mpls_top_label_ip": value.get("meta", {}).get("mpls", {}).get("top_label_ip", None),
                 "mpls_top_label_type": value.get("meta", {}).get("mpls", {}).get("top_label_type", None),

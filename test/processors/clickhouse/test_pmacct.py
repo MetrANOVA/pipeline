@@ -118,17 +118,17 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
         self.assertEqual(ext['ipv6_flow_label'], 12345)
 
     def test_add_mpls_extensions_with_single_string_field(self):
-        """Test add_mpls_extensions with mpls_labels as single string."""
+        """Test add_mpls_extensions with mpls_label as single string."""
         value = {
-            'mpls_labels': '12345-0_67890-0'
+            'mpls_label': '12345-0_67890-0'
         }
         ext = {}
         
         self.processor.add_mpls_extensions(value, ext)
         
-        self.assertIn('mpls_labels', ext)
+        self.assertIn('mpls_label', ext)
         self.assertIn('mpls_exp', ext)
-        self.assertGreater(len(ext['mpls_labels']), 0)
+        self.assertGreater(len(ext['mpls_label']), 0)
 
     def test_add_mpls_extensions_with_vpn_rd(self):
         """Test add_mpls_extensions with VPN RD."""
@@ -477,26 +477,26 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
         
         self.processor.add_mpls_extensions(value, ext)
         
-        self.assertIn('mpls_labels', ext)
+        self.assertIn('mpls_label', ext)
         self.assertIn('mpls_exp', ext)
-        self.assertGreater(len(ext['mpls_labels']), 0)
+        self.assertGreater(len(ext['mpls_label']), 0)
 
     def test_add_mpls_extensions_with_invalid_label_hex(self):
         """Test add_mpls_extensions skips invalid hex values."""
         value = {
-            'mpls_labels': '12345-0_invalid-0'
+            'mpls_label': '12345-0_invalid-0'
         }
         ext = {}
         
         self.processor.add_mpls_extensions(value, ext)
         
         # Should process valid label and skip invalid
-        self.assertIn('mpls_labels', ext)
+        self.assertIn('mpls_label', ext)
 
     def test_add_mpls_extensions_with_pw_id(self):
         """Test add_mpls_extensions with pseudowire ID."""
         value = {
-            'mpls_labels': '12345-0',
+            'mpls_label': '12345-0',
             'mpls_pw_id': '100'
         }
         ext = {}
@@ -508,7 +508,7 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
     def test_add_mpls_extensions_with_invalid_pw_id(self):
         """Test add_mpls_extensions with invalid pseudowire ID."""
         value = {
-            'mpls_labels': '12345-0',
+            'mpls_label': '12345-0',
             'mpls_pw_id': 'invalid'
         }
         ext = {}
@@ -521,7 +521,7 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
     def test_add_mpls_extensions_with_top_label_ip(self):
         """Test add_mpls_extensions with top label IPv4."""
         value = {
-            'mpls_labels': '12345-0',
+            'mpls_label': '12345-0',
             'mpls_top_label_ipv4': '192.168.1.1'
         }
         ext = {}
@@ -533,7 +533,7 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
     def test_add_mpls_extensions_with_top_label_type(self):
         """Test add_mpls_extensions with top label type."""
         value = {
-            'mpls_labels': '12345-0',
+            'mpls_label': '12345-0',
             'mpls_top_label_type': '1'
         }
         ext = {}
@@ -545,7 +545,7 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
     def test_add_mpls_extensions_with_invalid_top_label_type(self):
         """Test add_mpls_extensions with invalid top label type."""
         value = {
-            'mpls_labels': '12345-0',
+            'mpls_label': '12345-0',
             'mpls_top_label_type': 'invalid'
         }
         ext = {}

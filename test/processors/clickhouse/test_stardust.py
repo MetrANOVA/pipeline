@@ -295,7 +295,7 @@ class TestFlowProcessor(unittest.TestCase):
             
             self.assertIn("mpls_bottom_label", ext_data)
             self.assertIn("mpls_exp", ext_data)
-            self.assertIn("mpls_labels", ext_data)
+            self.assertIn("mpls_label", ext_data)
             self.assertIn("mpls_pw", ext_data)
             self.assertIn("mpls_top_label_ip", ext_data)
             self.assertIn("mpls_top_label_type", ext_data)
@@ -303,7 +303,7 @@ class TestFlowProcessor(unittest.TestCase):
             
             self.assertEqual(ext_data["mpls_bottom_label"], 100)
             self.assertEqual(ext_data["mpls_exp"], [1, 2])
-            self.assertEqual(ext_data["mpls_labels"], [10, 20, 30])
+            self.assertEqual(ext_data["mpls_label"], [10, 20, 30])
             self.assertEqual(ext_data["mpls_pw"], 123)
             self.assertEqual(ext_data["mpls_top_label_ip"], "10.0.0.1")
             self.assertEqual(ext_data["mpls_top_label_type"], "IGP")
@@ -434,7 +434,7 @@ class TestFlowProcessor(unittest.TestCase):
             self.assertIn("ipv4_dscp", ext_data)
             
             # MPLS fields
-            self.assertIn("mpls_labels", ext_data)
+            self.assertIn("mpls_label", ext_data)
             self.assertIn("mpls_bottom_label", ext_data)
     
     def test_build_message_missing_required_fields(self):
