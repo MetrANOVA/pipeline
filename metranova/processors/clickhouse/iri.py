@@ -148,7 +148,7 @@ class IncidentMetadataProcessor(IRIBaseMetadataProcessor):
         #verify it's a list
         if not isinstance(resource_uris, list):
             resource_uris = []
-        formatted_record['resource_id'], formatted_record['resource_ref'] = self.ids_and_refs_from_uri_list(resource_uris, 'resource')
+        formatted_record['resource_id'], formatted_record['resource_ref'] = self.ids_and_refs_from_uri_list(resource_uris, 'iri_resource')
         return formatted_record
 
 class ResourceMetadataProcessor(IRIBaseMetadataProcessor):
