@@ -391,7 +391,7 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
     def format_array_fields(self, formatted_record: dict) -> dict:
         """Format specified fields in formatted_record as arrays"""
         for field in self.array_fields:
-            if formatted_record[field] is None:
+            if formatted_record.get(field, None) is None:
                 formatted_record[field] = []
             elif isinstance(formatted_record[field], str):
                 try:
