@@ -49,7 +49,7 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
         # Call parent to build initial record
         formatted_record = super().build_metadata_fields(value)
         
-        # Validate and format IP subnet (same pattern as IPMetadataProcessor)
+        # Validate and format IP subnet
         ip_subnets = []
         for item in formatted_record.get('ip_subnet', []):
             if isinstance(item, (list, tuple)) and len(item) == 2:
