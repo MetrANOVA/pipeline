@@ -94,13 +94,6 @@ class JobMetadataProcessor(BaseMetadataProcessor):
         if formatted_record['submit_time'] is None:
             raise ValueError("submit_time is required but could not be parsed")
 
-        # report any fields in columns that are none
-        for col_def in self.column_defs:
-            col_name = col_def[0]
-            if col_name in ['id', 'ref', 'hash', 'insert_time']:  # add any additional fields to check here
-                continue    
-            if formatted_record.get(col_name, None) is None:
-                self.logger.info(f"Field {col_name} is None for jobid {formatted_record.get('id', 'unknown')}")
         #build a hash with all the keys and values from value['data']
         return formatted_record
 
