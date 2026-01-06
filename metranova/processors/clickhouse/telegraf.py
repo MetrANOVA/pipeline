@@ -318,6 +318,9 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
         # loop through fields and build messages
         formatted_records = []
         for field, field_value in value.get("fields", {}).items():
+            #skip null values
+            if field_value is None:
+                continue
             # we may have to change this so create var local to loop
             tmp_ext_json = ext_json
             table_name = None

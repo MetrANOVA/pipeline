@@ -136,7 +136,7 @@ class YAMLPipeline(BasePipeline):
         for consumer_cfg in yaml_config.get('consumers', []):
             consumer_type = consumer_cfg.get('type')
             if consumer_type:
-                self.consumers = self.load_classes(consumer_type, init_args={'pipeline': self}, required_class=BaseConsumer)
+                self.consumers.extend(self.load_classes(consumer_type, init_args={'pipeline': self}, required_class=BaseConsumer))
         
         #load cachers
         for cacher_cfg in yaml_config.get('cachers', []):
