@@ -105,8 +105,8 @@ class JobDataProcessor(BaseDataGenericMetricProcessor):
         self.required_fields = [['jobid']]
         self.collector_id = os.getenv('CLICKHOUSE_ALCF_COLLECTOR_ID', 'metranova_pipeline')
         self.metric_map = {
-            'runtime_secs': ('runtimef', 'gauge'),
-            'queued_time_secs': ('queuedtimef', 'gauge'),
+            'runtimef': ('runtime_secs', 'gauge'),
+            'queuedtimef': ('queued_time_secs', 'gauge'),
             'score': ('score', 'gauge')
         }
         self.url_match = None  

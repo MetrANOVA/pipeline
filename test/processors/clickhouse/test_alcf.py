@@ -276,8 +276,8 @@ class TestJobDataProcessor(unittest.TestCase):
         self.assertEqual(self.processor.resource_type, 'alcf_job')
         self.assertEqual(self.processor.collector_id, 'test_collector')
         self.assertEqual(self.processor.required_fields, [['jobid']])
-        self.assertIn('runtime_secs', self.processor.metric_map)
-        self.assertIn('queued_time_secs', self.processor.metric_map)
+        self.assertIn('runtimef', self.processor.metric_map)
+        self.assertIn('queuedtimef', self.processor.metric_map)
         self.assertIn('score', self.processor.metric_map)
 
     def test_load_resource_types(self):
@@ -308,8 +308,8 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtime_secs': 3600,
-                    'queued_time_secs': 600,
+                    'runtimef': 3600,
+                    'queuedtimef': 600,
                     'score': 0.95
                 }
             ]
@@ -320,8 +320,8 @@ class TestJobDataProcessor(unittest.TestCase):
         # Should have 3 records, one for each metric
         self.assertEqual(len(result), 3)
         
-        # Check runtime_secs metric
-        runtime_record = next((r for r in result if r['metric_name'] == 'runtimef'), None)
+        # Check runtime_secs metric (target name)
+        runtime_record = next((r for r in result if r['metric_name'] == 'runtime_secs'), None)
         self.assertIsNotNone(runtime_record)
         self.assertEqual(runtime_record['metric_value'], 3600)
         self.assertEqual(runtime_record['id'], 'job123')
@@ -335,12 +335,12 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtime_secs': 3600,
+                    'runtimef': 3600,
                     'score': 0.95
                 },
                 {
                     'jobid': 'job456',
-                    'queued_time_secs': 600,
+                    'queuedtimef': 600,
                     'score': 0.85
                 }
             ]
@@ -361,7 +361,7 @@ class TestJobDataProcessor(unittest.TestCase):
         value = {
             'data': [
                 {
-                    'runtime_secs': 3600,
+                    'runtimef': 3600,
                     'score': 0.95
                 }
             ]
@@ -378,17 +378,17 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtime_secs': 3600
-                    # queued_time_secs and score are missing
+                    'runtimef': 3600
+                    # queuedtimef and score are missing
                 }
             ]
         }
         
         result = self.processor.build_message(value, {})
         
-        # Should only have 1 record (for runtime_secs)
+        # Should only have 1 record (for runtimef -> runtime_secs)
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['metric_name'], 'runtimef')
+        self.assertEqual(result[0]['metric_name'], 'runtime_secs')
         self.assertEqual(result[0]['metric_value'], 3600)
 
     def test_build_message_metric_types(self):
@@ -397,8 +397,8 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtime_secs': 3600,
-                    'queued_time_secs': 600,
+                    'runtimef': 3600,
+                    'queuedtimef': 600,
                     'score': 0.95
                 }
             ]
@@ -416,7 +416,7 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtime_secs': 3600
+                    'runtimef': 3600
                 }
             ]
         }
@@ -437,7 +437,7 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtime_secs': 3600
+                    'runtimef': 3600
                 }
             ]
         }
@@ -455,7 +455,7 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtime_secs': 3600
+                    'runtimef': 3600
                 }
             ]
         }
@@ -486,7 +486,7 @@ class TestJobDataProcessor(unittest.TestCase):
         """Test build_single_message method directly."""
         value = {
             'jobid': 'job789',
-            'runtime_secs': 7200,
+            'runtimef': 7200,
             'score': 0.88
         }
         
@@ -494,9 +494,9 @@ class TestJobDataProcessor(unittest.TestCase):
         
         self.assertEqual(len(result), 2)
         
-        # Check both metrics are present
+        # Check both metrics are present (target metric names)
         metric_names = {r['metric_name'] for r in result}
-        self.assertIn('runtimef', metric_names)
+        self.assertIn('runtime_secs', metric_names)
         self.assertIn('score', metric_names)
 
 
