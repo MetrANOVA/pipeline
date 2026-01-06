@@ -130,6 +130,31 @@ class JobDataProcessor(BaseDataGenericMetricProcessor):
             formatted_records.extend(self.build_single_message(record, msg_metadata))
         return formatted_records
     
+    def format_value(self, field: str, value):
+        if field.endswith('timef'):
+            # timef fields in string format of DAYS:HH:MM:SS where days is optional
+            # parse and convert to total seconds
+            if value is None:
+                return None
+            try:    
+                time_parts = value.split(':')
+                if len(time_parts) == 3:
+                    # HH:MM:SS format
+                    hours, minutes, seconds = map(int, time_parts)
+                    total_seconds = hours * 3600 + minutes * 60 + seconds
+                elif len(time_parts) == 4:
+                    # DAYS:HH:MM:SS format
+                    days, hours, minutes, seconds = map(int, time_parts)
+                    total_seconds = days * 86400 + hours * 3600 + minutes * 60 + seconds
+                else:
+                    self.logger.debug(f"Invalid time format for field {field}: {value}")
+                    return None
+                return total_seconds
+            except ValueError:
+                self.logger.debug(f"Error parsing time value for field {field}: {value}")
+                return None
+        return value
+
     def build_single_message(self, value, msg_metadata):
         if not self.has_required_fields(value):
             return []
@@ -137,7 +162,7 @@ class JobDataProcessor(BaseDataGenericMetricProcessor):
         formatted_records = []
         #iterate through metric_map and build formatted record for each metric
         for metric_src_field, (target_field, field_type) in self.metric_map.items():
-            field_value = value.get(metric_src_field, None)
+            field_value = self.format_value(metric_src_field, value.get(metric_src_field, None))
             if field_value is None:
                 continue
             #get table name

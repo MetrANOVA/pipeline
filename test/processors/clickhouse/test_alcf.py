@@ -285,6 +285,97 @@ class TestJobDataProcessor(unittest.TestCase):
         result = self.processor.load_resource_types()
         self.assertEqual(result, ['alcf_job'])
 
+    def test_format_value_timef_hms_format(self):
+        """Test format_value with HH:MM:SS format for timef fields."""
+        # 1 hour, 30 minutes, 45 seconds = 5445 seconds
+        result = self.processor.format_value('runtimef', '1:30:45')
+        self.assertEqual(result, 5445)
+        
+        # 0 hours, 5 minutes, 30 seconds = 330 seconds
+        result = self.processor.format_value('queuedtimef', '0:5:30')
+        self.assertEqual(result, 330)
+        
+        # 10 hours, 0 minutes, 0 seconds = 36000 seconds
+        result = self.processor.format_value('runtimef', '10:0:0')
+        self.assertEqual(result, 36000)
+
+    def test_format_value_timef_dhms_format(self):
+        """Test format_value with DAYS:HH:MM:SS format for timef fields."""
+        # 1 day, 2 hours, 30 minutes, 15 seconds = 95415 seconds
+        result = self.processor.format_value('runtimef', '1:2:30:15')
+        self.assertEqual(result, 95415)
+        
+        # 5 days, 0 hours, 0 minutes, 0 seconds = 432000 seconds
+        result = self.processor.format_value('queuedtimef', '5:0:0:0')
+        self.assertEqual(result, 432000)
+        
+        # 0 days, 1 hour, 0 minutes, 30 seconds = 3630 seconds
+        result = self.processor.format_value('runtimef', '0:1:0:30')
+        self.assertEqual(result, 3630)
+
+    def test_format_value_timef_none(self):
+        """Test format_value with None value for timef fields."""
+        result = self.processor.format_value('runtimef', None)
+        self.assertIsNone(result)
+
+    def test_format_value_timef_invalid_format(self):
+        """Test format_value with invalid time format for timef fields."""
+        # Only 2 parts
+        result = self.processor.format_value('runtimef', '10:30')
+        self.assertIsNone(result)
+        
+        # 5 parts
+        result = self.processor.format_value('queuedtimef', '1:2:3:4:5')
+        self.assertIsNone(result)
+        
+        # Single value
+        result = self.processor.format_value('runtimef', '3600')
+        self.assertIsNone(result)
+
+    def test_format_value_timef_invalid_numbers(self):
+        """Test format_value with non-numeric values in timef fields."""
+        result = self.processor.format_value('runtimef', 'ab:cd:ef')
+        self.assertIsNone(result)
+        
+        result = self.processor.format_value('queuedtimef', '1:2:invalid')
+        self.assertIsNone(result)
+        
+        result = self.processor.format_value('runtimef', '1.5:30:45')
+        self.assertIsNone(result)
+
+    def test_format_value_non_timef_field(self):
+        """Test format_value with non-timef fields (should pass through unchanged)."""
+        # Numeric value
+        result = self.processor.format_value('score', 0.95)
+        self.assertEqual(result, 0.95)
+        
+        # String value
+        result = self.processor.format_value('status', 'running')
+        self.assertEqual(result, 'running')
+        
+        # None value
+        result = self.processor.format_value('other_field', None)
+        self.assertIsNone(result)
+        
+        # Dict value
+        test_dict = {'key': 'value'}
+        result = self.processor.format_value('data', test_dict)
+        self.assertEqual(result, test_dict)
+
+    def test_format_value_timef_edge_cases(self):
+        """Test format_value with edge cases for timef fields."""
+        # All zeros
+        result = self.processor.format_value('runtimef', '0:0:0')
+        self.assertEqual(result, 0)
+        
+        # Large values
+        result = self.processor.format_value('queuedtimef', '100:59:59')
+        self.assertEqual(result, 363599)
+        
+        # Very large day value
+        result = self.processor.format_value('runtimef', '30:0:0:0')
+        self.assertEqual(result, 2592000)  # 30 days in seconds
+
     def test_build_message_empty_value(self):
         """Test build_message with empty value."""
         result = self.processor.build_message({}, {})
@@ -308,8 +399,8 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtimef': 3600,
-                    'queuedtimef': 600,
+                    'runtimef': '1:0:0',  # 1 hour = 3600 seconds
+                    'queuedtimef': '0:10:0',  # 10 minutes = 600 seconds
                     'score': 0.95
                 }
             ]
@@ -335,12 +426,12 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtimef': 3600,
+                    'runtimef': '1:0:0',  # 1 hour = 3600 seconds
                     'score': 0.95
                 },
                 {
                     'jobid': 'job456',
-                    'queuedtimef': 600,
+                    'queuedtimef': '0:10:0',  # 10 minutes = 600 seconds
                     'score': 0.85
                 }
             ]
@@ -361,7 +452,7 @@ class TestJobDataProcessor(unittest.TestCase):
         value = {
             'data': [
                 {
-                    'runtimef': 3600,
+                    'runtimef': '1:0:0',
                     'score': 0.95
                 }
             ]
@@ -378,7 +469,7 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtimef': 3600
+                    'runtimef': '1:0:0'  # 1 hour = 3600 seconds
                     # queuedtimef and score are missing
                 }
             ]
@@ -397,8 +488,8 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtimef': 3600,
-                    'queuedtimef': 600,
+                    'runtimef': '1:0:0',  # 1 hour = 3600 seconds
+                    'queuedtimef': '0:10:0',  # 10 minutes = 600 seconds
                     'score': 0.95
                 }
             ]
@@ -416,7 +507,7 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtimef': 3600
+                    'runtimef': '1:0:0'  # 1 hour = 3600 seconds
                 }
             ]
         }
@@ -437,7 +528,7 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtimef': 3600
+                    'runtimef': '1:0:0'  # 1 hour = 3600 seconds
                 }
             ]
         }
@@ -455,7 +546,7 @@ class TestJobDataProcessor(unittest.TestCase):
             'data': [
                 {
                     'jobid': 'job123',
-                    'runtimef': 3600
+                    'runtimef': '1:0:0'  # 1 hour = 3600 seconds
                 }
             ]
         }
@@ -486,7 +577,7 @@ class TestJobDataProcessor(unittest.TestCase):
         """Test build_single_message method directly."""
         value = {
             'jobid': 'job789',
-            'runtimef': 7200,
+            'runtimef': '2:0:0',  # 2 hours = 7200 seconds
             'score': 0.88
         }
         
@@ -498,6 +589,76 @@ class TestJobDataProcessor(unittest.TestCase):
         metric_names = {r['metric_name'] for r in result}
         self.assertIn('runtime_secs', metric_names)
         self.assertIn('score', metric_names)
+
+    def test_build_message_with_time_string_format(self):
+        """Test build_message with time fields in string format."""
+        value = {
+            'data': [
+                {
+                    'jobid': 'job123',
+                    'runtimef': '2:30:45',  # 2 hours, 30 min, 45 sec = 9045 seconds
+                    'queuedtimef': '0:15:30',  # 15 min, 30 sec = 930 seconds
+                    'score': 0.95
+                }
+            ]
+        }
+        
+        result = self.processor.build_message(value, {})
+        
+        # Should have 3 records
+        self.assertEqual(len(result), 3)
+        
+        # Check runtime was converted correctly
+        runtime_record = next((r for r in result if r['metric_name'] == 'runtime_secs'), None)
+        self.assertIsNotNone(runtime_record)
+        self.assertEqual(runtime_record['metric_value'], 9045)
+        
+        # Check queued time was converted correctly
+        queued_record = next((r for r in result if r['metric_name'] == 'queued_time_secs'), None)
+        self.assertIsNotNone(queued_record)
+        self.assertEqual(queued_record['metric_value'], 930)
+
+    def test_build_message_with_days_in_time_format(self):
+        """Test build_message with time fields including days."""
+        value = {
+            'data': [
+                {
+                    'jobid': 'job456',
+                    'runtimef': '1:12:30:15',  # 1 day, 12h, 30m, 15s = 131415 seconds
+                    'score': 0.88
+                }
+            ]
+        }
+        
+        result = self.processor.build_message(value, {})
+        
+        # Should have 2 records
+        self.assertEqual(len(result), 2)
+        
+        # Check runtime was converted correctly
+        runtime_record = next((r for r in result if r['metric_name'] == 'runtime_secs'), None)
+        self.assertIsNotNone(runtime_record)
+        self.assertEqual(runtime_record['metric_value'], 131415)
+
+    def test_build_message_with_invalid_time_format_skipped(self):
+        """Test that records with invalid time format are skipped."""
+        value = {
+            'data': [
+                {
+                    'jobid': 'job789',
+                    'runtimef': 'invalid:time',  # Invalid format
+                    'queuedtimef': '1:2',  # Wrong number of parts
+                    'score': 0.75
+                }
+            ]
+        }
+        
+        result = self.processor.build_message(value, {})
+        
+        # Should only have 1 record (for score), timef fields should be skipped
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]['metric_name'], 'score')
+        self.assertEqual(result[0]['metric_value'], 0.75)
 
 
 if __name__ == '__main__':
