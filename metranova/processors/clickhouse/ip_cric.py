@@ -14,7 +14,7 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.logger = logger
-        self.table = os.getenv('CRIC_IP_METADATA_TABLE', 'meta_ip_cric')
+        self.table = os.getenv('CLICKHOUSE_CRIC_IP_METADATA_TABLE', 'meta_ip_cric')
         
         # Type formatting - only the fields we need
         self.float_fields = ['latitude', 'longitude']
