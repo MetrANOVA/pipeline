@@ -1,5 +1,5 @@
 consumers:
-  - type: metranova.consumers.metadata.CRICIPConsumer
+  - type: metranova.consumers.http.HTTPConsumer
 
 cachers:
   - type: metranova.cachers.clickhouse.ClickHouseCacher
