@@ -831,7 +831,7 @@ class CRICIPConsumer(TimedIntervalConsumer):
                 site_info = {
                     'name': site_name,                             # name field
                     'tier': site_data.get('rc_tier_level', None),  # tier field
-                    'country': site_data.get('country', None),     # country field
+                    'country_name': site_data.get('country', None),# rename country to country_name field for consistency across various sources
                     'latitude': site_data.get('latitude', None),   # latitude field
                     'longitude': site_data.get('longitude', None), # longitude field
                 }
@@ -911,7 +911,7 @@ class CRICIPConsumer(TimedIntervalConsumer):
                 'name': site_info['name'],    
                 'latitude': site_info['latitude'],
                 'longitude': site_info['longitude'],
-                'country': site_info['country'],
+                'country_name': site_info['country_name'],
                 'net_site': net_site,
                 'tier': site_info['tier'],
             }

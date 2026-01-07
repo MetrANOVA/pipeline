@@ -9,7 +9,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
 from metranova.consumers.metadata import CRICIPConsumer
-from metranova.processors.clickhouse.ip_cric import MetaIPCRICProcessor
+from metranova.processors.clickhouse.cric import MetaIPCRICProcessor
 
 
 class TestCRICIPConsumer(unittest.TestCase):
@@ -82,8 +82,8 @@ class TestCRICIPConsumer(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            'SITE1': {'country': 'CH', 'latitude': 46.2, 'longitude': 6.1},
-            'SITE2': {'country': 'US', 'latitude': 34.0, 'longitude': -118.2}
+            'SITE1': {'country_name': 'CH', 'latitude': 46.2, 'longitude': 6.1},
+            'SITE2': {'country_name': 'US', 'latitude': 34.0, 'longitude': -118.2}
         }
         
         # Mock at the datasource client level
@@ -140,7 +140,7 @@ class TestCRICIPConsumer(unittest.TestCase):
         site_info = {
             'name': 'CERN',
             'tier': 0,
-            'country': 'Switzerland',
+            'country_name': 'Switzerland',
             'latitude': 46.2044,
             'longitude': 6.1432
         }
@@ -156,7 +156,7 @@ class TestCRICIPConsumer(unittest.TestCase):
         self.assertEqual(result['name'], 'CERN')
         self.assertEqual(result['latitude'], 46.2044)
         self.assertEqual(result['longitude'], 6.1432)
-        self.assertEqual(result['country'], 'Switzerland')
+        self.assertEqual(result['country_name'], 'Switzerland')
         self.assertEqual(result['net_site'], 'CERN-PRIMARY')
         self.assertEqual(result['tier'], 0)
 
@@ -167,7 +167,7 @@ class TestCRICIPConsumer(unittest.TestCase):
         site_info = {
             'name': 'CERN',
             'tier': 0,
-            'country': 'Switzerland',
+            'country_name': 'Switzerland',
             'latitude': 46.2044,
             'longitude': 6.1432
         }
@@ -190,7 +190,7 @@ class TestCRICIPConsumer(unittest.TestCase):
         """Test building IP record with invalid subnet."""
         consumer = CRICIPConsumer(self.mock_pipeline)
         
-        site_info = {'name': 'CERN', 'tier': 0, 'country': 'CH', 'latitude': 46.2, 'longitude': 6.1}
+        site_info = {'name': 'CERN', 'tier': 0, 'country_name': 'CH', 'latitude': 46.2, 'longitude': 6.1}
         net_site = 'CERN-PRIMARY'
         ip_range = 'invalid-subnet'
         custom_ip_data = {}
@@ -205,7 +205,7 @@ class TestCRICIPConsumer(unittest.TestCase):
         
         cric_data = {
             'CERN': {
-                'country': 'Switzerland',
+                'country_name': 'Switzerland',
                 'latitude': 46.2044,
                 'longitude': 6.1432,
                 'rc_tier_level': 0,
@@ -237,7 +237,7 @@ class TestCRICIPConsumer(unittest.TestCase):
         
         cric_data = {
             'SITE_NO_ROUTES': {
-                'country': 'US',
+                'country_name': 'US',
                 'latitude': 34.0,
                 'longitude': -118.2,
                 'rc_tier_level': 2
@@ -257,7 +257,7 @@ class TestCRICIPConsumer(unittest.TestCase):
         # Provide minimal valid CRIC data so custom additions are processed
         cric_data = {
             'DUMMY_SITE': {
-                'country': 'US',
+                'country_name': 'US',
                 'latitude': 0.0,
                 'longitude': 0.0,
                 'rc_tier_level': 3,
@@ -346,7 +346,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
 
     def test_init_custom_table_name(self):
         """Test initialization with custom table name."""
-        with patch.dict(os.environ, {'CRIC_IP_METADATA_TABLE': 'custom_cric_table'}):
+        with patch.dict(os.environ, {'CLICKHOUSE_CRIC_IP_METADATA_TABLE': 'custom_cric_table'}):
             processor = MetaIPCRICProcessor(self.mock_pipeline)
             self.assertEqual(processor.table, 'custom_cric_table')
 
@@ -360,7 +360,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
         expected_columns = [
             'id', 'ref', 'hash', 'insert_time', 'ext', 'tag',
             'ip_subnet', 'name', 'latitude', 'longitude',
-            'country', 'net_site', 'tier'  # Actual names, not renamed
+            'country_name', 'net_site', 'tier'
         ]
         
         for expected_col in expected_columns:
@@ -377,7 +377,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
         self.assertEqual(column_types['name'], 'LowCardinality(String)')
         self.assertEqual(column_types['latitude'], 'Nullable(Float64)')
         self.assertEqual(column_types['longitude'], 'Nullable(Float64)')
-        self.assertEqual(column_types['country'], 'LowCardinality(Nullable(String))')
+        self.assertEqual(column_types['country_name'], 'LowCardinality(Nullable(String))')
         self.assertEqual(column_types['net_site'], 'LowCardinality(Nullable(String))')
         self.assertEqual(column_types['tier'], 'Nullable(UInt8)')
 
@@ -404,7 +404,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
             'name': 'CERN',
             'latitude': 46.2044,
             'longitude': 6.1432,
-            'country': 'Switzerland',
+            'country_name': 'Switzerland',
             'net_site': 'CERN-PRIMARY',
             'tier': 0
         }
@@ -416,7 +416,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
         self.assertEqual(result['name'], 'CERN')
         self.assertEqual(result['latitude'], 46.2044)
         self.assertEqual(result['longitude'], 6.1432)
-        self.assertEqual(result['country'], 'Switzerland')
+        self.assertEqual(result['country_name'], 'Switzerland')
         self.assertEqual(result['net_site'], 'CERN-PRIMARY')
         self.assertEqual(result['tier'], 0)
 
@@ -470,7 +470,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
                 'name': 'CERN',
                 'latitude': 46.2044,
                 'longitude': 6.1432,
-                'country': 'Switzerland',
+                'country_name': 'Switzerland',
                 'net_site': 'CERN-PRIMARY',
                 'tier': 0
             }]
@@ -481,7 +481,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
         self.assertEqual(len(result), 1)
         record = result[0]
         self.assertEqual(record['id'], '192.168.1.0/24')
-        self.assertEqual(record['country'], 'Switzerland')
+        self.assertEqual(record['country_name'], 'Switzerland')
         self.assertEqual(record['net_site'], 'CERN-PRIMARY')
         self.assertIn('ref', record)
         self.assertIn('hash', record)

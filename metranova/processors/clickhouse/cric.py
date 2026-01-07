@@ -34,7 +34,7 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
             ['name', 'LowCardinality(String)', True],          # Site name
             ['latitude', 'Nullable(Float64)', True],            # Latitude
             ['longitude', 'Nullable(Float64)', True],           # Longitude
-            ['country', 'LowCardinality(Nullable(String))', True],  # Country
+            ['country_name', 'LowCardinality(Nullable(String))', True],  # Country Name
             ['net_site', 'LowCardinality(Nullable(String))', True], # Network site
             ['tier', 'Nullable(UInt8)', True],                  # Tier level
         ])
