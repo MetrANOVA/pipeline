@@ -757,21 +757,15 @@ class CRICIPConsumer(TimedIntervalConsumer):
         super().__init__(pipeline)
         self.logger = logger
         self.datasource = HTTPConnector()
-
-        # Configuration from environment
-        env_prefix = os.getenv('CRIC_IP_CONSUMER_ENV_PREFIX', '')
-        if env_prefix and not env_prefix.endswith('_'):
-            env_prefix += '_'
-
-        self.update_interval = int(os.getenv(f'{env_prefix}CRIC_IP_CONSUMER_UPDATE_INTERVAL', -1))
-        self.table = os.getenv(f'{env_prefix}CRIC_IP_CONSUMER_TABLE', 'meta_ip_cric')
+        self.update_interval = int(os.getenv(f'CRIC_IP_CONSUMER_UPDATE_INTERVAL', -1))
+        self.table = os.getenv(f'CRIC_IP_CONSUMER_TABLE', 'meta_ip_cric')
         self.cric_url = os.getenv(
-            f'{env_prefix}CRIC_IP_CONSUMER_URL',
+            f'CRIC_IP_CONSUMER_URL',
             'https://wlcg-cric.cern.ch/api/core/rcsite/query/list/?json'
         )
 
         # Custom additions file (optional)
-        self.custom_ip_file = os.getenv(f'{env_prefix}CRIC_IP_CONSUMER_CUSTOM_IP_FILE', None)
+        self.custom_ip_file = os.getenv(f'CRIC_IP_CONSUMER_CUSTOM_IP_FILE', None)
         
         self.logger.info(f"CRIC IP Consumer initialized with URL: {self.cric_url}")
     
