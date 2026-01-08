@@ -62,7 +62,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
         expected_columns = [
             'id', 'ref', 'hash', 'insert_time', 'ext', 'tag',
             'ip_subnet', 'name', 'latitude', 'longitude',
-            'country_name', 'net_site', 'tier'
+            'country_name', 'site_name', 'tier'
         ]
         
         for expected_col in expected_columns:
@@ -80,7 +80,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
         self.assertEqual(column_types['latitude'], 'Nullable(Float64)')
         self.assertEqual(column_types['longitude'], 'Nullable(Float64)')
         self.assertEqual(column_types['country_name'], 'LowCardinality(Nullable(String))')
-        self.assertEqual(column_types['net_site'], 'LowCardinality(Nullable(String))')
+        self.assertEqual(column_types['site_name'], 'LowCardinality(Nullable(String))')
         self.assertEqual(column_types['tier'], 'Nullable(UInt8)')
 
     def test_create_table_command(self):
@@ -224,10 +224,10 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
             'latitude': 46.2044,
             'longitude': 6.1432
         }
-        net_site = 'CERN-PRIMARY'
+        site_name = 'CERN-PRIMARY'
         ip_range = '192.168.1.0/24'
         
-        result = processor._build_ip_record(ip_range, site_info, net_site)
+        result = processor._build_ip_record(ip_range, site_info, site_name)
         
         self.assertIsNotNone(result)
         self.assertEqual(result['id'], '192.168.1.0/24')
@@ -236,7 +236,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
         self.assertEqual(result['latitude'], 46.2044)
         self.assertEqual(result['longitude'], 6.1432)
         self.assertEqual(result['country_name'], 'Switzerland')
-        self.assertEqual(result['net_site'], 'CERN-PRIMARY')
+        self.assertEqual(result['site_name'], 'CERN-PRIMARY')
         self.assertEqual(result['tier'], 0)
 
     def test_build_ip_record_invalid_subnet(self):
@@ -244,10 +244,10 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
         processor = MetaIPCRICProcessor(self.mock_pipeline)
         
         site_info = {'name': 'CERN', 'tier': 0, 'country_name': 'CH', 'latitude': 46.2, 'longitude': 6.1}
-        net_site = 'CERN-PRIMARY'
+        site_name = 'CERN-PRIMARY'
         ip_range = 'invalid-subnet'
         
-        result = processor._build_ip_record(ip_range, site_info, net_site)
+        result = processor._build_ip_record(ip_range, site_info, site_name)
         
         self.assertIsNone(result)
 
@@ -353,7 +353,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
             'latitude': 46.2044,
             'longitude': 6.1432,
             'country_name': 'Switzerland',
-            'net_site': 'CERN-PRIMARY',
+            'site_name': 'CERN-PRIMARY',
             'tier': 0
         }
         
@@ -364,7 +364,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
         self.assertEqual(result['latitude'], 46.2044)
         self.assertEqual(result['longitude'], 6.1432)
         self.assertEqual(result['country_name'], 'Switzerland')
-        self.assertEqual(result['net_site'], 'CERN-PRIMARY')
+        self.assertEqual(result['site_name'], 'CERN-PRIMARY')
         self.assertEqual(result['tier'], 0)
 
     def test_build_metadata_fields_ip_subnet_validation(self):
@@ -407,7 +407,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
             'latitude': None,
             'longitude': None,
             'country_name': None,
-            'net_site': None,
+            'site_name': None,
             'tier': None
         }
         
@@ -416,7 +416,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
         self.assertIsNone(result['latitude'])
         self.assertIsNone(result['longitude'])
         self.assertIsNone(result['country_name'])
-        self.assertIsNone(result['net_site'])
+        self.assertIsNone(result['site_name'])
         self.assertIsNone(result['tier'])
 
     # ==================== build_message tests ====================

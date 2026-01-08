@@ -38,7 +38,7 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
             ['latitude', 'Nullable(Float64)', True],            # Latitude
             ['longitude', 'Nullable(Float64)', True],           # Longitude
             ['country_name', 'LowCardinality(Nullable(String))', True],  # Country Name
-            ['net_site', 'LowCardinality(Nullable(String))', True], # Network site
+            ['site_name', 'LowCardinality(Nullable(String))', True], # Network site name
             ['tier', 'Nullable(UInt8)', True],                  # Tier level
         ])
 
@@ -92,7 +92,7 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
             self.logger.error(f"Error parsing IP subnet {ip_subnet_str}: {e}")
             return None
     
-    def _build_ip_record(self, ip_range, site_info, net_site):
+    def _build_ip_record(self, ip_range, site_info, site_name):
         """Build an IP record with only the 6 core fields"""
         try:
             # Parse IP subnet
@@ -111,7 +111,7 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
                 'latitude': site_info['latitude'],
                 'longitude': site_info['longitude'],
                 'country_name': site_info['country_name'],
-                'net_site': net_site,
+                'site_name': site_name,
                 'tier': site_info['tier'],
             }
             
@@ -149,8 +149,8 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
                 # Iterate through each network route
                 for netroute_name, netroute_data in netroutes.items():
                     try:
-                        # Get net_site
-                        net_site = netroute_data.get('netsite', None)
+                        # Get site_name from netsite field
+                        netsite_name = netroute_data.get('netsite', None)
 
                         # Get networks (contains IPv4 and IPv6 ranges)
                         networks = netroute_data.get('networks', {})
@@ -160,13 +160,13 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
                         
                         # Process IPv4 ranges
                         for ip_range in networks.get('ipv4', []):
-                            ip_record = self._build_ip_record(ip_range, site_info, net_site)
+                            ip_record = self._build_ip_record(ip_range, site_info, netsite_name)
                             if ip_record:
                                 ip_records.append(ip_record)
                         
                         # Process IPv6 ranges
                         for ip_range in networks.get('ipv6', []):
-                            ip_record = self._build_ip_record(ip_range, site_info, net_site)
+                            ip_record = self._build_ip_record(ip_range, site_info, netsite_name)
                             if ip_record:
                                 ip_records.append(ip_record)
                     
