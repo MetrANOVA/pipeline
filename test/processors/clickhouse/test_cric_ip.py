@@ -47,6 +47,12 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
             processor = MetaIPCRICProcessor(self.mock_pipeline)
             self.assertEqual(processor.table, 'custom_cric_table')
 
+    def test_init_custom_url_pattern(self):
+        """Test initialization with custom URL match pattern."""
+        with patch.dict(os.environ, {'CRIC_URL_MATCH_PATTERN': 'test-cric.example.com'}):
+            processor = MetaIPCRICProcessor(self.mock_pipeline)
+            self.assertEqual(processor.cric_url_pattern, 'test-cric.example.com')
+
     def test_column_definitions(self):
         """Test that all required columns are defined."""
         processor = MetaIPCRICProcessor(self.mock_pipeline)
@@ -84,8 +90,7 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
         result = processor.create_table_command()
         
         self.assertIn("CREATE TABLE IF NOT EXISTS meta_ip_cric", result)
-        self.assertIn("ENGINE = ReplacingMergeTree", result)
-        self.assertIn("PRIMARY KEY", result)
+        self.assertIn("ENGINE = MergeTree", result)
         self.assertIn("ORDER BY", result)
         self.assertIn("name", result)
         self.assertIn("id", result)
@@ -143,6 +148,27 @@ class TestMetaIPCRICProcessor(unittest.TestCase):
         result = processor.match_message({})
         
         self.assertFalse(result)
+
+    def test_match_message_with_custom_url_pattern(self):
+        """Test match_message uses custom URL pattern from env."""
+        with patch.dict(os.environ, {'CRIC_URL_MATCH_PATTERN': 'custom-cric.example.com'}):
+            processor = MetaIPCRICProcessor(self.mock_pipeline)
+            
+            # Should match custom pattern
+            msg_match = {
+                'url': 'https://custom-cric.example.com/api/data',
+                'status_code': 200,
+                'data': {}
+            }
+            self.assertTrue(processor.match_message(msg_match))
+            
+            # Should NOT match default pattern anymore
+            msg_no_match = {
+                'url': 'https://wlcg-cric.cern.ch/api/core/rcsite/query/list/?json',
+                'status_code': 200,
+                'data': {}
+            }
+            self.assertFalse(processor.match_message(msg_no_match))
 
     # ==================== _parse_ip_subnet tests ====================
 

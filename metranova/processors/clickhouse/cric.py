@@ -17,7 +17,7 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
         self.table = os.getenv('CLICKHOUSE_CRIC_IP_METADATA_TABLE', 'meta_ip_cric')
         
         # CRIC URL pattern for matching HTTPConsumer messages
-        self.cric_url_pattern = 'cric.cern.ch'
+        self.cric_url_pattern = os.getenv('CRIC_URL_MATCH_PATTERN', 'cric.cern.ch')
         
         # Type formatting - only the fields we need
         self.float_fields = ['latitude', 'longitude']
@@ -42,10 +42,6 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
             ['tier', 'Nullable(UInt8)', True],                  # Tier level
         ])
 
-        # Table settings
-        self.table_engine = "ReplacingMergeTree"
-        self.order_by = ['name', 'id', 'ref', 'insert_time']
-        self.primary_keys = ['name', 'id'] # Primary Key must be a prefix of order_by
 
     def match_message(self, value):
         """
