@@ -1,0 +1,10 @@
+consumers:
+  - type: metranova.consumers.alcf.StatusConsumer
+cachers:
+  - type: metranova.cachers.clickhouse.ClickHouseCacher
+    name: clickhouse
+writers:
+  - type: metranova.writers.clickhouse.ClickHouseWriter
+    processors:
+      - metranova.processors.clickhouse.alcf.JobMetadataProcessor
+      - metranova.processors.clickhouse.alcf.JobDataProcessor
