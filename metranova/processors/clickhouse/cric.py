@@ -1,6 +1,12 @@
 """
 Processor for CRIC IP metadata
-Handles WLCG CRIC site network information including IP ranges, sites, and network routes
+Handles WLCG CRIC site network information including IP ranges, sites, and network routes.
+
+Data model:
+- One record per netroute (e.g., AGLT2_LHCONE_RT)
+- All IP subnets within a netroute are combined into ip_subnet array
+- rcsite_name: Resource Center Site (e.g., AGLT2 = ATLAS Great Lakes Tier 2)
+- netsite_name: Physical location (e.g., US-AGLT2 University of Michigan)
 """
 import logging
 import os
@@ -30,16 +36,16 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
         
         # Extend column definitions - only 6 core fields
         self.column_defs.extend([
-            # IP subnet
+            # IP subnet - array of all networks in the netroute
             ['ip_subnet', 'Array(Tuple(IPv6, UInt8))', True],
             
             # Core CRIC fields
-            ['name', 'LowCardinality(String)', True],          # Site name
-            ['latitude', 'Nullable(Float64)', True],            # Latitude
-            ['longitude', 'Nullable(Float64)', True],           # Longitude
-            ['country_name', 'LowCardinality(Nullable(String))', True],  # Country Name
-            ['site_name', 'LowCardinality(Nullable(String))', True], # Network site name
-            ['tier', 'Nullable(UInt8)', True],                  # Tier level
+            ['rcsite_name', 'LowCardinality(String)', True],           # Resource Center Site name (e.g., AGLT2)
+            ['latitude', 'Nullable(Float64)', True],                    # Latitude
+            ['longitude', 'Nullable(Float64)', True],                   # Longitude
+            ['country_name', 'LowCardinality(Nullable(String))', True], # Country Name
+            ['netsite_name', 'LowCardinality(Nullable(String))', True], # Network site name (e.g., US-AGLT2 Michigan State University)
+            ['tier', 'Nullable(UInt8)', True],                          # Tier level
         ])
 
 
@@ -92,48 +98,43 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
             self.logger.error(f"Error parsing IP subnet {ip_subnet_str}: {e}")
             return None
     
-    def _build_ip_record(self, ip_range, site_info, site_name):
-        """Build an IP record with only the 6 core fields"""
+    def _build_ip_record(self, netroute_id, ip_subnets, rcsite_info, netsite_name):
+        """Build an IP record for a netroute with all its IP subnets combined"""
         try:
-            # Parse IP subnet
-            ip_subnet_tuple = self._parse_ip_subnet(ip_range)
-            if not ip_subnet_tuple:
+            if not ip_subnets:
                 return None
             
-            # Use IP range as the record ID
-            record_id = ip_range
-            
-            # Build the IP record with only required fields
+            # Build the IP record
             ip_record = {
-                'id': record_id,
-                'ip_subnet': [ip_subnet_tuple],
-                'name': site_info['name'],    
-                'latitude': site_info['latitude'],
-                'longitude': site_info['longitude'],
-                'country_name': site_info['country_name'],
-                'site_name': site_name,
-                'tier': site_info['tier'],
+                'id': netroute_id,
+                'ip_subnet': ip_subnets,
+                'rcsite_name': rcsite_info['rcsite_name'],    
+                'latitude': rcsite_info['latitude'],
+                'longitude': rcsite_info['longitude'],
+                'country_name': rcsite_info['country_name'],
+                'netsite_name': netsite_name,
+                'tier': rcsite_info['tier'],
             }
             
             return ip_record
             
         except Exception as e:
-            self.logger.error(f"Error building IP record for {ip_range}: {e}")
+            self.logger.error(f"Error building IP record for {netroute_id}: {e}")
             return None
     
     def _extract_ip_records(self, cric_data):
-        """Extract IP records from CRIC data"""
+        """Extract IP records from CRIC data - one record per netroute"""
         ip_records = []
         
         if not cric_data:
             self.logger.warning("No CRIC data to process")
             return ip_records
         
-        for site_name, site_data in cric_data.items():
+        for rcsite_name, site_data in cric_data.items():
             try:
-                # Get only the 6 core fields we need
-                site_info = {
-                    'name': site_name,
+                # Get the rcsite (Resource Center Site) info
+                rcsite_info = {
+                    'rcsite_name': rcsite_name,
                     'tier': site_data.get('rc_tier_level', None),
                     'country_name': site_data.get('country', None),
                     'latitude': site_data.get('latitude', None),
@@ -143,39 +144,48 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
                 # Process netroutes (network routes)
                 netroutes = site_data.get('netroutes', {})
                 if not netroutes:
-                    self.logger.debug(f"No netroutes found for site {site_name}")
+                    self.logger.debug(f"No netroutes found for rcsite {rcsite_name}")
                     continue
                 
                 # Iterate through each network route
-                for netroute_name, netroute_data in netroutes.items():
+                for netroute_id, netroute_data in netroutes.items():
                     try:
-                        # Get site_name from netsite field
+                        # Get netsite_name from netsite field
                         netsite_name = netroute_data.get('netsite', None)
 
                         # Get networks (contains IPv4 and IPv6 ranges)
                         networks = netroute_data.get('networks', {})
                         if not networks:
-                            self.logger.debug(f"No networks found for netroute {netroute_name} in site {site_name}")
+                            self.logger.debug(f"No networks found for netroute {netroute_id} in rcsite {rcsite_name}")
                             continue
+                        
+                        # Combine all IPv4 and IPv6 ranges into one list
+                        ip_subnets = []
                         
                         # Process IPv4 ranges
                         for ip_range in networks.get('ipv4', []):
-                            ip_record = self._build_ip_record(ip_range, site_info, netsite_name)
-                            if ip_record:
-                                ip_records.append(ip_record)
+                            ip_subnet_tuple = self._parse_ip_subnet(ip_range)
+                            if ip_subnet_tuple:
+                                ip_subnets.append(ip_subnet_tuple)
                         
                         # Process IPv6 ranges
                         for ip_range in networks.get('ipv6', []):
-                            ip_record = self._build_ip_record(ip_range, site_info, netsite_name)
+                            ip_subnet_tuple = self._parse_ip_subnet(ip_range)
+                            if ip_subnet_tuple:
+                                ip_subnets.append(ip_subnet_tuple)
+                        
+                        # Build one record per netroute with all IP subnets combined
+                        if ip_subnets:
+                            ip_record = self._build_ip_record(netroute_id, ip_subnets, rcsite_info, netsite_name)
                             if ip_record:
                                 ip_records.append(ip_record)
                     
                     except Exception as e:
-                        self.logger.error(f"Error processing netroute {netroute_name} in site {site_name}: {e}")
+                        self.logger.error(f"Error processing netroute {netroute_id} in rcsite {rcsite_name}: {e}")
                         continue
                     
             except Exception as e:
-                self.logger.error(f"Error processing site {site_name}: {e}")
+                self.logger.error(f"Error processing rcsite {rcsite_name}: {e}")
                 continue
         
         self.logger.info(f"Extracted {len(ip_records)} IP records from CRIC data")
@@ -223,7 +233,7 @@ class MetaIPCRICProcessor(BaseMetadataProcessor):
         formatted_record['ip_subnet'] = ip_subnets
         
         # Ensure required string field has default
-        if not formatted_record.get('name'):
-            formatted_record['name'] = 'Unknown'
+        if not formatted_record.get('rcsite_name'):
+            formatted_record['rcsite_name'] = 'Unknown'
         
         return formatted_record
