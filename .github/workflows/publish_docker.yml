@@ -132,6 +132,7 @@ jobs:
   ##
   # create_manifest: This job creates the multi-arch manifest for the supervisord image. It uses the metadata from the manifest_metadata job to create the manifest.
   create_manifest:
+    if: github.event_name != 'pull_request'
     needs: 
       - build
       - manifest_metadata
@@ -148,7 +149,6 @@ jobs:
     steps:
     # Login to registry
     - name: Log into registry ${{ env.REGISTRY }}
-      if: github.event_name != 'pull_request'
       uses: docker/login-action@v2
       with:
         registry: ${{ env.REGISTRY }}

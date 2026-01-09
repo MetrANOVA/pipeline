@@ -57,13 +57,63 @@ Each resource type is accessed through dedicated connectors that provide consist
    # - conf/certificates/kafka_user.crt (User certificate) 
    # - conf/certificates/kafka_user.key (User private key)
    ```
-4. Decide which pipeline you want to run and find its conifguration file in in `conf/envs/`. For example to run the flow pipeline we will use `conf/envs/data_flow.env`. Copy this to `.env` and make any edits:
+
+4. **Set up local ClickHouse** (for development/testing)
+   
+   Start a local ClickHouse container:
+   ```bash
+   docker run -d --name clickhouse-server \
+     -p 8123:8123 \
+     -p 9000:9000 \
+     --ulimit nofile=262144:262144 \
+     -e CLICKHOUSE_PASSWORD=your_password_here \
+     -v clickhouse-data:/var/lib/clickhouse \
+     clickhouse/clickhouse-server:latest
+   ```
+   
+   The ClickHouse server will be available at:
+   - **HTTP interface**: `http://localhost:8123` (for web UI and HTTP queries)
+   - **Native interface**: `localhost:9000` (for client connections)
+   - **Default user**: `default`
+   - **Password**: Set via `CLICKHOUSE_PASSWORD` environment variable
+   
+   Update your `conf/envs/base.env` with the local ClickHouse connection details:
+   ```bash
+   CLICKHOUSE_HOST=host.docker.internal  # Use host.docker.internal to access host from container
+   CLICKHOUSE_PORT=9000
+   CLICKHOUSE_USER=default
+   CLICKHOUSE_PASSWORD=your_password_here
+   CLICKHOUSE_DATABASE=default
+   ```
+   
+   **Useful ClickHouse commands:**
+   ```bash
+   # Access ClickHouse CLI
+   docker exec -it clickhouse-server clickhouse-client --password your_password_here
+   
+   # View logs
+   docker logs clickhouse-server
+   
+   # Stop ClickHouse
+   docker stop clickhouse-server
+   
+   # Start ClickHouse (after stopping)
+   docker start clickhouse-server
+   
+   # Remove ClickHouse (keeps data volume)
+   docker rm clickhouse-server
+   
+   # Remove ClickHouse and data
+   docker rm clickhouse-server
+   docker volume rm clickhouse-data
+   ```
+5. Decide which pipeline you want to run and find its conifguration file in in `conf/envs/`. For example to run the flow pipeline we will use `conf/envs/data_flow.env`. Copy this to `.env` and make any edits:
   ```bash
   cp conf/envs/data_flow.env .env #replace data_flow.env with chosen pipeline.  
   ```
   *NOTE: You can alternatively set the PIPELINE_ENV_FILE environment variable to the path of the chosen file instead of copying to .env. EXAMPLE: PIPELINE_ENV_FILE=conf/envs/data_flow.env* 
 
-5. **Build and run the pipelines**
+6. **Build and run the pipelines**
    ```bash
    docker compose up --build pipeline
    ```
