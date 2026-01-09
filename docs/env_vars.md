@@ -52,6 +52,7 @@ This document describes all environment variables used by the MetrANOVA Pipeline
 | `CLICKHOUSE_APPLICATION_METADATA_TABLE` | `meta_application` | Application metadata table |
 | `CLICKHOUSE_SCIREG_METADATA_TABLE` | `meta_ip_scireg` | Science Registry IP metadata table |
 | `CLICKHOUSE_SCINET_METADATA_TABLE` | `meta_ip_scinet` | SCINet booth metadata table |
+| `CLICKHOUSE_CRIC_IP_METADATA_TABLE` | `meta_ip_cric` | CRIC IP metadata table |
 
 ## ClickHouse Writer Settings
 
