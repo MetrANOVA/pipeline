@@ -58,6 +58,18 @@ class TestIPCacher(unittest.TestCase):
             self.assertEqual(cacher.cache_dir, 'caches')
             self.assertEqual(cacher.cache_refresh_interval, 600)
             self.assertEqual(cacher.tables, [])
+            self.assertIsNone(cacher.base_url)
+            cacher.close()
+
+    def test_init_with_base_url(self):
+        """Test initialization with base URL."""
+        with patch.dict(os.environ, {
+            'IP_CACHER_BASE_URL': 'https://example.com/caches',
+            'IP_CACHER_REFRESH_INTERVAL': '0'
+        }):
+            cacher = IPCacher()
+            
+            self.assertEqual(cacher.base_url, 'https://example.com/caches')
             cacher.close()
 
     def test_init_no_tables_warning(self):
@@ -69,6 +81,41 @@ class TestIPCacher(unittest.TestCase):
                 # Should have logged a warning about no tables
                 mock_logger.warning.assert_called()
                 cacher.close()
+
+    def test_prime_with_base_url(self):
+        """Test prime calls load_from_url when base_url is set."""
+        with patch.dict(os.environ, {
+            'IP_CACHER_BASE_URL': 'https://example.com',
+            'IP_CACHER_TABLES': 'meta_ip',
+            'IP_CACHER_REFRESH_INTERVAL': '0'
+        }):
+            cacher = IPCacher()
+            with patch.object(cacher, 'load_from_url') as mock_load_url:
+                cacher.prime()
+                mock_load_url.assert_called_once_with('meta_ip')
+            cacher.close()
+
+    def test_prime_with_cache_dir(self):
+        """Test prime calls load_from_file when cache_dir is set but not base_url."""
+        with patch.object(self.cacher, 'load_from_file') as mock_load_file:
+            self.cacher.prime()
+            # Should be called for each table
+            self.assertEqual(mock_load_file.call_count, len(self.cacher.tables))
+
+    def test_prime_no_base_url_or_cache_dir(self):
+        """Test prime logs error when neither base_url nor cache_dir is set."""
+        with patch.dict(os.environ, {
+            'IP_CACHER_TABLES': 'meta_ip',
+            'IP_CACHER_REFRESH_INTERVAL': '0'
+        }):
+            cacher = IPCacher()
+            cacher.base_url = None
+            cacher.cache_dir = None
+            
+            with patch.object(cacher.logger, 'error') as mock_error:
+                cacher.prime()
+                mock_error.assert_called()
+            cacher.close()
 
     def test_prime_file_not_found(self):
         """Test prime when pickle file doesn't exist."""
@@ -247,6 +294,121 @@ class TestIPCacher(unittest.TestCase):
             
         except ImportError:
             self.skipTest("pytricia not available")
+
+    def test_load_from_url_success(self):
+        """Test load_from_url successfully loads from remote URL."""
+        test_trie = {'192.168.1.1': {'id': 'ip1', 'ref': 'IP 1'}}
+        pickled_data = pickle.dumps(test_trie)
+        
+        with patch('requests.get') as mock_get:
+            mock_response = Mock()
+            mock_response.content = pickled_data
+            mock_response.raise_for_status = Mock()
+            mock_get.return_value = mock_response
+            
+            self.cacher.base_url = 'https://example.com'
+            self.cacher.load_from_url('meta_ip')
+            
+            mock_get.assert_called_once_with('https://example.com/ip_trie_meta_ip.pickle')
+            self.assertIn('meta_ip', self.cacher.local_cache)
+            self.assertEqual(self.cacher.local_cache['meta_ip']['192.168.1.1']['ref'], 'IP 1')
+
+    def test_load_from_url_http_error(self):
+        """Test load_from_url handles HTTP errors."""
+        with patch('requests.get') as mock_get:
+            mock_response = Mock()
+            mock_response.raise_for_status.side_effect = Exception("404 Not Found")
+            mock_get.return_value = mock_response
+            
+            self.cacher.base_url = 'https://example.com'
+            
+            with patch.object(self.cacher.logger, 'error') as mock_error:
+                self.cacher.load_from_url('meta_ip')
+                mock_error.assert_called()
+                
+            # Should not have loaded anything
+            self.assertNotIn('meta_ip', self.cacher.local_cache)
+
+    def test_load_from_url_pickle_error(self):
+        """Test load_from_url handles pickle deserialization errors."""
+        with patch('requests.get') as mock_get:
+            mock_response = Mock()
+            mock_response.content = b'invalid pickle data'
+            mock_response.raise_for_status = Mock()
+            mock_get.return_value = mock_response
+            
+            self.cacher.base_url = 'https://example.com'
+            
+            with patch.object(self.cacher.logger, 'error') as mock_error:
+                self.cacher.load_from_url('meta_ip')
+                mock_error.assert_called()
+                
+            # Should not have loaded anything
+            self.assertNotIn('meta_ip', self.cacher.local_cache)
+
+    def test_load_from_url_network_error(self):
+        """Test load_from_url handles network errors."""
+        with patch('requests.get') as mock_get:
+            mock_get.side_effect = Exception("Connection error")
+            
+            self.cacher.base_url = 'https://example.com'
+            
+            with patch.object(self.cacher.logger, 'error') as mock_error:
+                self.cacher.load_from_url('meta_ip')
+                mock_error.assert_called()
+                
+            # Should not have loaded anything
+            self.assertNotIn('meta_ip', self.cacher.local_cache)
+
+    def test_load_from_file_success(self):
+        """Test load_from_file successfully loads from local file."""
+        test_trie = {'192.168.1.1': {'id': 'ip1', 'ref': 'IP 1'}}
+        
+        # Create pickle file
+        pickle_path = os.path.join(self.temp_dir, 'ip_trie_meta_ip.pickle')
+        with open(pickle_path, 'wb') as f:
+            pickle.dump(test_trie, f)
+        
+        self.cacher.load_from_file('meta_ip')
+        
+        # Should have loaded the trie
+        self.assertIn('meta_ip', self.cacher.local_cache)
+        self.assertEqual(self.cacher.local_cache['meta_ip']['192.168.1.1']['ref'], 'IP 1')
+
+    def test_load_from_file_not_found(self):
+        """Test load_from_file handles missing file."""
+        with patch.object(self.cacher.logger, 'warning') as mock_warning:
+            self.cacher.load_from_file('nonexistent_table')
+            mock_warning.assert_called()
+            
+        # Should not have loaded anything
+        self.assertNotIn('nonexistent_table', self.cacher.local_cache)
+
+    def test_load_from_file_pickle_error(self):
+        """Test load_from_file handles pickle deserialization errors."""
+        # Create a corrupted file
+        pickle_path = os.path.join(self.temp_dir, 'ip_trie_meta_ip.pickle')
+        with open(pickle_path, 'w') as f:
+            f.write('this is not a valid pickle file')
+        
+        with patch.object(self.cacher.logger, 'error') as mock_error:
+            self.cacher.load_from_file('meta_ip')
+            mock_error.assert_called()
+            
+        # Should not have loaded anything for this table
+        self.assertNotIn('meta_ip', self.cacher.local_cache)
+
+    def test_load_from_file_logs_info(self):
+        """Test load_from_file logs info messages."""
+        test_trie = {'key': 'value'}
+        pickle_path = os.path.join(self.temp_dir, 'ip_trie_meta_ip.pickle')
+        with open(pickle_path, 'wb') as f:
+            pickle.dump(test_trie, f)
+        
+        with patch.object(self.cacher.logger, 'info') as mock_info:
+            self.cacher.load_from_file('meta_ip')
+            # Should log at least twice: file found and loaded
+            self.assertGreaterEqual(mock_info.call_count, 2)
 
 
 if __name__ == '__main__':
