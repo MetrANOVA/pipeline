@@ -23,6 +23,7 @@ class IPCacher(BaseCacher):
         if not self.tables:
             self.logger.warning("No tables specified for IP cacher")
         self.local_cache = {}
+        self.cache_lock = threading.RLock()  # Lock to protect cache during updates
         self.start_refresh_thread()
 
     def prime(self):
@@ -40,20 +41,18 @@ class IPCacher(BaseCacher):
         url = f"{self.base_url}/ip_trie_{table}.pickle"
         self.logger.info(f"Loading IP trie for table {table} from URL: {url}")
         try:
-            response = requests.get(url)
-            response.raise_for_status()
-            new_trie = pickle.loads(response.content)
-            
-            # Atomically swap old trie with new one, then cleanup
-            # This ensures lookups never fail during refresh
-            old_trie = self.local_cache.get(table, None)
-            self.local_cache[table] = new_trie
-            
-            # Now cleanup old trie to prevent memory leak
-            if old_trie is not None:
-                self.logger.debug(f"Cleaning up old trie for table {table}")
-                del old_trie
-                gc.collect()
+            # Use lock to prevent lookups during update
+            # Delete old trie before assigning new one to avoid both in memory
+            with self.cache_lock:
+                if table in self.local_cache:
+                    self.logger.debug(f"Deleting old trie for table {table} before loading new one")
+                    old_trie = self.local_cache[table]
+                    del self.local_cache[table]
+                    del old_trie
+                    gc.collect()
+                response = requests.get(url)
+                response.raise_for_status()
+                self.local_cache[table] = pickle.loads(response.content)
             
             self.logger.info(f"Loaded IP trie for table {table} with {len(new_trie)} entries")
         except Exception as e:
@@ -68,24 +67,25 @@ class IPCacher(BaseCacher):
             return
         # Load the trie from the pickle file
         try:
-            with open(filename, 'rb') as f:
-                new_trie = pickle.load(f)
-            
-            # Atomically swap old trie with new one, then cleanup
-            # This ensures lookups never fail during refresh
-            old_trie = self.local_cache.get(table)
-            self.local_cache[table] = new_trie
-            
-            # Now cleanup old trie to prevent memory leak
-            if old_trie is not None:
-                self.logger.debug(f"Cleaning up old trie for table {table}")
-                del old_trie
-                gc.collect()
+            # Use lock to prevent lookups during update
+            # Delete old trie before assigning new one to avoid both in memory
+            with self.cache_lock:
+                if table in self.local_cache:
+                    self.logger.debug(f"Deleting old trie for table {table} before loading new one")
+                    old_trie = self.local_cache[table]
+                    del self.local_cache[table]
+                    del old_trie
+                    gc.collect()
+                with open(filename, 'rb') as f:
+                    self.local_cache[table] = pickle.load(f)
             
             self.logger.info(f"Loaded IP trie for table {table} with {len(new_trie)} entries")
         except Exception as e:
             self.logger.error(f"Error loading IP trie from {filename}: {e}")
 
     def lookup(self, table, key: str) -> Optional[str]:
-        return self.local_cache.get(table, {}).get(key, None) if key and table else None
+        with self.cache_lock:
+            if not key or not table:
+                return None
+            return self.local_cache.get(table, {}).get(key, None)
 
