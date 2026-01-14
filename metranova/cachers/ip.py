@@ -3,6 +3,7 @@ import os
 import pickle
 import threading
 import time
+import requests
 import gc
 from typing import Optional, List
 from metranova.cachers.base import BaseCacher
@@ -39,7 +40,6 @@ class IPCacher(BaseCacher):
         url = f"{self.base_url}/ip_trie_{table}.pickle"
         self.logger.info(f"Loading IP trie for table {table} from URL: {url}")
         try:
-            import requests
             response = requests.get(url)
             response.raise_for_status()
             new_trie = pickle.loads(response.content)
