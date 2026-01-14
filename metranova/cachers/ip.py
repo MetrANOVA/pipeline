@@ -54,7 +54,7 @@ class IPCacher(BaseCacher):
                 response.raise_for_status()
                 self.local_cache[table] = pickle.loads(response.content)
             
-            self.logger.info(f"Loaded IP trie for table {table} with {len(new_trie)} entries")
+            self.logger.info(f"Loaded IP trie for table {table} with {len(self.local_cache.get(table, []))} entries")
         except Exception as e:
             self.logger.error(f"Error loading IP trie from {url}: {e}") 
 
@@ -79,7 +79,7 @@ class IPCacher(BaseCacher):
                 with open(filename, 'rb') as f:
                     self.local_cache[table] = pickle.load(f)
             
-            self.logger.info(f"Loaded IP trie for table {table} with {len(new_trie)} entries")
+            self.logger.info(f"Loaded IP trie for table {table} with {len(self.local_cache.get(table, []))} entries")
         except Exception as e:
             self.logger.error(f"Error loading IP trie from {filename}: {e}")
 
