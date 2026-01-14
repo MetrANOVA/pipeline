@@ -3,6 +3,7 @@ import os
 import pickle
 import threading
 import time
+import gc
 from typing import Optional, List
 from metranova.cachers.base import BaseCacher
 
@@ -41,9 +42,20 @@ class IPCacher(BaseCacher):
             import requests
             response = requests.get(url)
             response.raise_for_status()
-            trie = pickle.loads(response.content)
-            self.local_cache[table] = trie
-            self.logger.info(f"Loaded IP trie for table {table} with {len(trie)} entries")
+            new_trie = pickle.loads(response.content)
+            
+            # Atomically swap old trie with new one, then cleanup
+            # This ensures lookups never fail during refresh
+            old_trie = self.local_cache.get(table, None)
+            self.local_cache[table] = new_trie
+            
+            # Now cleanup old trie to prevent memory leak
+            if old_trie is not None:
+                self.logger.debug(f"Cleaning up old trie for table {table}")
+                del old_trie
+                gc.collect()
+            
+            self.logger.info(f"Loaded IP trie for table {table} with {len(new_trie)} entries")
         except Exception as e:
             self.logger.error(f"Error loading IP trie from {url}: {e}") 
 
@@ -57,9 +69,20 @@ class IPCacher(BaseCacher):
         # Load the trie from the pickle file
         try:
             with open(filename, 'rb') as f:
-                trie = pickle.load(f)
-            self.local_cache[table] = trie
-            self.logger.info(f"Loaded IP trie for table {table} with {len(trie)} entries")
+                new_trie = pickle.load(f)
+            
+            # Atomically swap old trie with new one, then cleanup
+            # This ensures lookups never fail during refresh
+            old_trie = self.local_cache.get(table)
+            self.local_cache[table] = new_trie
+            
+            # Now cleanup old trie to prevent memory leak
+            if old_trie is not None:
+                self.logger.debug(f"Cleaning up old trie for table {table}")
+                del old_trie
+                gc.collect()
+            
+            self.logger.info(f"Loaded IP trie for table {table} with {len(new_trie)} entries")
         except Exception as e:
             self.logger.error(f"Error loading IP trie from {filename}: {e}")
 
