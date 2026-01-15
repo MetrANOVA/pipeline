@@ -160,7 +160,7 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
 
     def test_lookup_ip_as_fields_with_ip_cache_hit(self):
         """Test lookup_ip_as_fields when IP is found in cache."""
-        mock_ip_result = {'ref': 'ip_ref_123', 'as_id': 65001}
+        mock_ip_result = ('ip_ref_123', 65001)
         
         def cacher_side_effect(name):
             if name == "ip":
@@ -619,7 +619,7 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
 
     def test_lookup_ip_as_fields_with_zero_as_id(self):
         """Test lookup_ip_as_fields when AS ID is 0 (should try to get from IP cache)."""
-        mock_ip_result = {'ref': 'ip_ref_123', 'as_id': 65001}
+        mock_ip_result = ('ip_ref_123', 65001)
         
         def cacher_side_effect(name):
             if name == "ip":
@@ -645,7 +645,7 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
 
     def test_lookup_ip_as_fields_with_invalid_as_id(self):
         """Test lookup_ip_as_fields when AS ID can't be converted to int."""
-        mock_ip_result = {'ref': 'ip_ref_123', 'as_id': 65001}
+        mock_ip_result = ('ip_ref_123', 65001)
         
         def cacher_side_effect(name):
             if name == "ip":
