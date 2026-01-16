@@ -42,14 +42,8 @@ class IPTriePickleFileProcessor(BaseFileProcessor):
             if not isinstance(ip_subnet, list):
                 self.logger.warning(f"Expected 'ip_subnet' to be a list, got {type(ip_subnet)}")
                 continue
-            #build trie entry
-            lookup_value = {'ref': ref}
-            #for other fields, get key from value['column_names'] and value from fields (zip joins them into one iterator)
-            for field, col_name in zip(fields, value['column_names'][3:]):
-                #remove latest_ prefix if present since column names come from ClickHouse query
-                if col_name.startswith('latest_'):
-                    col_name = col_name[len('latest_'):]
-                lookup_value[col_name] = field
+            #build trie entry as tuple (ref, *fields)
+            lookup_value = (ref, *fields)
 
             #iterate over list of tuples and assign to trie
             for ip_subnet_tuple in ip_subnet:

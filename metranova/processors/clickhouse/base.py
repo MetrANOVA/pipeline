@@ -157,7 +157,7 @@ class BaseClickHouseProcessor(BaseProcessor):
             table_name = f"meta_ip_{ext}"
             ref = self.pipeline.cacher("ip").lookup(table_name, ip_address)
             if ref:
-                ref_results[f"{direction}_ip_{ext}_ref"] = ref.get("ref", None)
+                ref_results[f"{direction}_ip_{ext}_ref"] = ref[0]
         return ref_results
 
     def column_names(self) -> list:
