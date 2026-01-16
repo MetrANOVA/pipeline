@@ -29,7 +29,7 @@ class BaseFileConsumer(TimedIntervalConsumer):
             self.file_paths = self.parse_file_list(file_str)
             logger.info(f"Found {len(self.file_paths)} file paths: {self.file_paths}")
         else:
-            logger.warning(f"{env_prefix}FILE_CONSUMER_FILE_PATHS environment variable is empty")
+            logger.warning(f"{env_prefix}FILE_CONSUMER_PATHS environment variable is empty")
     
     def parse_file_list(self, file_list_str: str):
         """Parse a comma-separated string of file paths into a list."""

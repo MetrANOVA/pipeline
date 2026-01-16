@@ -138,11 +138,11 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         formatted_record[as_id_field] = value.get(as_field, None)
         ip_cache_result = self.pipeline.cacher("ip").lookup("meta_ip", formatted_record[target_ip_field])
         if ip_cache_result:
-            formatted_record[f"{target_ip_field}_ref"] = ip_cache_result.get("ref", None)
+            formatted_record[f"{target_ip_field}_ref"] = ip_cache_result[0]
             #if no AS provided in value (0 or None), see if we have one in the cached result
             try:
                 if formatted_record[as_id_field] is None or int(formatted_record[as_id_field]) == 0:
-                    formatted_record[as_id_field] = ip_cache_result.get("as_id", None)
+                    formatted_record[as_id_field] = ip_cache_result[1] if len(ip_cache_result) > 1 else None
             except ValueError:
                 pass
         else:

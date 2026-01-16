@@ -590,11 +590,12 @@ class TestBaseClickHouseProcessorAdditional(unittest.TestCase):
         processor = BaseMetadataProcessor(self.mock_pipeline)
         processor.ip_ref_extensions = ['as', 'geo']
         
-        # Mock cacher lookups
+        # Mock cacher lookups - now returns tuples instead of dicts
+        # Tuple format: (ref, *other_fields)
         mock_ip_cacher = Mock()
         mock_ip_cacher.lookup.side_effect = [
-            {'ref': 'AS12345'},  # as lookup
-            {'ref': 'US-CA'}     # geo lookup
+            ('AS12345',),  # as lookup - tuple with ref at index 0
+            ('US-CA',)     # geo lookup - tuple with ref at index 0
         ]
         self.mock_pipeline.cacher.return_value = mock_ip_cacher
         
@@ -625,12 +626,13 @@ class TestBaseClickHouseProcessorAdditional(unittest.TestCase):
         processor.ip_ref_extensions = ['as']
         
         mock_ip_cacher = Mock()
-        mock_ip_cacher.lookup.return_value = {'other_field': 'value'}
+        # Return empty tuple or tuple without enough elements
+        mock_ip_cacher.lookup.return_value = ()
         self.mock_pipeline.cacher.return_value = mock_ip_cacher
         
         result = processor.lookup_ip_ref_extensions('192.168.1.1', 'dst')
         
-        self.assertEqual(result, {'dst_ip_as_ref': None})
+        self.assertEqual(result, {})
     
     def test_column_names_with_duplicates(self):
         """Test column_names handles duplicate column definitions."""
