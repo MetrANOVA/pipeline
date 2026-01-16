@@ -200,7 +200,7 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
                             "bgpNeighbors": [
                                 {
                                     "id": "2",
-                                    "remoteIp": "192.168.1.0",
+                                    "remoteIp": "192.0.2.1",
                                     "peerDetail": {
                                         "id": "4",
                                         "asn": 123
@@ -369,6 +369,9 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
                         pass
                     else:
                         peer_info = None
+                else:
+                    # Exchange point or no BGP neighbors - don't extract peer info
+                    peer_info = None
                 
                 # Build the record
                 record = self._build_service_edge_record(
