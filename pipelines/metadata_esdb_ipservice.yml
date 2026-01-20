@@ -8,4 +8,4 @@ cachers:
 writers:
   - type: metranova.writers.clickhouse.ClickHouseWriter
     processors:
-      - metranova.processors.clickhouse.ipservice.MetaIPServiceProcessor
+      - metranova.processors.clickhouse.esdb.MetaIPServiceProcessor

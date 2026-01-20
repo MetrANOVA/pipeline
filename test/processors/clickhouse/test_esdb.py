@@ -8,7 +8,7 @@ import sys
 # Add the project root to Python path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
-from metranova.processors.clickhouse.ipservice import MetaIPServiceProcessor
+from metranova.processors.clickhouse.esdb import MetaIPServiceProcessor
 
 
 class TestMetaIPServiceProcessor(unittest.TestCase):
