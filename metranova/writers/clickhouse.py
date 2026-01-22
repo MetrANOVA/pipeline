@@ -1,19 +1,18 @@
 from collections import defaultdict
 import logging
 import os
-from platform import processor
 import threading
 import time
 from typing import List, Dict, Any, Optional
 
 from metranova.connectors.clickhouse import ClickHouseConnector
-from metranova.processors.base import BaseProcessor
+from metranova.processors.clickhouse.base import BaseClickHouseProcessor
 from metranova.writers.base import BaseWriter
 
 logger = logging.getLogger(__name__)
 
 class ClickHouseWriter(BaseWriter):
-    def __init__(self, processors: List[BaseProcessor]):
+    def __init__(self, processors: List[BaseClickHouseProcessor]):
         super().__init__(processors)
         # setup logger
         self.logger = logger
@@ -43,7 +42,7 @@ class ClickHouseWriter(BaseWriter):
         logger.info("Datastore connection closed")
 
 class ClickHouseBatcher:
-    def __init__(self, processor):
+    def __init__(self, processor: BaseClickHouseProcessor):
         # Logger
         self.logger = logger
 
@@ -68,6 +67,10 @@ class ClickHouseBatcher:
             self.batch[table_name] = []
             self.create_table(table_name)
 
+        #create supporting dictionaries
+        for ch_dictionary in self.processor.get_ch_dictionaries():
+            self.create_dictionary(ch_dictionary)
+
     def create_table(self, table_name):
         """Create the target table if it doesn't exist"""
         create_table_cmd = self.processor.create_table_command(table_name=table_name) # store for reference
@@ -76,9 +79,22 @@ class ClickHouseBatcher:
             return
         try:
             self.client.command(create_table_cmd)
-            logger.info(f"Table {self.processor.table} is ready")
+            logger.info(f"Table {table_name} is ready")
         except Exception as e:
-            logger.error(f"Failed to create table {self.processor.table}: {e}")
+            logger.error(f"Failed to create table {table_name}: {e}")
+            raise
+
+    def create_dictionary(self, ch_dictionary):
+        """Create the target dictionary if it doesn't exist"""
+        create_dict_cmd = ch_dictionary.create_dictionary_command()
+        if create_dict_cmd is None:
+            logger.info("No create_dictionary_cmd defined, skipping dictionary creation")
+            return
+        try:
+            self.client.command(create_dict_cmd)
+            logger.info(f"Dictionary {ch_dictionary.dictionary_name} is ready")
+        except Exception as e:
+            logger.error(f"Failed to create dictionary {ch_dictionary.dictionary_name}: {e}")
             raise
 
     def start_flush_timer(self):

@@ -93,6 +93,7 @@ class TestClickHouseBatcher(unittest.TestCase):
         self.mock_processor = Mock()
         self.mock_processor.table = 'test_table'
         self.mock_processor.get_table_names.return_value = ['test_table']
+        self.mock_processor.get_ch_dictionaries.return_value = []
         self.mock_processor.create_table_command.return_value = 'CREATE TABLE test_table'
         self.mock_processor.column_names.return_value = ['col1', 'col2']
         
