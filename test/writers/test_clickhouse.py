@@ -344,6 +344,106 @@ class TestClickHouseBatcher(unittest.TestCase):
         self.assertEqual(self.mock_processor.create_table_command.call_count, 2)
     
     @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_create_dictionary(self, mock_connector):
+        """Test create_dictionary method."""
+        mock_connector.return_value.client = self.mock_client
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Create mock dictionary
+        mock_dictionary = Mock()
+        mock_dictionary.dictionary_name = 'test_dict'
+        mock_dictionary.create_dictionary_command.return_value = 'CREATE DICTIONARY test_dict'
+        
+        batcher.create_dictionary(mock_dictionary)
+        
+        self.mock_client.command.assert_called_with('CREATE DICTIONARY test_dict')
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_create_dictionary_none_command(self, mock_connector):
+        """Test create_dictionary when create_dictionary_command returns None."""
+        mock_connector.return_value.client = self.mock_client
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Reset call count from initialization
+        self.mock_client.command.reset_mock()
+        
+        # Create mock dictionary that returns None
+        mock_dictionary = Mock()
+        mock_dictionary.create_dictionary_command.return_value = None
+        
+        batcher.create_dictionary(mock_dictionary)
+        
+        # Should not call client.command
+        self.mock_client.command.assert_not_called()
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    @patch('metranova.writers.clickhouse.logger')
+    def test_create_dictionary_exception(self, mock_logger, mock_connector):
+        """Test create_dictionary handles exceptions."""
+        mock_connector.return_value.client = self.mock_client
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Create mock dictionary
+        mock_dictionary = Mock()
+        mock_dictionary.dictionary_name = 'test_dict'
+        mock_dictionary.create_dictionary_command.return_value = 'CREATE DICTIONARY test_dict'
+        
+        # Make client.command raise an exception on next call
+        self.mock_client.command.side_effect = Exception("Dictionary creation failed")
+        
+        with self.assertRaises(Exception):
+            batcher.create_dictionary(mock_dictionary)
+        
+        # Should log error
+        mock_logger.error.assert_called()
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_initialization_with_dictionaries(self, mock_connector):
+        """Test ClickHouseBatcher initialization creates dictionaries."""
+        mock_connector.return_value.client = self.mock_client
+        
+        # Create mock dictionaries
+        mock_dict1 = Mock()
+        mock_dict1.dictionary_name = 'dict1'
+        mock_dict1.create_dictionary_command.return_value = 'CREATE DICTIONARY dict1'
+        
+        mock_dict2 = Mock()
+        mock_dict2.dictionary_name = 'dict2'
+        mock_dict2.create_dictionary_command.return_value = 'CREATE DICTIONARY dict2'
+        
+        self.mock_processor.get_ch_dictionaries.return_value = [mock_dict1, mock_dict2]
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Verify get_ch_dictionaries was called
+        self.mock_processor.get_ch_dictionaries.assert_called_once()
+        
+        # Verify both dictionaries were created
+        calls = self.mock_client.command.call_args_list
+        # First call is for table creation, next two are for dictionaries
+        self.assertGreaterEqual(len(calls), 2)
+        
+        # Check that dictionary commands were executed
+        dict_commands = [call[0][0] for call in calls if 'DICTIONARY' in call[0][0]]
+        self.assertIn('CREATE DICTIONARY dict1', dict_commands)
+        self.assertIn('CREATE DICTIONARY dict2', dict_commands)
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_initialization_no_dictionaries(self, mock_connector):
+        """Test ClickHouseBatcher initialization with no dictionaries."""
+        mock_connector.return_value.client = self.mock_client
+        self.mock_processor.get_ch_dictionaries.return_value = []
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Should still initialize successfully
+        self.assertIsNotNone(batcher)
+        self.mock_processor.get_ch_dictionaries.assert_called_once()
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
     def test_process_message_with_consumer_metadata(self, mock_connector):
         """Test process_message with consumer metadata."""
         mock_connector.return_value.client = self.mock_client
