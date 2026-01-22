@@ -127,6 +127,115 @@ class TestBaseClickHouseTableMixin(unittest.TestCase):
         self.mixin.extension_enabled['custom']['another_ext'] = True
         self.assertTrue(self.mixin.extension_is_enabled('another_ext', 'custom'))
         self.assertFalse(self.mixin.extension_is_enabled('another_ext', 'ext'))
+    
+    def test_create_table_command_non_replicated_no_options(self):
+        """Test table creation with non-replicated MergeTree engine without options."""
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True], ['value', 'Int32', True]]
+        self.mixin.table_engine = "MergeTree"
+        self.mixin.table_engine_opts = ""
+        self.mixin.order_by = ['id']
+        self.mixin.replication = False
+        
+        result = self.mixin.create_table_command()
+        
+        self.assertIn("ENGINE = MergeTree()", result)
+        self.assertNotIn("Replicated", result)
+        self.assertNotIn("replica_path", result)
+    
+    def test_create_table_command_non_replicated_with_options(self):
+        """Test table creation with non-replicated MergeTree engine with options."""
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True], ['value', 'Int32', True]]
+        self.mixin.table_engine = "ReplacingMergeTree"
+        self.mixin.table_engine_opts = "ver"
+        self.mixin.order_by = ['id']
+        self.mixin.replication = False
+        
+        result = self.mixin.create_table_command()
+        
+        self.assertIn("ENGINE = ReplacingMergeTree(ver)", result)
+        self.assertNotIn("Replicated", result)
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_REPLICATION': 'true'})
+    def test_create_table_command_replicated_no_options(self):
+        """Test table creation with replicated MergeTree engine without options."""
+        self.mixin = BaseClickHouseTableMixin()  # Reinitialize with env var
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True], ['value', 'Int32', True]]
+        self.mixin.table_engine = "MergeTree"
+        self.mixin.table_engine_opts = ""
+        self.mixin.order_by = ['id']
+        
+        result = self.mixin.create_table_command()
+        
+        self.assertIn("ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}')", result)
+        self.assertIn("ReplicatedMergeTree", result)
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_REPLICATION': 'true'})
+    def test_create_table_command_replicated_with_options(self):
+        """Test table creation with replicated ReplacingMergeTree engine with options."""
+        self.mixin = BaseClickHouseTableMixin()  # Reinitialize with env var
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True], ['value', 'Int32', True]]
+        self.mixin.table_engine = "ReplacingMergeTree"
+        self.mixin.table_engine_opts = "ver"
+        self.mixin.order_by = ['id']
+        
+        result = self.mixin.create_table_command()
+        
+        self.assertIn("ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}', ver)", result)
+        self.assertIn("ReplicatedReplacingMergeTree", result)
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_REPLICATION': 'true'})
+    def test_create_table_command_already_replicated_engine(self):
+        """Test that already replicated engine names don't get double prefixed."""
+        self.mixin = BaseClickHouseTableMixin()  # Reinitialize with env var
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True]]
+        self.mixin.table_engine = "ReplicatedMergeTree"  # Already has Replicated prefix
+        self.mixin.table_engine_opts = ""
+        self.mixin.order_by = ['id']
+        
+        result = self.mixin.create_table_command()
+        
+        # Should not become ReplicatedReplicatedMergeTree
+        self.assertIn("ENGINE = ReplicatedMergeTree", result)
+        self.assertNotIn("ReplicatedReplicatedMergeTree", result)
+    
+    def test_create_table_command_non_mergetree_engine(self):
+        """Test that non-MergeTree engines don't get Replicated prefix but still get replica paths."""
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True]]
+        self.mixin.table_engine = "Log"
+        self.mixin.table_engine_opts = ""
+        self.mixin.order_by = ['id']
+        self.mixin.replication = True  # Even with replication enabled
+        
+        result = self.mixin.create_table_command()
+        
+        # Log engine doesn't become ReplicatedLog
+        self.assertNotIn("ReplicatedLog", result)
+        # But when replication is enabled, replica paths are still added
+        self.assertIn("ENGINE = Log('/clickhouse/tables/{shard}/{database}/{table}', '{replica}')", result)
+    
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_REPLICATION': 'true',
+        'CLICKHOUSE_REPLICA_PATH': '/custom/replica/path',
+        'CLICKHOUSE_REPLICA_NAME': '{custom_replica}'
+    })
+    def test_create_table_command_custom_replica_paths(self):
+        """Test table creation with custom replica path and name."""
+        self.mixin = BaseClickHouseTableMixin()  # Reinitialize with env vars
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True]]
+        self.mixin.table_engine = "MergeTree"
+        self.mixin.table_engine_opts = ""
+        self.mixin.order_by = ['id']
+        
+        result = self.mixin.create_table_command()
+        
+        self.assertIn("ENGINE = ReplicatedMergeTree('/custom/replica/path', '{custom_replica}')", result)
 
 
 class TestBaseClickHouseMaterializedViewMixin(unittest.TestCase):
@@ -186,6 +295,67 @@ class TestBaseClickHouseMaterializedViewMixin(unittest.TestCase):
         self.assertIn("CREATE MATERIALIZED VIEW IF NOT EXISTS aggregated_mv", result)
         self.assertIn("sum(value)", result)
         self.assertIn("GROUP BY hour, resource_id", result)
+    
+    def test_build_extension_select_term_with_fields(self):
+        """Test build_extension_select_term with extension field definitions."""
+        self.mixin.extension_defs = {
+            "ext": [
+                ["bgp_as_path_id", "UInt32"],
+                ["device_type", "String"],
+                ["location_id", "UInt64"]
+            ]
+        }
+        
+        result = self.mixin.build_extension_select_term("ext")
+        
+        self.assertIn("toJSONString(", result)
+        self.assertIn("map(", result)
+        self.assertIn("'bgp_as_path_id', ext.bgp_as_path_id", result)
+        self.assertIn("'device_type', ext.device_type", result)
+        self.assertIn("'location_id', ext.location_id", result)
+        self.assertIn(") as ext,", result)
+    
+    def test_build_extension_select_term_no_fields(self):
+        """Test build_extension_select_term with no extension fields returns empty string."""
+        self.mixin.extension_defs = {"ext": []}
+        
+        result = self.mixin.build_extension_select_term("ext")
+        
+        self.assertEqual(result, "")
+    
+    def test_build_extension_select_term_custom_json_column(self):
+        """Test build_extension_select_term with custom JSON column name."""
+        self.mixin.extension_defs = {
+            "custom_ext": [
+                ["field1", "String"],
+                ["field2", "Int32"]
+            ]
+        }
+        
+        result = self.mixin.build_extension_select_term("custom_ext")
+        
+        self.assertIn("'field1', custom_ext.field1", result)
+        self.assertIn("'field2', custom_ext.field2", result)
+        self.assertIn(") as custom_ext,", result)
+    
+    def test_build_extension_select_term_single_field(self):
+        """Test build_extension_select_term with single extension field."""
+        self.mixin.extension_defs = {
+            "ext": [["single_field", "String"]]
+        }
+        
+        result = self.mixin.build_extension_select_term("ext")
+        
+        self.assertIn("'single_field', ext.single_field", result)
+        self.assertNotIn(",\n        '", result)  # Should not have comma before closing
+    
+    def test_build_extension_select_term_nonexistent_column(self):
+        """Test build_extension_select_term with nonexistent JSON column name."""
+        self.mixin.extension_defs = {"ext": [["field1", "String"]]}
+        
+        result = self.mixin.build_extension_select_term("nonexistent")
+        
+        self.assertEqual(result, "")
 
 
 class TestBaseClickHouseDictionaryMixin(unittest.TestCase):
@@ -852,6 +1022,80 @@ class TestBaseClickHouseProcessorAdditional(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.mock_pipeline = Mock()
+        
+    def test_get_materialized_views_default(self):
+        """Test get_materialized_views returns empty list by default."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        
+        result = processor.get_materialized_views()
+        
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 0)
+    
+    def test_get_materialized_views_with_views(self):
+        """Test get_materialized_views returns list of materialized views."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        
+        # Add mock materialized views
+        mock_mv1 = Mock()
+        mock_mv2 = Mock()
+        processor.materialized_views = [mock_mv1, mock_mv2]
+        
+        result = processor.get_materialized_views()
+        
+        self.assertEqual(len(result), 2)
+        self.assertIn(mock_mv1, result)
+        self.assertIn(mock_mv2, result)
+    
+    def test_materialized_views_initialization(self):
+        """Test that materialized_views list is initialized on processor creation."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        
+        self.assertIsInstance(processor.materialized_views, list)
+        self.assertEqual(processor.materialized_views, [])
+    
+    def test_get_ch_dictionaries_default(self):
+        """Test get_ch_dictionaries returns empty list by default."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        
+        result = processor.get_ch_dictionaries()
+        
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 0)
+    
+    def test_get_ch_dictionaries_with_dictionaries(self):
+        """Test get_ch_dictionaries returns list of dictionaries."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        
+        # Add mock dictionaries
+        mock_dict1 = Mock()
+        mock_dict2 = Mock()
+        processor.ch_dictionaries = [mock_dict1, mock_dict2]
+        
+        result = processor.get_ch_dictionaries()
+        
+        self.assertEqual(len(result), 2)
+        self.assertIn(mock_dict1, result)
+        self.assertIn(mock_dict2, result)
+    
+    def test_ch_dictionaries_initialization(self):
+        """Test that ch_dictionaries list is initialized on processor creation."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        
+        self.assertIsInstance(processor.ch_dictionaries, list)
+        self.assertEqual(processor.ch_dictionaries, [])
         
     def test_get_table_names_default(self):
         """Test get_table_names returns single table name."""

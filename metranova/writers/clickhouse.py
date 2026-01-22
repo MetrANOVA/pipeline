@@ -71,6 +71,10 @@ class ClickHouseBatcher:
         for ch_dictionary in self.processor.get_ch_dictionaries():
             self.create_dictionary(ch_dictionary)
 
+        #create materialized views
+        for materialized_view in self.processor.get_materialized_views():
+            self.create_materialized_view(materialized_view)
+
     def create_table(self, table_name):
         """Create the target table if it doesn't exist"""
         create_table_cmd = self.processor.create_table_command(table_name=table_name) # store for reference
@@ -95,6 +99,34 @@ class ClickHouseBatcher:
             logger.info(f"Dictionary {ch_dictionary.dictionary_name} is ready")
         except Exception as e:
             logger.error(f"Failed to create dictionary {ch_dictionary.dictionary_name}: {e}")
+            raise
+
+    def create_materialized_view(self, materialized_view):
+        """Create the target table and materialized view if it doesn't exist"""
+        # Make sure we can create commands
+        create_table_cmd = materialized_view.create_table_command()
+        if create_table_cmd is None:
+            logger.info("No create_table_cmd defined, skipping table creation")
+            return
+        create_mv_cmd = materialized_view.create_mv_command()
+        if create_mv_cmd is None:
+            logger.info("No create_materialized_view_cmd defined, skipping materialized view creation")
+            return
+        # Create the target table
+        try:
+            self.logger.debug(f"Creating materialized view target table with command: {create_table_cmd}")
+            self.client.command(create_table_cmd)
+            logger.info(f"Materialized View Table {materialized_view.table} is ready")
+        except Exception as e:
+            logger.error(f"Failed to create materialized view target table {materialized_view.table}: {e}")
+            raise
+        # Create materialized view
+        try:
+            self.logger.debug(f"Creating materialized view with command: {create_mv_cmd}")
+            self.client.command(create_mv_cmd)
+            logger.info(f"Materialized View {materialized_view.mv_name} is ready")
+        except Exception as e:
+            logger.error(f"Failed to create materialized view {materialized_view.mv_name}: {e}")
             raise
 
     def start_flush_timer(self):

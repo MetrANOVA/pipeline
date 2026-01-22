@@ -20,6 +20,7 @@ class BaseClickHouseTableMixin:
         self.replica_path = os.getenv('CLICKHOUSE_REPLICA_PATH', '/clickhouse/tables/{shard}/{database}/{table}')
         self.replica_name = os.getenv('CLICKHOUSE_REPLICA_NAME', '{replica}')
         self.table_engine = "MergeTree"
+        self.table_engine_opts = ""
         self.table_granularity = 8192  # default ClickHouse index granularity
         self.extension_columns = {"ext": True}  # default extension column"}
         self.table_ttl_column = "insert_time"
@@ -40,6 +41,7 @@ class BaseClickHouseTableMixin:
         self.partition_by = ""
         self.primary_keys = []
         self.order_by = []
+        self.allow_nullable_key = False
 
     def get_table_names(self) -> list:
         """Return list of table names used by this processor. Override in child classes if multiple tables are used."""
@@ -62,6 +64,8 @@ class BaseClickHouseTableMixin:
             table_engine = f"Replicated{table_engine}"
 
         table_settings = { "index_granularity": self.table_granularity }
+        if self.allow_nullable_key:
+            table_settings["allow_nullable_key"] = 1
         create_table_cmd =  "CREATE TABLE IF NOT EXISTS {} ".format(table_name)
         if self.cluster_name:
             create_table_cmd += f"ON CLUSTER '{self.cluster_name}' "
@@ -92,10 +96,12 @@ class BaseClickHouseTableMixin:
                 create_table_cmd += "\n    `{}` {}".format(col_def[0], col_def[1])
             has_columns = True
         create_table_cmd += "\n) \n"
-        if self.replication:
-            create_table_cmd += "ENGINE = {}('{}', '{}')".format(table_engine, self.replica_path, self.replica_name)
+        if self.replication and self.table_engine_opts:
+            create_table_cmd += "ENGINE = {}('{}', '{}', {})".format(table_engine, self.replica_path, self.replica_name, self.table_engine_opts)
+        elif self.replication:
+            create_table_cmd += "ENGINE = {}('{}', '{}') \n".format(table_engine, self.replica_path, self.replica_name)
         else:
-            create_table_cmd += "ENGINE = {}() \n".format(table_engine)
+            create_table_cmd += "ENGINE = {}({}) \n".format(table_engine, self.table_engine_opts)
         if self.partition_by:
             create_table_cmd += "PARTITION BY {} \n".format(self.partition_by)
         if self.primary_keys:
@@ -133,8 +139,9 @@ class BaseClickHouseTableMixin:
 
 class BaseClickHouseMaterializedViewMixin(BaseClickHouseTableMixin):
     """Mixin class for ClickHouse materialized view related functionality"""
-    def __init__(self):
+    def __init__(self,source_table_name: str = ""):
         super().__init__()
+        self.source_table_name = source_table_name
         self.mv_name = ""
         self.mv_select_query = ""
 
@@ -147,6 +154,28 @@ class BaseClickHouseMaterializedViewMixin(BaseClickHouseTableMixin):
         create_mv_cmd += f"TO {self.table} AS {self.mv_select_query}"
         
         return create_mv_cmd
+    
+    def build_extension_select_term(self, json_column_name: str = "ext") -> str:
+        """
+        EXAMPLE:
+        toJSONString(
+                    map(
+                        'bgp_as_path_id', ext.bgp_as_path_id
+                    )
+                ) as ext,
+        """
+        select_term = "toJSONString(\n    map(\n"
+        has_columns = False
+        for ext_col_def in self.extension_defs.get(json_column_name, []):
+            if has_columns:
+                select_term += ",\n"
+            select_term += f"        '{ext_col_def[0]}', {json_column_name}.{ext_col_def[0]}"
+            has_columns = True
+        #return empty string if no columns enabled
+        if not has_columns:
+            return ""
+        select_term += "\n    )\n) as {},\n        ".format(json_column_name)
+        return select_term
 
 class BaseClickHouseDictionaryMixin:
     """Mixin class for ClickHouse dictionary related functionality"""
@@ -217,10 +246,16 @@ class BaseClickHouseProcessor(BaseProcessor, BaseClickHouseTableMixin):
         self.ip_ref_extensions = []
         # List of clickhouse dictionaries (as BaseClickHouseDictionaryMixin objects) to build
         self.ch_dictionaries = []
+        # List of materailized views to build (as BaseClickHouseMaterializedViewMixin objects)
+        self.materialized_views = []
     
     def get_ch_dictionaries(self) -> list:
         """Return list of ClickHouse dictionaries used by this processor. Override in child classes if multiple dictionaries are used."""
         return self.ch_dictionaries
+
+    def get_materialized_views(self) -> list:
+        """Return list of ClickHouse materialized views used by this processor. Override in child classes if multiple views are used."""
+        return self.materialized_views
 
     def get_ip_ref_extensions(self, env_var_name: str) -> list:
         """Get list of extension names that should have IP reference fields from environment variable"""
