@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 # Import using importlib to handle 'as' reserved keyword
 as_module = importlib.import_module('metranova.processors.clickhouse.as')
 ASMetadataProcessor = as_module.ASMetadataProcessor
+ASDictionary = as_module.ASDictionary
 
 
 class TestASMetadataProcessor(unittest.TestCase):
@@ -354,6 +355,180 @@ class TestASMetadataProcessor(unittest.TestCase):
         
         # Verify ClickHouse lookup for organization reference was among the calls
         self.mock_clickhouse_cacher.lookup.assert_any_call('meta_organization', 'ucla')
+
+    def test_dictionary_enabled_by_default(self):
+        """Test that dictionary is enabled by default."""
+        processor = ASMetadataProcessor(self.mock_pipeline)
+        
+        self.assertTrue(processor.dictionary_enabled)
+        self.assertEqual(len(processor.ch_dictionaries), 1)
+        self.assertIsInstance(processor.ch_dictionaries[0], ASDictionary)
+
+    @patch.dict(os.environ, {'CLICKHOUSE_AS_DICTIONARY_ENABLED': 'false'})
+    def test_dictionary_disabled_by_env(self):
+        """Test that dictionary can be disabled via environment variable."""
+        processor = ASMetadataProcessor(self.mock_pipeline)
+        
+        self.assertFalse(processor.dictionary_enabled)
+        self.assertEqual(len(processor.ch_dictionaries), 0)
+
+    @patch.dict(os.environ, {'CLICKHOUSE_AS_DICTIONARY_ENABLED': '0'})
+    def test_dictionary_disabled_by_env_zero(self):
+        """Test that dictionary can be disabled with '0'."""
+        processor = ASMetadataProcessor(self.mock_pipeline)
+        
+        self.assertFalse(processor.dictionary_enabled)
+        self.assertEqual(len(processor.ch_dictionaries), 0)
+
+    @patch.dict(os.environ, {'CLICKHOUSE_AS_DICTIONARY_ENABLED': 'true'})
+    def test_dictionary_enabled_explicitly(self):
+        """Test that dictionary can be explicitly enabled."""
+        processor = ASMetadataProcessor(self.mock_pipeline)
+        
+        self.assertTrue(processor.dictionary_enabled)
+        self.assertEqual(len(processor.ch_dictionaries), 1)
+
+    def test_dictionary_receives_table_name(self):
+        """Test that ASDictionary receives the correct table name."""
+        processor = ASMetadataProcessor(self.mock_pipeline)
+        
+        dictionary = processor.ch_dictionaries[0]
+        self.assertEqual(dictionary.source_table_name, 'meta_as')
+
+    @patch.dict(os.environ, {'CLICKHOUSE_AS_METADATA_TABLE': 'custom_as_table'})
+    def test_dictionary_receives_custom_table_name(self):
+        """Test that ASDictionary receives custom table name."""
+        processor = ASMetadataProcessor(self.mock_pipeline)
+        
+        dictionary = processor.ch_dictionaries[0]
+        self.assertEqual(dictionary.source_table_name, 'custom_as_table')
+
+    def test_get_ch_dictionaries(self):
+        """Test that get_ch_dictionaries returns the dictionary list."""
+        processor = ASMetadataProcessor(self.mock_pipeline)
+        
+        dictionaries = processor.get_ch_dictionaries()
+        self.assertEqual(len(dictionaries), 1)
+        self.assertIsInstance(dictionaries[0], ASDictionary)
+
+
+class TestASDictionary(unittest.TestCase):
+    """Unit tests for ASDictionary class."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.source_table = 'meta_as'
+
+    def test_init_default_values(self):
+        """Test that ASDictionary initializes with correct default values."""
+        dictionary = ASDictionary(self.source_table)
+        
+        # Test source table
+        self.assertEqual(dictionary.source_table_name, self.source_table)
+        
+        # Test dictionary name
+        self.assertEqual(dictionary.dictionary_name, 'meta_as_dict')
+        
+        # Test column definitions
+        expected_columns = [
+            ['id', 'UInt32'],
+            ['name', 'String']
+        ]
+        self.assertEqual(dictionary.column_defs, expected_columns)
+        
+        # Test primary keys
+        self.assertEqual(dictionary.primary_keys, ['id'])
+        
+        # Test lifetime
+        self.assertEqual(dictionary.lifetime_min, '600')
+        self.assertEqual(dictionary.lifetime_max, '3600')
+        
+        # Test layout
+        self.assertEqual(dictionary.layout, "HASHED()")
+
+    @patch.dict(os.environ, {'CLICKHOUSE_AS_DICTIONARY_NAME': 'custom_as_dict'})
+    def test_init_with_custom_dictionary_name(self):
+        """Test initialization with custom dictionary name."""
+        dictionary = ASDictionary(self.source_table)
+        self.assertEqual(dictionary.dictionary_name, 'custom_as_dict')
+
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_AS_DICTIONARY_LIFETIME_MIN': '300',
+        'CLICKHOUSE_AS_DICTIONARY_LIFETIME_MAX': '1800'
+    })
+    def test_init_with_custom_lifetime(self):
+        """Test initialization with custom lifetime values."""
+        dictionary = ASDictionary(self.source_table)
+        self.assertEqual(dictionary.lifetime_min, '300')
+        self.assertEqual(dictionary.lifetime_max, '1800')
+
+    def test_inheritance_from_base_dictionary_mixin(self):
+        """Test that ASDictionary inherits from BaseClickHouseDictionaryMixin."""
+        from metranova.processors.clickhouse.base import BaseClickHouseDictionaryMixin
+        dictionary = ASDictionary(self.source_table)
+        self.assertIsInstance(dictionary, BaseClickHouseDictionaryMixin)
+
+    def test_create_dictionary_command(self):
+        """Test that ASDictionary can create a valid dictionary command."""
+        dictionary = ASDictionary(self.source_table)
+        
+        command = dictionary.create_dictionary_command()
+        
+        # Verify command structure
+        self.assertIn("CREATE DICTIONARY IF NOT EXISTS meta_as_dict", command)
+        self.assertIn("`id` UInt32", command)
+        self.assertIn("`name` String", command)
+        self.assertIn("PRIMARY KEY (`id`)", command)
+        self.assertIn("SOURCE(CLICKHOUSE(TABLE 'meta_as'", command)
+        self.assertIn("LIFETIME(MIN 600 MAX 3600)", command)
+        self.assertIn("LAYOUT(HASHED())", command)
+
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_CLUSTER_NAME': 'test_cluster',
+        'CLICKHOUSE_DATABASE': 'test_db',
+        'CLICKHOUSE_USERNAME': 'test_user',
+        'CLICKHOUSE_PASSWORD': 'test_pass'
+    })
+    def test_create_dictionary_command_with_cluster_and_credentials(self):
+        """Test dictionary creation with cluster and custom credentials."""
+        dictionary = ASDictionary(self.source_table)
+        
+        command = dictionary.create_dictionary_command()
+        
+        self.assertIn("ON CLUSTER 'test_cluster'", command)
+        self.assertIn("USER 'test_user'", command)
+        self.assertIn("PASSWORD 'test_pass'", command)
+        self.assertIn("DB 'test_db'", command)
+
+    def test_hashed_layout_for_as_lookups(self):
+        """Test that HASHED layout is properly configured for AS ID lookups."""
+        dictionary = ASDictionary(self.source_table)
+        
+        # Verify layout type for direct key lookups
+        self.assertEqual(dictionary.layout, "HASHED()")
+        
+        # Verify primary key is AS ID
+        self.assertEqual(dictionary.primary_keys, ['id'])
+
+    def test_uint32_id_column_type(self):
+        """Test that AS ID column is UInt32."""
+        dictionary = ASDictionary(self.source_table)
+        
+        # Find the id column definition
+        id_col = next((col for col in dictionary.column_defs if col[0] == 'id'), None)
+        
+        self.assertIsNotNone(id_col)
+        self.assertEqual(id_col[1], 'UInt32')
+
+    def test_includes_name_field(self):
+        """Test that dictionary includes name field for lookups."""
+        dictionary = ASDictionary(self.source_table)
+        
+        # Find the name column definition
+        name_col = next((col for col in dictionary.column_defs if col[0] == 'name'), None)
+        
+        self.assertIsNotNone(name_col)
+        self.assertEqual(name_col[1], 'String')
 
 
 if __name__ == '__main__':

@@ -93,6 +93,8 @@ class TestClickHouseBatcher(unittest.TestCase):
         self.mock_processor = Mock()
         self.mock_processor.table = 'test_table'
         self.mock_processor.get_table_names.return_value = ['test_table']
+        self.mock_processor.get_ch_dictionaries.return_value = []
+        self.mock_processor.get_materialized_views.return_value = []
         self.mock_processor.create_table_command.return_value = 'CREATE TABLE test_table'
         self.mock_processor.column_names.return_value = ['col1', 'col2']
         
@@ -341,6 +343,270 @@ class TestClickHouseBatcher(unittest.TestCase):
         self.assertIn('table2', batcher.batch)
         # create_table_command should be called for each table
         self.assertEqual(self.mock_processor.create_table_command.call_count, 2)
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_create_dictionary(self, mock_connector):
+        """Test create_dictionary method."""
+        mock_connector.return_value.client = self.mock_client
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Create mock dictionary
+        mock_dictionary = Mock()
+        mock_dictionary.dictionary_name = 'test_dict'
+        mock_dictionary.create_dictionary_command.return_value = 'CREATE DICTIONARY test_dict'
+        
+        batcher.create_dictionary(mock_dictionary)
+        
+        self.mock_client.command.assert_called_with('CREATE DICTIONARY test_dict')
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_create_dictionary_none_command(self, mock_connector):
+        """Test create_dictionary when create_dictionary_command returns None."""
+        mock_connector.return_value.client = self.mock_client
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Reset call count from initialization
+        self.mock_client.command.reset_mock()
+        
+        # Create mock dictionary that returns None
+        mock_dictionary = Mock()
+        mock_dictionary.create_dictionary_command.return_value = None
+        
+        batcher.create_dictionary(mock_dictionary)
+        
+        # Should not call client.command
+        self.mock_client.command.assert_not_called()
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    @patch('metranova.writers.clickhouse.logger')
+    def test_create_dictionary_exception(self, mock_logger, mock_connector):
+        """Test create_dictionary handles exceptions."""
+        mock_connector.return_value.client = self.mock_client
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Create mock dictionary
+        mock_dictionary = Mock()
+        mock_dictionary.dictionary_name = 'test_dict'
+        mock_dictionary.create_dictionary_command.return_value = 'CREATE DICTIONARY test_dict'
+        
+        # Make client.command raise an exception on next call
+        self.mock_client.command.side_effect = Exception("Dictionary creation failed")
+        
+        with self.assertRaises(Exception):
+            batcher.create_dictionary(mock_dictionary)
+        
+        # Should log error
+        mock_logger.error.assert_called()
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_initialization_with_dictionaries(self, mock_connector):
+        """Test ClickHouseBatcher initialization creates dictionaries."""
+        mock_connector.return_value.client = self.mock_client
+        
+        # Create mock dictionaries
+        mock_dict1 = Mock()
+        mock_dict1.dictionary_name = 'dict1'
+        mock_dict1.create_dictionary_command.return_value = 'CREATE DICTIONARY dict1'
+        
+        mock_dict2 = Mock()
+        mock_dict2.dictionary_name = 'dict2'
+        mock_dict2.create_dictionary_command.return_value = 'CREATE DICTIONARY dict2'
+        
+        self.mock_processor.get_ch_dictionaries.return_value = [mock_dict1, mock_dict2]
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Verify get_ch_dictionaries was called
+        self.mock_processor.get_ch_dictionaries.assert_called_once()
+        
+        # Verify both dictionaries were created
+        calls = self.mock_client.command.call_args_list
+        # First call is for table creation, next two are for dictionaries
+        self.assertGreaterEqual(len(calls), 2)
+        
+        # Check that dictionary commands were executed
+        dict_commands = [call[0][0] for call in calls if 'DICTIONARY' in call[0][0]]
+        self.assertIn('CREATE DICTIONARY dict1', dict_commands)
+        self.assertIn('CREATE DICTIONARY dict2', dict_commands)
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_initialization_no_dictionaries(self, mock_connector):
+        """Test ClickHouseBatcher initialization with no dictionaries."""
+        mock_connector.return_value.client = self.mock_client
+        self.mock_processor.get_ch_dictionaries.return_value = []
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Should still initialize successfully
+        self.assertIsNotNone(batcher)
+        self.mock_processor.get_ch_dictionaries.assert_called_once()
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_create_materialized_view(self, mock_connector):
+        """Test create_materialized_view method."""
+        mock_connector.return_value.client = self.mock_client
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Create mock materialized view
+        mock_mv = Mock()
+        mock_mv.table = 'mv_target_table'
+        mock_mv.mv_name = 'test_mv'
+        mock_mv.create_table_command.return_value = 'CREATE TABLE mv_target_table'
+        mock_mv.create_mv_command.return_value = 'CREATE MATERIALIZED VIEW test_mv'
+        
+        # Reset mock to clear initialization calls
+        self.mock_client.command.reset_mock()
+        
+        batcher.create_materialized_view(mock_mv)
+        
+        # Should call command twice: once for table, once for MV
+        self.assertEqual(self.mock_client.command.call_count, 2)
+        calls = self.mock_client.command.call_args_list
+        self.assertEqual(calls[0][0][0], 'CREATE TABLE mv_target_table')
+        self.assertEqual(calls[1][0][0], 'CREATE MATERIALIZED VIEW test_mv')
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_create_materialized_view_no_table_command(self, mock_connector):
+        """Test create_materialized_view when create_table_command returns None."""
+        mock_connector.return_value.client = self.mock_client
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Reset mock to clear initialization calls
+        self.mock_client.command.reset_mock()
+        
+        # Create mock MV that returns None for table command
+        mock_mv = Mock()
+        mock_mv.create_table_command.return_value = None
+        
+        batcher.create_materialized_view(mock_mv)
+        
+        # Should not call client.command
+        self.mock_client.command.assert_not_called()
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_create_materialized_view_no_mv_command(self, mock_connector):
+        """Test create_materialized_view when create_mv_command returns None."""
+        mock_connector.return_value.client = self.mock_client
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Reset mock to clear initialization calls
+        self.mock_client.command.reset_mock()
+        
+        # Create mock MV with table command but no MV command
+        mock_mv = Mock()
+        mock_mv.table = 'mv_target_table'
+        mock_mv.create_table_command.return_value = 'CREATE TABLE mv_target_table'
+        mock_mv.create_mv_command.return_value = None
+        
+        batcher.create_materialized_view(mock_mv)
+        
+        # Should not call client.command since MV command is None
+        self.mock_client.command.assert_not_called()
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    @patch('metranova.writers.clickhouse.logger')
+    def test_create_materialized_view_table_exception(self, mock_logger, mock_connector):
+        """Test create_materialized_view handles table creation exceptions."""
+        mock_connector.return_value.client = self.mock_client
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Create mock MV
+        mock_mv = Mock()
+        mock_mv.table = 'mv_target_table'
+        mock_mv.mv_name = 'test_mv'
+        mock_mv.create_table_command.return_value = 'CREATE TABLE mv_target_table'
+        mock_mv.create_mv_command.return_value = 'CREATE MATERIALIZED VIEW test_mv'
+        
+        # Make client.command raise an exception for table creation
+        self.mock_client.command.side_effect = Exception("Table creation failed")
+        
+        with self.assertRaises(Exception):
+            batcher.create_materialized_view(mock_mv)
+        
+        # Should log error
+        mock_logger.error.assert_called()
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    @patch('metranova.writers.clickhouse.logger')
+    def test_create_materialized_view_mv_exception(self, mock_logger, mock_connector):
+        """Test create_materialized_view handles MV creation exceptions."""
+        mock_connector.return_value.client = self.mock_client
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Create mock MV
+        mock_mv = Mock()
+        mock_mv.table = 'mv_target_table'
+        mock_mv.mv_name = 'test_mv'
+        mock_mv.create_table_command.return_value = 'CREATE TABLE mv_target_table'
+        mock_mv.create_mv_command.return_value = 'CREATE MATERIALIZED VIEW test_mv'
+        
+        # Make client.command succeed for table but fail for MV
+        self.mock_client.command.side_effect = [None, Exception("MV creation failed")]
+        
+        with self.assertRaises(Exception):
+            batcher.create_materialized_view(mock_mv)
+        
+        # Should log error
+        mock_logger.error.assert_called()
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_initialization_with_materialized_views(self, mock_connector):
+        """Test ClickHouseBatcher initialization creates materialized views."""
+        mock_connector.return_value.client = self.mock_client
+        
+        # Create mock materialized views
+        mock_mv1 = Mock()
+        mock_mv1.table = 'mv1_target'
+        mock_mv1.mv_name = 'mv1'
+        mock_mv1.create_table_command.return_value = 'CREATE TABLE mv1_target'
+        mock_mv1.create_mv_command.return_value = 'CREATE MATERIALIZED VIEW mv1'
+        
+        mock_mv2 = Mock()
+        mock_mv2.table = 'mv2_target'
+        mock_mv2.mv_name = 'mv2'
+        mock_mv2.create_table_command.return_value = 'CREATE TABLE mv2_target'
+        mock_mv2.create_mv_command.return_value = 'CREATE MATERIALIZED VIEW mv2'
+        
+        self.mock_processor.get_materialized_views.return_value = [mock_mv1, mock_mv2]
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Verify get_materialized_views was called
+        self.mock_processor.get_materialized_views.assert_called_once()
+        
+        # Verify both MVs were created (2 commands per MV = 4 total, plus 1 for table init)
+        calls = self.mock_client.command.call_args_list
+        self.assertGreaterEqual(len(calls), 4)
+        
+        # Check that MV commands were executed
+        mv_commands = [call[0][0] for call in calls if 'MATERIALIZED VIEW' in call[0][0]]
+        self.assertIn('CREATE MATERIALIZED VIEW mv1', mv_commands)
+        self.assertIn('CREATE MATERIALIZED VIEW mv2', mv_commands)
+        
+        # Check that table commands were executed
+        table_commands = [call[0][0] for call in calls if 'CREATE TABLE' in call[0][0]]
+        self.assertIn('CREATE TABLE mv1_target', table_commands)
+        self.assertIn('CREATE TABLE mv2_target', table_commands)
+    
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_initialization_no_materialized_views(self, mock_connector):
+        """Test ClickHouseBatcher initialization with no materialized views."""
+        mock_connector.return_value.client = self.mock_client
+        self.mock_processor.get_materialized_views.return_value = []
+        
+        batcher = ClickHouseBatcher(self.mock_processor)
+        
+        # Should still initialize successfully
+        self.assertIsNotNone(batcher)
+        self.mock_processor.get_materialized_views.assert_called_once()
     
     @patch('metranova.writers.clickhouse.ClickHouseConnector')
     def test_process_message_with_consumer_metadata(self, mock_connector):

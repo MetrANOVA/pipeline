@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from collections import defaultdict
 import unittest
 import sys
 import os
@@ -8,7 +9,690 @@ from unittest.mock import Mock, patch
 # Add the project root to the Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from metranova.processors.clickhouse.base import BaseMetadataProcessor, BaseDataProcessor
+from metranova.processors.clickhouse.base import BaseMetadataProcessor, BaseDataProcessor, BaseClickHouseTableMixin, BaseClickHouseMaterializedViewMixin, BaseClickHouseDictionaryMixin
+
+
+class TestBaseClickHouseTableMixin(unittest.TestCase):
+    def setUp(self):
+        """Set up test fixtures for BaseClickHouseTableMixin tests."""
+        self.mixin = BaseClickHouseTableMixin()
+        
+    def test_init_default_values(self):
+        """Test initialization with default values."""
+        self.assertIsNotNone(self.mixin.logger)
+        self.assertIsNone(self.mixin.cluster_name)
+        self.assertFalse(self.mixin.replication)
+        self.assertEqual(self.mixin.replica_path, '/clickhouse/tables/{shard}/{database}/{table}')
+        self.assertEqual(self.mixin.replica_name, '{replica}')
+        self.assertEqual(self.mixin.table_engine, "MergeTree")
+        self.assertEqual(self.mixin.table_granularity, 8192)
+        self.assertEqual(self.mixin.extension_columns, {"ext": True})
+        self.assertEqual(self.mixin.table_ttl_column, "insert_time")
+        self.assertEqual(self.mixin.table, "")
+        self.assertIsNone(self.mixin.table_ttl)
+        self.assertEqual(self.mixin.column_defs, [])
+        self.assertEqual(self.mixin.extension_defs, {"ext": []})
+        self.assertIsInstance(self.mixin.extension_enabled, defaultdict)
+        self.assertEqual(self.mixin.partition_by, "")
+        self.assertEqual(self.mixin.primary_keys, [])
+        self.assertEqual(self.mixin.order_by, [])
+    
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_CLUSTER_NAME': 'test_cluster',
+        'CLICKHOUSE_REPLICATION': 'true',
+        'CLICKHOUSE_REPLICA_PATH': '/custom/path',
+        'CLICKHOUSE_REPLICA_NAME': '{custom_replica}'
+    })
+    def test_init_with_environment_variables(self):
+        """Test initialization with environment variables."""
+        mixin = BaseClickHouseTableMixin()
+        
+        self.assertEqual(mixin.cluster_name, 'test_cluster')
+        self.assertTrue(mixin.replication)
+        self.assertEqual(mixin.replica_path, '/custom/path')
+        self.assertEqual(mixin.replica_name, '{custom_replica}')
+    
+    def test_get_table_names_default(self):
+        """Test get_table_names returns single table name."""
+        self.mixin.table = "test_table"
+        result = self.mixin.get_table_names()
+        self.assertEqual(result, ["test_table"])
+    
+    def test_create_table_command_basic(self):
+        """Test basic table creation command."""
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [
+            ['id', 'String', True],
+            ['name', 'String', True]
+        ]
+        self.mixin.order_by = ['id']
+        
+        result = self.mixin.create_table_command()
+        
+        self.assertIn("CREATE TABLE IF NOT EXISTS test_table", result)
+        self.assertIn("ENGINE = MergeTree()", result)
+        self.assertIn("`id` String", result)
+        self.assertIn("`name` String", result)
+        self.assertIn("ORDER BY (`id`)", result)
+    
+    def test_create_table_command_validation_errors(self):
+        """Test validation errors in create_table_command."""
+        # No table name
+        self.mixin.column_defs = [['id', 'String', True]]
+        with self.assertRaises(ValueError) as context:
+            self.mixin.create_table_command()
+        self.assertIn("Table name is not set", str(context.exception))
+        
+        # No column definitions
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = []
+        with self.assertRaises(ValueError) as context:
+            self.mixin.create_table_command()
+        self.assertIn("Column definitions are not set", str(context.exception))
+        
+        # No table engine
+        self.mixin.column_defs = [['id', 'String', True]]
+        self.mixin.table_engine = ""
+        with self.assertRaises(ValueError) as context:
+            self.mixin.create_table_command()
+        self.assertIn("Table engine is not set", str(context.exception))
+    
+    def test_get_extension_defs(self):
+        """Test get_extension_defs method."""
+        extension_options = {
+            'ext1': [['field1', 'String'], ['field2', 'Int32']],
+            'ext2': [['field3', 'Float64']]
+        }
+        
+        with patch.dict(os.environ, {'TEST_EXT_VAR': 'ext1,ext2'}):
+            result = self.mixin.get_extension_defs('TEST_EXT_VAR', extension_options)
+            
+            expected = [['field1', 'String'], ['field2', 'Int32'], ['field3', 'Float64']]
+            self.assertEqual(result, expected)
+            self.assertTrue(self.mixin.extension_is_enabled('ext1'))
+            self.assertTrue(self.mixin.extension_is_enabled('ext2'))
+    
+    def test_get_extension_defs_empty_env(self):
+        """Test get_extension_defs with empty environment variable."""
+        result = self.mixin.get_extension_defs('NON_EXISTENT_VAR', {})
+        self.assertEqual(result, [])
+    
+    def test_extension_is_enabled(self):
+        """Test extension_is_enabled method."""
+        self.assertFalse(self.mixin.extension_is_enabled('test_ext'))
+        
+        self.mixin.extension_enabled['ext']['test_ext'] = True
+        self.assertTrue(self.mixin.extension_is_enabled('test_ext'))
+        
+        self.mixin.extension_enabled['custom']['another_ext'] = True
+        self.assertTrue(self.mixin.extension_is_enabled('another_ext', 'custom'))
+        self.assertFalse(self.mixin.extension_is_enabled('another_ext', 'ext'))
+    
+    def test_create_table_command_non_replicated_no_options(self):
+        """Test table creation with non-replicated MergeTree engine without options."""
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True], ['value', 'Int32', True]]
+        self.mixin.table_engine = "MergeTree"
+        self.mixin.table_engine_opts = ""
+        self.mixin.order_by = ['id']
+        self.mixin.replication = False
+        
+        result = self.mixin.create_table_command()
+        
+        self.assertIn("ENGINE = MergeTree()", result)
+        self.assertNotIn("Replicated", result)
+        self.assertNotIn("replica_path", result)
+    
+    def test_create_table_command_non_replicated_with_options(self):
+        """Test table creation with non-replicated MergeTree engine with options."""
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True], ['value', 'Int32', True]]
+        self.mixin.table_engine = "ReplacingMergeTree"
+        self.mixin.table_engine_opts = "ver"
+        self.mixin.order_by = ['id']
+        self.mixin.replication = False
+        
+        result = self.mixin.create_table_command()
+        
+        self.assertIn("ENGINE = ReplacingMergeTree(ver)", result)
+        self.assertNotIn("Replicated", result)
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_REPLICATION': 'true'})
+    def test_create_table_command_replicated_no_options(self):
+        """Test table creation with replicated MergeTree engine without options."""
+        self.mixin = BaseClickHouseTableMixin()  # Reinitialize with env var
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True], ['value', 'Int32', True]]
+        self.mixin.table_engine = "MergeTree"
+        self.mixin.table_engine_opts = ""
+        self.mixin.order_by = ['id']
+        
+        result = self.mixin.create_table_command()
+        
+        self.assertIn("ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}')", result)
+        self.assertIn("ReplicatedMergeTree", result)
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_REPLICATION': 'true'})
+    def test_create_table_command_replicated_with_options(self):
+        """Test table creation with replicated ReplacingMergeTree engine with options."""
+        self.mixin = BaseClickHouseTableMixin()  # Reinitialize with env var
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True], ['value', 'Int32', True]]
+        self.mixin.table_engine = "ReplacingMergeTree"
+        self.mixin.table_engine_opts = "ver"
+        self.mixin.order_by = ['id']
+        
+        result = self.mixin.create_table_command()
+        
+        self.assertIn("ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}', ver)", result)
+        self.assertIn("ReplicatedReplacingMergeTree", result)
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_REPLICATION': 'true'})
+    def test_create_table_command_already_replicated_engine(self):
+        """Test that already replicated engine names don't get double prefixed."""
+        self.mixin = BaseClickHouseTableMixin()  # Reinitialize with env var
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True]]
+        self.mixin.table_engine = "ReplicatedMergeTree"  # Already has Replicated prefix
+        self.mixin.table_engine_opts = ""
+        self.mixin.order_by = ['id']
+        
+        result = self.mixin.create_table_command()
+        
+        # Should not become ReplicatedReplicatedMergeTree
+        self.assertIn("ENGINE = ReplicatedMergeTree", result)
+        self.assertNotIn("ReplicatedReplicatedMergeTree", result)
+    
+    def test_create_table_command_non_mergetree_engine(self):
+        """Test that non-MergeTree engines don't get Replicated prefix but still get replica paths."""
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True]]
+        self.mixin.table_engine = "Log"
+        self.mixin.table_engine_opts = ""
+        self.mixin.order_by = ['id']
+        self.mixin.replication = True  # Even with replication enabled
+        
+        result = self.mixin.create_table_command()
+        
+        # Log engine doesn't become ReplicatedLog
+        self.assertNotIn("ReplicatedLog", result)
+        # But when replication is enabled, replica paths are still added
+        self.assertIn("ENGINE = Log('/clickhouse/tables/{shard}/{database}/{table}', '{replica}')", result)
+    
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_REPLICATION': 'true',
+        'CLICKHOUSE_REPLICA_PATH': '/custom/replica/path',
+        'CLICKHOUSE_REPLICA_NAME': '{custom_replica}'
+    })
+    def test_create_table_command_custom_replica_paths(self):
+        """Test table creation with custom replica path and name."""
+        self.mixin = BaseClickHouseTableMixin()  # Reinitialize with env vars
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [['id', 'String', True]]
+        self.mixin.table_engine = "MergeTree"
+        self.mixin.table_engine_opts = ""
+        self.mixin.order_by = ['id']
+        
+        result = self.mixin.create_table_command()
+        
+        self.assertIn("ENGINE = ReplicatedMergeTree('/custom/replica/path', '{custom_replica}')", result)
+
+
+class TestBaseClickHouseMaterializedViewMixin(unittest.TestCase):
+    def setUp(self):
+        """Set up test fixtures."""
+        self.mixin = BaseClickHouseMaterializedViewMixin()
+    
+    def test_init(self):
+        """Test initialization."""
+        self.assertEqual(self.mixin.mv_name, "")
+        self.assertEqual(self.mixin.mv_select_query, "")
+        # Should inherit from BaseClickHouseTableMixin
+        self.assertIsNotNone(self.mixin.logger)
+        self.assertIsNone(self.mixin.cluster_name)
+    
+    def test_init_with_agg_window(self):
+        """Test initialization with aggregation window."""
+        mixin = BaseClickHouseMaterializedViewMixin(source_table_name="source_table", agg_window="5m")
+        self.assertEqual(mixin.source_table_name, "source_table")
+        self.assertEqual(mixin.agg_window, "5m")
+        self.assertEqual(mixin.agg_window_ch_interval, "5 MINUTE")
+    
+    def test_init_with_various_agg_windows(self):
+        """Test initialization with various aggregation window formats."""
+        test_cases = [
+            ("10s", "10 SECOND"),
+            ("15m", "15 MINUTE"),
+            ("12h", "12 HOUR"),
+            ("7d", "7 DAY"),
+            ("2w", "2 WEEK"),
+            ("3mo", "3 MONTH"),
+            ("1y", "1 YEAR")
+        ]
+        for agg_window, expected_interval in test_cases:
+            with self.subTest(agg_window=agg_window):
+                mixin = BaseClickHouseMaterializedViewMixin(agg_window=agg_window)
+                self.assertEqual(mixin.agg_window, agg_window)
+                self.assertEqual(mixin.agg_window_ch_interval, expected_interval)
+    
+    def test_agg_window_to_ch_interval_seconds(self):
+        """Test agg_window_to_ch_interval with seconds."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("30s"), "30 SECOND")
+    
+    def test_agg_window_to_ch_interval_minutes(self):
+        """Test agg_window_to_ch_interval with minutes."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("5m"), "5 MINUTE")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("15m"), "15 MINUTE")
+    
+    def test_agg_window_to_ch_interval_hours(self):
+        """Test agg_window_to_ch_interval with hours."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("1h"), "1 HOUR")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("12h"), "12 HOUR")
+    
+    def test_agg_window_to_ch_interval_days(self):
+        """Test agg_window_to_ch_interval with days."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("1d"), "1 DAY")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("30d"), "30 DAY")
+    
+    def test_agg_window_to_ch_interval_weeks(self):
+        """Test agg_window_to_ch_interval with weeks."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("1w"), "1 WEEK")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("4w"), "4 WEEK")
+    
+    def test_agg_window_to_ch_interval_months(self):
+        """Test agg_window_to_ch_interval with months."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("1mo"), "1 MONTH")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("3mo"), "3 MONTH")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("12mo"), "12 MONTH")
+    
+    def test_agg_window_to_ch_interval_years(self):
+        """Test agg_window_to_ch_interval with years."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("1y"), "1 YEAR")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("10y"), "10 YEAR")
+    
+    def test_agg_window_to_ch_interval_invalid_format(self):
+        """Test agg_window_to_ch_interval with invalid format raises ValueError."""
+        invalid_windows = ["5", "5x", "abc", "5minutes", "5 m", ""]
+        for invalid_window in invalid_windows:
+            with self.subTest(invalid_window=invalid_window):
+                with self.assertRaises(ValueError) as context:
+                    self.mixin.agg_window_to_ch_interval(invalid_window)
+                self.assertIn("Invalid aggregation window format", str(context.exception))
+    
+    def test_create_mv_command_basic(self):
+        """Test basic materialized view creation command."""
+        self.mixin.mv_name = "test_mv"
+        self.mixin.table = "target_table"
+        self.mixin.mv_select_query = "SELECT * FROM source_table"
+        
+        result = self.mixin.create_mv_command()
+        
+        self.assertIn("CREATE MATERIALIZED VIEW IF NOT EXISTS test_mv", result)
+        self.assertIn("TO target_table", result)
+        self.assertIn("AS SELECT * FROM source_table", result)
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_CLUSTER_NAME': 'test_cluster'})
+    def test_create_mv_command_with_cluster(self):
+        """Test materialized view creation with cluster."""
+        mixin = BaseClickHouseMaterializedViewMixin()
+        mixin.mv_name = "test_mv"
+        mixin.table = "target_table"
+        mixin.mv_select_query = "SELECT id, name FROM source_table"
+        
+        result = mixin.create_mv_command()
+        
+        self.assertIn("ON CLUSTER 'test_cluster'", result)
+        self.assertIn("CREATE MATERIALIZED VIEW IF NOT EXISTS test_mv", result)
+    
+    def test_create_mv_command_complex_query(self):
+        """Test materialized view with complex SELECT query."""
+        self.mixin.mv_name = "aggregated_mv"
+        self.mixin.table = "aggregated_table"
+        self.mixin.mv_select_query = """
+            SELECT 
+                toStartOfHour(timestamp) as hour,
+                resource_id,
+                sum(value) as total_value,
+                avg(value) as avg_value
+            FROM source_table
+            GROUP BY hour, resource_id
+        """
+        
+        result = self.mixin.create_mv_command()
+        
+        self.assertIn("CREATE MATERIALIZED VIEW IF NOT EXISTS aggregated_mv", result)
+        self.assertIn("sum(value)", result)
+        self.assertIn("GROUP BY hour, resource_id", result)
+    
+    def test_build_extension_select_term_with_fields(self):
+        """Test build_extension_select_term with extension field definitions."""
+        self.mixin.extension_defs = {
+            "ext": [
+                ["bgp_as_path_id", "UInt32"],
+                ["device_type", "String"],
+                ["location_id", "UInt64"]
+            ]
+        }
+        
+        result = self.mixin.build_extension_select_term("ext")
+        
+        self.assertIn("toJSONString(", result)
+        self.assertIn("map(", result)
+        self.assertIn("'bgp_as_path_id', ext.bgp_as_path_id", result)
+        self.assertIn("'device_type', ext.device_type", result)
+        self.assertIn("'location_id', ext.location_id", result)
+        self.assertIn(") as ext,", result)
+    
+    def test_build_extension_select_term_no_fields(self):
+        """Test build_extension_select_term with no extension fields returns empty string."""
+        self.mixin.extension_defs = {"ext": []}
+        
+        result = self.mixin.build_extension_select_term("ext")
+        
+        self.assertEqual(result, "")
+    
+    def test_build_extension_select_term_custom_json_column(self):
+        """Test build_extension_select_term with custom JSON column name."""
+        self.mixin.extension_defs = {
+            "custom_ext": [
+                ["field1", "String"],
+                ["field2", "Int32"]
+            ]
+        }
+        
+        result = self.mixin.build_extension_select_term("custom_ext")
+        
+        self.assertIn("'field1', custom_ext.field1", result)
+        self.assertIn("'field2', custom_ext.field2", result)
+        self.assertIn(") as custom_ext,", result)
+    
+    def test_build_extension_select_term_single_field(self):
+        """Test build_extension_select_term with single extension field."""
+        self.mixin.extension_defs = {
+            "ext": [["single_field", "String"]]
+        }
+        
+        result = self.mixin.build_extension_select_term("ext")
+        
+        self.assertIn("'single_field', ext.single_field", result)
+        self.assertNotIn(",\n        '", result)  # Should not have comma before closing
+    
+    def test_build_extension_select_term_nonexistent_column(self):
+        """Test build_extension_select_term with nonexistent JSON column name."""
+        self.mixin.extension_defs = {"ext": [["field1", "String"]]}
+        
+        result = self.mixin.build_extension_select_term("nonexistent")
+        
+        self.assertEqual(result, "")
+    
+    def test_policy_override_initialization(self):
+        """Test that policy override fields are initialized correctly."""
+        self.assertFalse(self.mixin.policy_override)
+        self.assertEqual(self.mixin.policy_level, "")
+        self.assertEqual(self.mixin.policy_scope, [])
+    
+    def test_policy_override_terms_default(self):
+        """Test policy_override_terms returns default field names when override is False."""
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        self.assertEqual(policy_level_term, "policy_level")
+        self.assertEqual(policy_scope_term, "policy_scope")
+    
+    def test_policy_override_terms_with_override(self):
+        """Test policy_override_terms with policy override enabled."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:green"
+        self.mixin.policy_scope = ["scope1", "scope2", "scope3"]
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        self.assertEqual(policy_level_term, "'tlp:green' AS policy_level")
+        self.assertEqual(policy_scope_term, "['scope1,scope2,scope3'] AS policy_scope")
+    
+    def test_policy_override_terms_with_single_scope(self):
+        """Test policy_override_terms with single scope item."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:amber"
+        self.mixin.policy_scope = ["public"]
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        self.assertEqual(policy_level_term, "'tlp:amber' AS policy_level")
+        self.assertEqual(policy_scope_term, "['public'] AS policy_scope")
+    
+    def test_policy_override_terms_with_whitespace(self):
+        """Test policy_override_terms strips whitespace from scope items."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:red"
+        self.mixin.policy_scope = ["  scope1  ", "scope2", "  scope3"]
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        # Should strip whitespace
+        self.assertEqual(policy_scope_term, "['scope1,scope2,scope3'] AS policy_scope")
+    
+    def test_policy_override_terms_filters_empty_strings(self):
+        """Test policy_override_terms filters out empty strings from scope."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:white"
+        self.mixin.policy_scope = ["scope1", "", "  ", "scope2"]
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        # Should filter out empty and whitespace-only strings
+        self.assertEqual(policy_scope_term, "['scope1,scope2'] AS policy_scope")
+    
+    def test_policy_override_terms_missing_level(self):
+        """Test policy_override_terms raises ValueError when policy_level is not set."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = ""
+        self.mixin.policy_scope = ["scope1"]
+        
+        with self.assertRaises(ValueError) as context:
+            self.mixin.policy_override_terms()
+        self.assertIn("policy_level is not set", str(context.exception))
+    
+    def test_policy_override_terms_missing_scope(self):
+        """Test policy_override_terms raises ValueError when policy_scope is None."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:amber"
+        self.mixin.policy_scope = None
+        
+        with self.assertRaises(ValueError) as context:
+            self.mixin.policy_override_terms()
+        self.assertIn("policy_scope is not set or not a list", str(context.exception))
+    
+    def test_policy_override_terms_scope_not_list(self):
+        """Test policy_override_terms raises ValueError when policy_scope is not a list."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:green"
+        self.mixin.policy_scope = "not_a_list"
+        
+        with self.assertRaises(ValueError) as context:
+            self.mixin.policy_override_terms()
+        self.assertIn("policy_scope is not set or not a list", str(context.exception))
+    
+    def test_policy_override_terms_empty_scope_list(self):
+        """Test policy_override_terms with empty policy_scope list."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:red"
+        self.mixin.policy_scope = []
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        self.assertEqual(policy_level_term, "'tlp:red' AS policy_level")
+        self.assertEqual(policy_scope_term, "[''] AS policy_scope")
+    
+    def test_policy_override_terms_special_characters_in_level(self):
+        """Test policy_override_terms with special characters in policy_level."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "custom:level-1.0"
+        self.mixin.policy_scope = ["internal"]
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        self.assertEqual(policy_level_term, "'custom:level-1.0' AS policy_level")
+    
+    def test_policy_override_terms_complex_scopes(self):
+        """Test policy_override_terms with complex scope names."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:amber"
+        self.mixin.policy_scope = ["org:research", "team:security", "project:alpha"]
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        self.assertEqual(policy_scope_term, "['org:research,team:security,project:alpha'] AS policy_scope")
+
+
+class TestBaseClickHouseDictionaryMixin(unittest.TestCase):
+    def setUp(self):
+        """Set up test fixtures."""
+        self.mixin = BaseClickHouseDictionaryMixin(source_table_name="source_table")
+    
+    def test_init_with_source_table(self):
+        """Test initialization with source table."""
+        self.assertEqual(self.mixin.dictionary_name, "")
+        self.assertEqual(self.mixin.source_table_name, "source_table")
+        self.assertEqual(self.mixin.column_defs, [])
+        self.assertEqual(self.mixin.primary_keys, [])
+        self.assertEqual(self.mixin.source_database, 'default')
+        self.assertEqual(self.mixin.source_username, 'default')
+        self.assertEqual(self.mixin.source_password, '')
+        self.assertEqual(self.mixin.lifetime_min, 600)
+        self.assertEqual(self.mixin.lifetime_max, 3600)
+        self.assertEqual(self.mixin.layout, "")
+    
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_CLUSTER_NAME': 'test_cluster',
+        'CLICKHOUSE_DATABASE': 'test_db',
+        'CLICKHOUSE_USERNAME': 'test_user',
+        'CLICKHOUSE_PASSWORD': 'test_pass'
+    })
+    def test_init_with_environment_variables(self):
+        """Test initialization with environment variables."""
+        mixin = BaseClickHouseDictionaryMixin()
+        
+        self.assertEqual(mixin.cluster_name, 'test_cluster')
+        self.assertEqual(mixin.source_database, 'test_db')
+        self.assertEqual(mixin.source_username, 'test_user')
+        self.assertEqual(mixin.source_password, 'test_pass')
+    
+    def test_create_dictionary_command_basic(self):
+        """Test basic dictionary creation command."""
+        self.mixin.dictionary_name = "test_dict"
+        self.mixin.column_defs = [
+            ['id', 'String'],
+            ['name', 'String'],
+            ['value', 'Int32']
+        ]
+        self.mixin.primary_keys = ['id']
+        self.mixin.layout = "FLAT()"
+        
+        result = self.mixin.create_dictionary_command()
+        
+        self.assertIn("CREATE DICTIONARY IF NOT EXISTS test_dict", result)
+        self.assertIn("`id` String", result)
+        self.assertIn("`name` String", result)
+        self.assertIn("`value` Int32", result)
+        self.assertIn("PRIMARY KEY (`id`)", result)
+        self.assertIn("SOURCE(CLICKHOUSE(TABLE 'source_table'", result)
+        self.assertIn("LIFETIME(MIN 600 MAX 3600)", result)
+        self.assertIn("LAYOUT(FLAT())", result)
+    
+    def test_create_dictionary_command_validation_errors(self):
+        """Test validation errors in create_dictionary_command."""
+        # No dictionary name
+        self.mixin.column_defs = [['id', 'String']]
+        self.mixin.source_table_name = "source"
+        with self.assertRaises(ValueError) as context:
+            self.mixin.create_dictionary_command()
+        self.assertIn("Dictionary name is not set", str(context.exception))
+        
+        # No column definitions
+        self.mixin.dictionary_name = "test_dict"
+        self.mixin.column_defs = []
+        with self.assertRaises(ValueError) as context:
+            self.mixin.create_dictionary_command()
+        self.assertIn("Column definitions are not set", str(context.exception))
+        
+        # No source table
+        self.mixin.column_defs = [['id', 'String']]
+        self.mixin.source_table_name = ""
+        with self.assertRaises(ValueError) as context:
+            self.mixin.create_dictionary_command()
+        self.assertIn("Source table name is not set", str(context.exception))
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_CLUSTER_NAME': 'prod_cluster'})
+    def test_create_dictionary_command_with_cluster(self):
+        """Test dictionary creation with cluster."""
+        mixin = BaseClickHouseDictionaryMixin(source_table_name="meta_table")
+        mixin.dictionary_name = "meta_dict"
+        mixin.column_defs = [['id', 'UInt64'], ['data', 'String']]
+        mixin.primary_keys = ['id']
+        mixin.layout = "HASHED()"
+        
+        result = mixin.create_dictionary_command()
+        
+        self.assertIn("ON CLUSTER 'prod_cluster'", result)
+    
+    def test_create_dictionary_command_with_range(self):
+        """Test dictionary creation with range layout."""
+        self.mixin.dictionary_name = "range_dict"
+        self.mixin.column_defs = [
+            ['id', 'UInt64'],
+            ['start_date', 'Date'],
+            ['end_date', 'Date'],
+            ['value', 'String']
+        ]
+        self.mixin.primary_keys = ['id']
+        self.mixin.layout = "RANGE_HASHED()"
+        self.mixin.layout_range_min = "start_date"
+        self.mixin.layout_range_max = "end_date"
+        
+        result = self.mixin.create_dictionary_command()
+        
+        self.assertIn("RANGE(MIN start_date MAX end_date)", result)
+    
+    def test_create_dictionary_command_multiple_primary_keys(self):
+        """Test dictionary with multiple primary keys."""
+        self.mixin.dictionary_name = "composite_dict"
+        self.mixin.column_defs = [
+            ['id1', 'String'],
+            ['id2', 'String'],
+            ['value', 'Int32']
+        ]
+        self.mixin.primary_keys = ['id1', 'id2']
+        self.mixin.layout = "COMPLEX_KEY_HASHED()"
+        
+        result = self.mixin.create_dictionary_command()
+        
+        self.assertIn("PRIMARY KEY (`id1`,`id2`)", result)
+    
+    def test_create_dictionary_command_custom_lifetime(self):
+        """Test dictionary with custom lifetime."""
+        self.mixin.dictionary_name = "cached_dict"
+        self.mixin.column_defs = [['key', 'String'], ['val', 'String']]
+        self.mixin.primary_keys = ['key']
+        self.mixin.layout = "CACHE(SIZE_IN_CELLS 1000000)"
+        self.mixin.lifetime_min = 300
+        self.mixin.lifetime_max = 1800
+        
+        result = self.mixin.create_dictionary_command()
+        
+        self.assertIn("LIFETIME(MIN 300 MAX 1800)", result)
+    
+    def test_create_dictionary_command_no_range_if_not_set(self):
+        """Test that RANGE clause is not added if range fields not set."""
+        self.mixin.dictionary_name = "simple_dict"
+        self.mixin.column_defs = [['id', 'String'], ['val', 'String']]
+        self.mixin.primary_keys = ['id']
+        self.mixin.layout = "FLAT()"
+        self.mixin.layout_range_min = ""
+        self.mixin.layout_range_max = ""
+        
+        result = self.mixin.create_dictionary_command()
+        
+        self.assertNotIn("RANGE(", result)
 
 
 class TestBaseMetadataProcessor(unittest.TestCase):
@@ -524,6 +1208,221 @@ class TestBaseClickHouseProcessorAdditional(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.mock_pipeline = Mock()
+        
+    def test_get_materialized_views_default(self):
+        """Test get_materialized_views returns empty list by default."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        
+        result = processor.get_materialized_views()
+        
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 0)
+    
+    def test_get_materialized_views_with_views(self):
+        """Test get_materialized_views returns list of materialized views."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        
+        # Add mock materialized views
+        mock_mv1 = Mock()
+        mock_mv2 = Mock()
+        processor.materialized_views = [mock_mv1, mock_mv2]
+        
+        result = processor.get_materialized_views()
+        
+        self.assertEqual(len(result), 2)
+        self.assertIn(mock_mv1, result)
+        self.assertIn(mock_mv2, result)
+    
+    def test_materialized_views_initialization(self):
+        """Test that materialized_views list is initialized on processor creation."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        
+        self.assertIsInstance(processor.materialized_views, list)
+        self.assertEqual(processor.materialized_views, [])
+    
+    def test_get_ch_dictionaries_default(self):
+        """Test get_ch_dictionaries returns empty list by default."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        
+        result = processor.get_ch_dictionaries()
+        
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 0)
+    
+    def test_get_ch_dictionaries_with_dictionaries(self):
+        """Test get_ch_dictionaries returns list of dictionaries."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        
+        # Add mock dictionaries
+        mock_dict1 = Mock()
+        mock_dict2 = Mock()
+        processor.ch_dictionaries = [mock_dict1, mock_dict2]
+        
+        result = processor.get_ch_dictionaries()
+        
+        self.assertEqual(len(result), 2)
+        self.assertIn(mock_dict1, result)
+        self.assertIn(mock_dict2, result)
+    
+    def test_ch_dictionaries_initialization(self):
+        """Test that ch_dictionaries list is initialized on processor creation."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        
+        self.assertIsInstance(processor.ch_dictionaries, list)
+        self.assertEqual(processor.ch_dictionaries, [])
+    
+    @patch.dict(os.environ, {'TEST_MV_WINDOWS': '5m,1h,1d'})
+    def test_load_materialized_views(self):
+        """Test loading materialized views from environment variable."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "test_table"
+        
+        # Create a mock MV class
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            def __init__(self, source_table_name="", agg_window=""):
+                super().__init__(source_table_name, agg_window)
+                self.mv_name = f"test_mv_{agg_window}"
+        
+        processor.load_materialized_views('TEST_MV_WINDOWS', MockMVClass)
+        
+        self.assertEqual(len(processor.materialized_views), 3)
+        self.assertEqual(processor.materialized_views[0].agg_window, "5m")
+        self.assertEqual(processor.materialized_views[0].source_table_name, "test_table")
+        self.assertEqual(processor.materialized_views[0].agg_window_ch_interval, "5 MINUTE")
+        self.assertEqual(processor.materialized_views[1].agg_window, "1h")
+        self.assertEqual(processor.materialized_views[1].agg_window_ch_interval, "1 HOUR")
+        self.assertEqual(processor.materialized_views[2].agg_window, "1d")
+        self.assertEqual(processor.materialized_views[2].agg_window_ch_interval, "1 DAY")
+    
+    @patch.dict(os.environ, {'TEST_MV_WINDOWS': '1w, 1mo, 1y'})
+    def test_load_materialized_views_with_spaces(self):
+        """Test loading materialized views handles spaces in environment variable."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "test_table"
+        
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            def __init__(self, source_table_name="", agg_window=""):
+                super().__init__(source_table_name, agg_window)
+        
+        processor.load_materialized_views('TEST_MV_WINDOWS', MockMVClass)
+        
+        self.assertEqual(len(processor.materialized_views), 3)
+        self.assertEqual(processor.materialized_views[0].agg_window, "1w")
+        self.assertEqual(processor.materialized_views[1].agg_window, "1mo")
+        self.assertEqual(processor.materialized_views[2].agg_window, "1y")
+    
+    def test_load_materialized_views_empty_env(self):
+        """Test load_materialized_views with empty environment variable."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "test_table"
+        
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            pass
+        
+        processor.load_materialized_views('NON_EXISTENT_VAR', MockMVClass)
+        
+        self.assertEqual(len(processor.materialized_views), 0)
+    
+    @patch.dict(os.environ, {'TEST_MV_WINDOWS': ''})
+    def test_load_materialized_views_empty_string(self):
+        """Test load_materialized_views with empty string environment variable."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "test_table"
+        
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            pass
+        
+        processor.load_materialized_views('TEST_MV_WINDOWS', MockMVClass)
+        
+        self.assertEqual(len(processor.materialized_views), 0)
+    
+    @patch.dict(os.environ, {'TEST_MV_WINDOWS': '5m,,1h,  ,1d'})
+    def test_load_materialized_views_with_empty_values(self):
+        """Test load_materialized_views filters out empty values."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "test_table"
+        
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            def __init__(self, source_table_name="", agg_window=""):
+                super().__init__(source_table_name, agg_window)
+        
+        processor.load_materialized_views('TEST_MV_WINDOWS', MockMVClass)
+        
+        # Should only create MVs for non-empty values
+        self.assertEqual(len(processor.materialized_views), 3)
+        self.assertEqual(processor.materialized_views[0].agg_window, "5m")
+        self.assertEqual(processor.materialized_views[1].agg_window, "1h")
+        self.assertEqual(processor.materialized_views[2].agg_window, "1d")
+    
+    @patch.dict(os.environ, {'TEST_MV_WINDOWS': '5m'})
+    def test_load_materialized_views_single_value(self):
+        """Test load_materialized_views with single aggregation window."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "source_table"
+        
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            def __init__(self, source_table_name="", agg_window=""):
+                super().__init__(source_table_name, agg_window)
+        
+        processor.load_materialized_views('TEST_MV_WINDOWS', MockMVClass)
+        
+        self.assertEqual(len(processor.materialized_views), 1)
+        self.assertEqual(processor.materialized_views[0].agg_window, "5m")
+        self.assertEqual(processor.materialized_views[0].source_table_name, "source_table")
+    
+    @patch.dict(os.environ, {'TEST_MV_WINDOWS': '10s,30m,6h,14d,2w,6mo,5y'})
+    def test_load_materialized_views_multiple_types(self):
+        """Test load_materialized_views with multiple aggregation window types."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "metrics_table"
+        
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            def __init__(self, source_table_name="", agg_window=""):
+                super().__init__(source_table_name, agg_window)
+        
+        processor.load_materialized_views('TEST_MV_WINDOWS', MockMVClass)
+        
+        self.assertEqual(len(processor.materialized_views), 7)
+        # Verify each aggregation window and its converted interval
+        expected = [
+            ("10s", "10 SECOND"),
+            ("30m", "30 MINUTE"),
+            ("6h", "6 HOUR"),
+            ("14d", "14 DAY"),
+            ("2w", "2 WEEK"),
+            ("6mo", "6 MONTH"),
+            ("5y", "5 YEAR")
+        ]
+        for i, (agg_window, expected_interval) in enumerate(expected):
+            self.assertEqual(processor.materialized_views[i].agg_window, agg_window)
+            self.assertEqual(processor.materialized_views[i].agg_window_ch_interval, expected_interval)
+            self.assertEqual(processor.materialized_views[i].source_table_name, "metrics_table")
         
     def test_get_table_names_default(self):
         """Test get_table_names returns single table name."""

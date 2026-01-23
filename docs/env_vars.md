@@ -99,6 +99,62 @@ This document describes all environment variables used by the MetrANOVA Pipeline
 | `CLICKHOUSE_FLOW_POLICY_AUTO_SCOPES` | `true` | Automatically determine policy scopes from BGP communities |
 | `CLICKHOUSE_FLOW_POLICY_COMMUNITY_SCOPE_MAP` | (none) | Map BGP communities to policy scopes (format: `community:scope,community:scope`) |
 
+## ClickHouse Materialized Views
+
+Materialized views provide pre-aggregated data for faster queries. Each materialized view type can have multiple aggregation windows defined.
+
+### Flow Materialized View Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLICKHOUSE_FLOW_MV_BY_EDGE_AS` | (none) | Comma-separated list of aggregation windows for edge AS materialized views (e.g., `5m,1h,1d,1w`) |
+| `CLICKHOUSE_FLOW_MV_BY_INTERFACE` | (none) | Comma-separated list of aggregation windows for interface materialized views (e.g., `5m,1h,1d`) |
+| `CLICKHOUSE_FLOW_MV_BY_IP_VERSION` | (none) | Comma-separated list of aggregation windows for IP version materialized views (e.g., `1h,1d,1w`) |
+
+### Per-Window Materialized View Settings
+
+For each materialized view type and aggregation window (replace `{MV_TYPE}` with `EDGE_AS`, `INTERFACE`, or `IP_VERSION`, and `{WINDOW}` with the uppercase window like `5M`, `1H`, `1D`, `1W`, `1MO`, `1Y`):
+
+| Variable Pattern | Default | Description |
+|----------|---------|-------------|
+| `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_TABLE` | `data_flow_by_{type}_{window}` | Custom table name for the materialized view |
+| `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_TTL` | `5 YEAR` | TTL for materialized view table |
+| `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_TTL_COLUMN` | `start_time` | Column to use for TTL calculation |
+| `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_PARTITION_BY` | `toYYYYMMDD(start_time)` | Partition expression for materialized view table |
+| `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_POLICY_LEVEL` | `tlp:green` | Policy level override for aggregated data |
+| `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_POLICY_SCOPE` | `comm:re` | Policy scope override (comma-separated list) |
+| `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_POLICY_OVERRIDE` | `true` | Enable policy override for this materialized view |
+
+**Example:**
+```
+CLICKHOUSE_FLOW_MV_BY_EDGE_AS=5m,1h,1d
+CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_POLICY_LEVEL=tlp:amber
+CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_POLICY_SCOPE=internal,restricted
+CLICKHOUSE_FLOW_MV_BY_EDGE_AS_1H_TABLE=custom_flow_edge_as_1h
+```
+
+## ClickHouse Dictionary Settings
+
+Dictionaries provide fast lookup capabilities for metadata enrichment. Each metadata type can have its own dictionary configuration.
+
+### Application Dictionary
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLICKHOUSE_APPLICATION_DICTIONARY_ENABLED` | `true` | Enable application metadata dictionary creation |
+| `CLICKHOUSE_APPLICATION_DICTIONARY_NAME` | `meta_application_dict` | Dictionary name for application lookups |
+| `CLICKHOUSE_APPLICATION_DICTIONARY_LIFETIME_MIN` | `600` | Minimum cache lifetime in seconds (10 minutes) |
+| `CLICKHOUSE_APPLICATION_DICTIONARY_LIFETIME_MAX` | `3600` | Maximum cache lifetime in seconds (1 hour) |
+
+### AS Dictionary
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLICKHOUSE_AS_DICTIONARY_ENABLED` | `true` | Enable AS metadata dictionary creation |
+| `CLICKHOUSE_AS_DICTIONARY_NAME` | `meta_as_dict` | Dictionary name for AS lookups |
+| `CLICKHOUSE_AS_DICTIONARY_LIFETIME_MIN` | `600` | Minimum cache lifetime in seconds (10 minutes) |
+| `CLICKHOUSE_AS_DICTIONARY_LIFETIME_MAX` | `3600` | Maximum cache lifetime in seconds (1 hour) |
+
 ## ClickHouse Metadata Processing
 
 | Variable | Default | Description |

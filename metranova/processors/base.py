@@ -5,6 +5,9 @@ logger = logging.getLogger(__name__)
 
 class BaseProcessor:
     def __init__(self, pipeline):
+        # Initialize parent class - need this for multiple inheritance
+        super().__init__()
+
         # setup logger
         self.logger = logger
 
