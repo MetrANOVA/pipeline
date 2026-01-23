@@ -338,273 +338,273 @@ class TestBaseFlowProcessor(unittest.TestCase):
         # Check that order_by is properly set
         expected_order_by = ["src_as_id", "dst_as_id", "src_ip", "dst_ip", "start_time"]
         self.assertEqual(processor.order_by, expected_order_by)
-
-    def test_materialized_view_not_loaded_by_default(self):
-        """Test that MaterializedViewByEdgeAS5m is not loaded by default."""
-        
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_FLOW_MV_BY_EDGE_AS': '5m,1h,1d'})
+    def test_load_materialized_views(self):
+        """Test loading materialized views from environment variable."""
         processor = BaseFlowProcessor(self.mock_pipeline)
         
-        # Should have no materialized views by default
+        # Should have 3 materialized views
+        self.assertEqual(len(processor.materialized_views), 3)
+        self.assertEqual(processor.materialized_views[0].agg_window, "5m")
+        self.assertEqual(processor.materialized_views[0].source_table_name, "data_flow")
+        self.assertEqual(processor.materialized_views[1].agg_window, "1h")
+        self.assertEqual(processor.materialized_views[2].agg_window, "1d")
+    
+    def test_no_materialized_views_by_default(self):
+        """Test that no materialized views are loaded without environment variable."""
+        processor = BaseFlowProcessor(self.mock_pipeline)
+        
+        # Should have no materialized views
         self.assertEqual(len(processor.materialized_views), 0)
-        self.assertEqual(processor.get_materialized_views(), [])
     
-    @patch.dict(os.environ, {'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_ENABLED': 'false'})
-    def test_materialized_view_not_loaded_when_disabled(self):
-        """Test that MaterializedViewByEdgeAS5m is not loaded when explicitly disabled."""
-        
+    @patch.dict(os.environ, {'CLICKHOUSE_FLOW_MV_BY_EDGE_AS': '1w, 1mo, 1y'})
+    def test_load_materialized_views_with_spaces(self):
+        """Test loading materialized views handles spaces in environment variable."""
         processor = BaseFlowProcessor(self.mock_pipeline)
         
-        # Should have no materialized views when disabled
-        self.assertEqual(len(processor.materialized_views), 0)
-    
-    @patch.dict(os.environ, {'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_ENABLED': 'true'})
-    def test_materialized_view_loaded_when_enabled(self):
-        """Test that MaterializedViewByEdgeAS5m is loaded when enabled."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
-        
-        processor = BaseFlowProcessor(self.mock_pipeline)
-        
-        # Should have one materialized view
-        self.assertEqual(len(processor.materialized_views), 1)
-        self.assertIsInstance(processor.materialized_views[0], MaterializedViewByEdgeAS5m)
-    
-    @patch.dict(os.environ, {'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_ENABLED': '1'})
-    def test_materialized_view_loaded_with_numeric_true(self):
-        """Test that MaterializedViewByEdgeAS5m is loaded with numeric '1'."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
-        
-        processor = BaseFlowProcessor(self.mock_pipeline)
-        
-        self.assertEqual(len(processor.materialized_views), 1)
-        self.assertIsInstance(processor.materialized_views[0], MaterializedViewByEdgeAS5m)
-    
-    @patch.dict(os.environ, {'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_ENABLED': 'yes'})
-    def test_materialized_view_loaded_with_yes(self):
-        """Test that MaterializedViewByEdgeAS5m is loaded with 'yes'."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
-        
-        processor = BaseFlowProcessor(self.mock_pipeline)
-        
-        self.assertEqual(len(processor.materialized_views), 1)
-        self.assertIsInstance(processor.materialized_views[0], MaterializedViewByEdgeAS5m)
+        self.assertEqual(len(processor.materialized_views), 3)
+        self.assertEqual(processor.materialized_views[0].agg_window, "1w")
+        self.assertEqual(processor.materialized_views[1].agg_window, "1mo")
+        self.assertEqual(processor.materialized_views[2].agg_window, "1y")
 
 
-class TestMaterializedViewByEdgeAS5m(unittest.TestCase):
+class TestMaterializedViewByEdgeAS(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures before each test method."""
-        # Create a mock pipeline (not used in MV but needed for parent)
         self.mock_pipeline = MagicMock()
     
-    def test_initialization_basic(self):
-        """Test basic initialization of MaterializedViewByEdgeAS5m."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
+    def test_initialization_requires_agg_window(self):
+        """Test that MaterializedViewByEdgeAS requires agg_window parameter."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
         
-        mv = MaterializedViewByEdgeAS5m(source_table_name="data_flow")
+        with self.assertRaises(ValueError) as context:
+            MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="")
+        self.assertIn("agg_window must be provided", str(context.exception))
+    
+    def test_initialization_with_agg_window(self):
+        """Test MaterializedViewByEdgeAS initialization with aggregation window."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
         
-        # Check basic attributes
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="5m")
+        
         self.assertEqual(mv.source_table_name, "data_flow")
-        self.assertEqual(mv.table, 'data_flow_by_edge_as_5m')
-        self.assertEqual(mv.table_ttl, '5 YEAR')
-        self.assertEqual(mv.table_ttl_column, 'start_time')
-        self.assertEqual(mv.partition_by, 'toYYYYMMDD(start_time)')
-        self.assertEqual(mv.table_engine, 'SummingMergeTree')
-        self.assertEqual(mv.table_engine_opts, '(flow_count, bit_count, packet_count)')
-        self.assertEqual(mv.mv_name, 'data_flow_by_edge_as_5m_mv')
-        self.assertTrue(mv.allow_nullable_key)
+        self.assertEqual(mv.agg_window, "5m")
+        self.assertEqual(mv.agg_window_ch_interval, "5 MINUTE")
+        self.assertEqual(mv.table, "data_flow_by_edge_as_5m")
+        self.assertEqual(mv.mv_name, "data_flow_by_edge_as_5m_mv")
+        self.assertEqual(mv.table_engine, "SummingMergeTree")
+        self.assertEqual(mv.table_engine_opts, "(flow_count, bit_count, packet_count)")
     
-    def test_initialization_column_defs(self):
-        """Test that column_defs are properly set."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
+    def test_create_table_command_basic(self):
+        """Test create_table_command for MaterializedViewByEdgeAS."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
         
-        mv = MaterializedViewByEdgeAS5m(source_table_name="data_flow")
-        
-        # Check that key columns exist
-        column_names = [col[0] for col in mv.column_defs]
-        self.assertIn('start_time', column_names)
-        self.assertIn('policy_originator', column_names)
-        self.assertIn('policy_level', column_names)
-        self.assertIn('policy_scope', column_names)
-        self.assertIn('ext', column_names)
-        self.assertIn('src_as_id', column_names)
-        self.assertIn('src_as_ref', column_names)
-        self.assertIn('dst_as_id', column_names)
-        self.assertIn('dst_as_ref', column_names)
-        self.assertIn('device_id', column_names)
-        self.assertIn('application_id', column_names)
-        self.assertIn('in_interface_id', column_names)
-        self.assertIn('in_interface_edge', column_names)
-        self.assertIn('out_interface_id', column_names)
-        self.assertIn('out_interface_edge', column_names)
-        self.assertIn('ip_version', column_names)
-        self.assertIn('flow_count', column_names)
-        self.assertIn('bit_count', column_names)
-        self.assertIn('packet_count', column_names)
-    
-    def test_initialization_primary_and_order_keys(self):
-        """Test that primary and order by keys are properly set."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
-        
-        mv = MaterializedViewByEdgeAS5m(source_table_name="data_flow")
-        
-        # Check primary keys (note: plural)
-        self.assertEqual(mv.primary_keys, ['src_as_id', 'dst_as_id', 'start_time'])
-        
-        # Check order by includes all necessary fields
-        self.assertIn('src_as_id', mv.order_by)
-        self.assertIn('dst_as_id', mv.order_by)
-        self.assertIn('start_time', mv.order_by)
-        self.assertIn('policy_originator', mv.order_by)
-        self.assertIn('ext.bgp_as_path_id', mv.order_by)
-        self.assertIn('application_id', mv.order_by)
-    
-    def test_create_table_command(self):
-        """Test create_table_command generates correct SQL."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
-        
-        mv = MaterializedViewByEdgeAS5m(source_table_name="data_flow")
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="1h")
         result = mv.create_table_command()
         
         print("\n" + "="*80)
-        print("CREATE TABLE COMMAND OUTPUT (MaterializedViewByEdgeAS5m):")
+        print("CREATE TABLE COMMAND OUTPUT (MaterializedViewByEdgeAS - 1h):")
         print("="*80)
         print(result)
         print("="*80)
         
-        # Check basic structure
-        self.assertIn("CREATE TABLE IF NOT EXISTS data_flow_by_edge_as_5m", result)
+        # Check table name and engine
+        self.assertIn("CREATE TABLE IF NOT EXISTS data_flow_by_edge_as_1h", result)
         self.assertIn("ENGINE = SummingMergeTree((flow_count, bit_count, packet_count))", result)
-        self.assertIn("PARTITION BY toYYYYMMDD(start_time)", result)
-        self.assertIn("PRIMARY KEY (`src_as_id`,`dst_as_id`,`start_time`)", result)
-        self.assertIn("TTL start_time + INTERVAL 5 YEAR", result)
-        self.assertIn("allow_nullable_key = 1", result)
         
-        # Check key columns
+        # Check for required columns
         self.assertIn("`start_time` DateTime", result)
         self.assertIn("`src_as_id` UInt32", result)
         self.assertIn("`dst_as_id` UInt32", result)
+        self.assertIn("`device_id` LowCardinality(String)", result)
         self.assertIn("`flow_count` UInt64", result)
         self.assertIn("`bit_count` UInt64", result)
         self.assertIn("`packet_count` UInt64", result)
-    
-    def test_create_mv_command(self):
-        """Test create_mv_command generates correct SQL."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
+        self.assertIn("`in_interface_edge` Bool", result)
+        self.assertIn("`out_interface_edge` Bool", result)
         
-        mv = MaterializedViewByEdgeAS5m(source_table_name="data_flow")
+        # Check settings
+        self.assertIn("PARTITION BY toYYYYMMDD(start_time)", result)
+        self.assertIn("PRIMARY KEY (`src_as_id`,`dst_as_id`,`start_time`)", result)
+        self.assertIn("TTL start_time + INTERVAL 5 YEAR", result)
+    
+    def test_create_mv_command_basic(self):
+        """Test create_mv_command for MaterializedViewByEdgeAS."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
+        
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="1d")
         result = mv.create_mv_command()
         
         print("\n" + "="*80)
-        print("CREATE MATERIALIZED VIEW COMMAND OUTPUT (MaterializedViewByEdgeAS5m):")
+        print("CREATE MV COMMAND OUTPUT (MaterializedViewByEdgeAS - 1d):")
         print("="*80)
         print(result)
         print("="*80)
         
-        # Check basic structure
-        self.assertIn("CREATE MATERIALIZED VIEW IF NOT EXISTS data_flow_by_edge_as_5m_mv", result)
-        self.assertIn("TO data_flow_by_edge_as_5m", result)
+        # Check materialized view structure
+        self.assertIn("CREATE MATERIALIZED VIEW IF NOT EXISTS data_flow_by_edge_as_1d_mv", result)
+        self.assertIn("TO data_flow_by_edge_as_1d", result)
         self.assertIn("AS", result)
         
-        # Check SELECT clause
-        self.assertIn("SELECT", result)
-        self.assertIn("toStartOfInterval(start_time, INTERVAL 5 MINUTE) AS start_time", result)
+        # Check SELECT query elements
+        self.assertIn("toStartOfInterval(start_time, INTERVAL 1 DAY)", result)
         self.assertIn("FROM data_flow", result)
-        
-        # Check WHERE clause
         self.assertIn("WHERE in_interface_edge = True OR out_interface_edge = True", result)
-        
-        # Check key fields in SELECT
+        self.assertIn("policy_originator", result)
+        self.assertIn("policy_level", result)
+        self.assertIn("policy_scope", result)
         self.assertIn("src_as_id", result)
         self.assertIn("dst_as_id", result)
+        self.assertIn("device_id", result)
         self.assertIn("1 AS flow_count", result)
         self.assertIn("bit_count", result)
         self.assertIn("packet_count", result)
+    
+    def test_various_aggregation_windows(self):
+        """Test MaterializedViewByEdgeAS with various aggregation windows."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
         
-        # Check dictionary lookup
-        self.assertIn("dictGetOrNull('meta_application_dict', 'id', protocol, application_port) AS application_id", result)
+        test_cases = [
+            ("5m", "5 MINUTE", "data_flow_by_edge_as_5m"),
+            ("1h", "1 HOUR", "data_flow_by_edge_as_1h"),
+            ("12h", "12 HOUR", "data_flow_by_edge_as_12h"),
+            ("1d", "1 DAY", "data_flow_by_edge_as_1d"),
+            ("1w", "1 WEEK", "data_flow_by_edge_as_1w"),
+            ("1mo", "1 MONTH", "data_flow_by_edge_as_1mo"),
+            ("1y", "1 YEAR", "data_flow_by_edge_as_1y")
+        ]
+        
+        for agg_window, expected_interval, expected_table in test_cases:
+            with self.subTest(agg_window=agg_window):
+                mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window=agg_window)
+                self.assertEqual(mv.agg_window, agg_window)
+                self.assertEqual(mv.agg_window_ch_interval, expected_interval)
+                self.assertEqual(mv.table, expected_table)
+                self.assertEqual(mv.mv_name, expected_table + "_mv")
     
     @patch.dict(os.environ, {'CLICKHOUSE_FLOW_EXTENSIONS': 'bgp'})
-    def test_create_mv_command_with_bgp_extension(self):
-        """Test create_mv_command with BGP extensions."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
+    def test_with_bgp_extensions(self):
+        """Test MaterializedViewByEdgeAS with BGP extensions."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
         
-        mv = MaterializedViewByEdgeAS5m(source_table_name="data_flow")
-        result = mv.create_mv_command()
-        
-        # Should include BGP extension select term
-        self.assertIn("toJSONString", result)
-        self.assertIn("'bgp_as_path_id', ext.bgp_as_path_id", result)
-    
-    @patch.dict(os.environ, {
-        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_TABLE': 'custom_mv_table',
-        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_TTL': '10 YEAR',
-        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_TTL_COLUMN': 'end_time',
-        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_PARTITION_BY': 'toYYYYMM(start_time)'
-    })
-    def test_initialization_with_custom_env_vars(self):
-        """Test initialization with custom environment variables."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
-        
-        mv = MaterializedViewByEdgeAS5m(source_table_name="data_flow")
-        
-        # Check custom values
-        self.assertEqual(mv.table, 'custom_mv_table')
-        self.assertEqual(mv.table_ttl, '10 YEAR')
-        self.assertEqual(mv.table_ttl_column, 'end_time')
-        self.assertEqual(mv.partition_by, 'toYYYYMM(start_time)')
-        self.assertEqual(mv.mv_name, 'custom_mv_table_mv')
-    
-    @patch.dict(os.environ, {'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_TABLE': 'aggregated_flow'})
-    def test_create_table_command_with_custom_table_name(self):
-        """Test create_table_command with custom table name."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
-        
-        mv = MaterializedViewByEdgeAS5m(source_table_name="data_flow")
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="5m")
         result = mv.create_table_command()
         
-        # Should use custom table name
-        self.assertIn("CREATE TABLE IF NOT EXISTS aggregated_flow", result)
-        self.assertNotIn("data_flow_by_edge_as_5m", result)
+        # Should include BGP extension column
+        self.assertIn("`ext` JSON(", result)
+        self.assertIn("`bgp_as_path_id` Array(UInt32)", result)
+        
+        # Check MV command includes extension select term
+        mv_result = mv.create_mv_command()
+        self.assertIn("toJSONString", mv_result)
     
-    def test_mv_select_query_structure(self):
-        """Test that mv_select_query has correct structure."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_1H_TABLE': 'custom_flow_1h',
+        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_1H_TTL': '10 YEAR',
+        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_1H_PARTITION_BY': 'toYYYYMM(start_time)'
+    })
+    def test_custom_environment_variables(self):
+        """Test MaterializedViewByEdgeAS with custom environment variables."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
         
-        mv = MaterializedViewByEdgeAS5m(source_table_name="data_flow")
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="1h")
         
-        # Check that mv_select_query is set
-        self.assertIsNotNone(mv.mv_select_query)
-        self.assertIsInstance(mv.mv_select_query, str)
+        # Check custom values
+        self.assertEqual(mv.table, "custom_flow_1h")
+        self.assertEqual(mv.table_ttl, "10 YEAR")
+        self.assertEqual(mv.partition_by, "toYYYYMM(start_time)")
         
-        # Check key components
-        self.assertIn("SELECT", mv.mv_select_query)
-        self.assertIn("FROM data_flow", mv.mv_select_query)
-        self.assertIn("toStartOfInterval(start_time, INTERVAL 5 MINUTE)", mv.mv_select_query)
+        result = mv.create_table_command()
+        self.assertIn("CREATE TABLE IF NOT EXISTS custom_flow_1h", result)
+        self.assertIn("TTL start_time + INTERVAL 10 YEAR", result)
+        self.assertIn("PARTITION BY toYYYYMM(start_time)", result)
+    
+    def test_order_by_configuration(self):
+        """Test that MaterializedViewByEdgeAS has correct order_by configuration."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
+        
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="5m")
+        
+        # Check that order_by includes all necessary columns
+        expected_start = ["src_as_id", "dst_as_id", "start_time"]
+        self.assertEqual(mv.order_by[:3], expected_start)
+        
+        # Check that it includes policy and extension fields
+        self.assertIn("policy_originator", mv.order_by)
+        self.assertIn("policy_level", mv.order_by)
+        self.assertIn("policy_scope", mv.order_by)
+        self.assertIn("ext.bgp_as_path_id", mv.order_by)
+    
+    def test_primary_keys_configuration(self):
+        """Test that MaterializedViewByEdgeAS has correct primary_keys configuration."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
+        
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="1d")
+        
+        expected_primary_keys = ["src_as_id", "dst_as_id", "start_time"]
+        self.assertEqual(mv.primary_keys, expected_primary_keys)
+    
+    def test_allow_nullable_key(self):
+        """Test that MaterializedViewByEdgeAS allows nullable keys."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
+        
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="1h")
+        
+        self.assertTrue(mv.allow_nullable_key)
+        
+        # Verify it's in the table command
+        result = mv.create_table_command()
+        self.assertIn("allow_nullable_key = 1", result)
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_REPLICATION': 'true'})
+    def test_with_replication(self):
+        """Test MaterializedViewByEdgeAS with replication enabled."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
+        
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="5m")
+        result = mv.create_table_command()
+        
+        # Should use ReplicatedSummingMergeTree
+        self.assertIn("ReplicatedSummingMergeTree", result)
+        self.assertIn("/clickhouse/tables/{shard}/{database}/{table}", result)
+        self.assertIn("{replica}", result)
+    
+    def test_mv_select_query_uses_interval(self):
+        """Test that the MV SELECT query uses the correct interval."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
+        
+        test_cases = [
+            ("5m", "5 MINUTE"),
+            ("1h", "1 HOUR"),
+            ("1d", "1 DAY"),
+            ("1w", "1 WEEK")
+        ]
+        
+        for agg_window, expected_interval in test_cases:
+            with self.subTest(agg_window=agg_window):
+                mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window=agg_window)
+                self.assertIn(f"INTERVAL {expected_interval}", mv.mv_select_query)
+    
+    def test_mv_select_query_filters_edge_interfaces(self):
+        """Test that the MV SELECT query filters for edge interfaces."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
+        
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="1h")
+        
+        # Should filter for edge interfaces
         self.assertIn("WHERE in_interface_edge = True OR out_interface_edge = True", mv.mv_select_query)
     
-    def test_extension_defs_with_bgp(self):
-        """Test that extension_defs are set correctly with BGP extensions."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
+    def test_mv_select_query_uses_application_dict(self):
+        """Test that the MV SELECT query uses application dictionary lookup."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
         
-        with patch.dict(os.environ, {'CLICKHOUSE_FLOW_EXTENSIONS': 'bgp'}):
-            mv = MaterializedViewByEdgeAS5m(source_table_name="data_flow")
-            
-            # Check that BGP extension is in extension_defs
-            self.assertIn('ext', mv.extension_defs)
-            ext_fields = mv.extension_defs['ext']
-            
-            # Should have bgp_as_path_id field
-            field_names = [field[0] for field in ext_fields]
-            self.assertIn('bgp_as_path_id', field_names)
-    
-    def test_extension_defs_without_extensions(self):
-        """Test that extension_defs are empty without extensions."""
-        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS5m
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="1h")
         
-        with patch.dict(os.environ, {}, clear=True):
-            mv = MaterializedViewByEdgeAS5m(source_table_name="data_flow")
-            
-            # extension_defs should be empty or have empty ext
-            self.assertEqual(mv.extension_defs.get('ext', []), [])
+        # Should use dictionary lookup for application
+        self.assertIn("dictGetOrNull('meta_application_dict'", mv.mv_select_query)
+        self.assertIn("protocol, application_port", mv.mv_select_query)
+        self.assertIn("AS application_id", mv.mv_select_query)
 
 if __name__ == '__main__':
     # Run tests with verbose output

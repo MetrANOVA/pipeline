@@ -90,9 +90,8 @@ class BaseFlowProcessor(BaseDataProcessor):
         self.ip_ref_extensions = self.get_ip_ref_extensions("CLICKHOUSE_FLOW_IP_REF_EXTENSIONS")
         # set additional table settings
         self.order_by = ["src_as_id", "dst_as_id", "src_ip", "dst_ip", "start_time"]
-        # Enable materialized views - default to false
-        if os.getenv('CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_ENABLED', 'false').lower() in ('true', '1', 'yes'):
-            self.materialized_views.append(MaterializedViewByEdgeAS5m(source_table_name=self.table))
+        # Enable materialized views - they accept a comma separated list of agg windows - e.g. 5m, 12h, 1d, 1w, 3mo, 10y, etc
+        self.load_materialized_views('CLICKHOUSE_FLOW_MV_BY_EDGE_AS',MaterializedViewByEdgeAS)
 
     def parse_env_map_list(self, map_list_str: str | None) -> Dict[str, str]:
         result = {}
@@ -104,10 +103,14 @@ class BaseFlowProcessor(BaseDataProcessor):
                     result[key.strip()] = value.strip()
         return result
 
-class MaterializedViewByEdgeAS5m(BaseClickHouseMaterializedViewMixin):
+class MaterializedViewByEdgeAS(BaseClickHouseMaterializedViewMixin):
     
-    def __init__(self, source_table_name: str = ""):
-        super().__init__(source_table_name)
+    def __init__(self, source_table_name: str = "", agg_window: str = ""):
+        super().__init__(source_table_name, agg_window)  
+        #check required parameters
+        if not agg_window:
+            raise ValueError("agg_window must be provided for MaterializedViewByEdgeAS")
+        
         #Target Table settings
         self.column_defs = [
             ['start_time', 'DateTime', True],
@@ -140,10 +143,11 @@ class MaterializedViewByEdgeAS5m(BaseClickHouseMaterializedViewMixin):
             ]
         }
         self.extension_defs['ext'] = self.get_extension_defs('CLICKHOUSE_FLOW_EXTENSIONS', extension_options)
-        self.table = os.getenv('CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_TABLE', 'data_flow_by_edge_as_5m')
-        self.table_ttl = os.getenv('CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_TTL', '5 YEAR')
-        self.table_ttl_column = os.getenv('CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_TTL_COLUMN', 'start_time')
-        self.partition_by = os.getenv('CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_PARTITION_BY', "toYYYYMMDD(start_time)")
+        agg_window_upper = agg_window.upper()
+        self.table = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_TABLE', f'data_flow_by_edge_as_{agg_window}')
+        self.table_ttl = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_TTL', '5 YEAR')
+        self.table_ttl_column = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_TTL_COLUMN', 'start_time')
+        self.partition_by = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_PARTITION_BY', "toYYYYMMDD(start_time)")
         self.table_engine = 'SummingMergeTree'
         # note; The opts are a single parameter passed as a tuple. The create_tabla_command will add the surrounding parantheses
         # Example: SummingMergeTree((flow_count, bit_count, packet_count))
@@ -181,7 +185,7 @@ class MaterializedViewByEdgeAS5m(BaseClickHouseMaterializedViewMixin):
         self.mv_name = self.table + "_mv"
         self.mv_select_query = f"""
             SELECT
-                toStartOfInterval(start_time, INTERVAL 5 MINUTE) AS start_time, 
+                toStartOfInterval(start_time, INTERVAL {self.agg_window_ch_interval}) AS start_time, 
                 policy_originator,
                 policy_level,
                 policy_scope,

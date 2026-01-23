@@ -139,11 +139,16 @@ class BaseClickHouseTableMixin:
 
 class BaseClickHouseMaterializedViewMixin(BaseClickHouseTableMixin):
     """Mixin class for ClickHouse materialized view related functionality"""
-    def __init__(self,source_table_name: str = ""):
+    def __init__(self,source_table_name: str = "", agg_window: str = ""):
         super().__init__()
         self.source_table_name = source_table_name
         self.mv_name = ""
         self.mv_select_query = ""
+        #format agg_window if exists. Can by used by child classes in select query, env vars, etc.
+        self.agg_window = agg_window
+        if self.agg_window:
+            self.agg_window = self.agg_window.lower()
+            self.agg_window_ch_interval = self.agg_window_to_ch_interval(self.agg_window)
 
     def create_mv_command(self) -> str:
         """Return the ClickHouse materialized view creation command"""
@@ -176,6 +181,26 @@ class BaseClickHouseMaterializedViewMixin(BaseClickHouseTableMixin):
             return ""
         select_term += "\n    )\n) as {},\n        ".format(json_column_name)
         return select_term
+    
+    def agg_window_to_ch_interval(self, window: str) -> str:
+        """Convert an aggregation window string like 5m to '5 MINUTE' for ClickHouse"""
+        match = re.match(r'(\d+)([smhdwmy]|mo)$', window)
+        if match:
+            value = match.group(1)
+            unit = match.group(2)
+            unit_map = {
+                's': 'SECOND',
+                'm': 'MINUTE',
+                'h': 'HOUR',
+                'd': 'DAY',
+                'w': 'WEEK',
+                'mo': 'MONTH',
+                'y': 'YEAR'
+            }
+            if unit in unit_map:
+                return f"{value} {unit_map[unit]}"
+
+        raise ValueError(f"Invalid aggregation window format: {window}")
 
 class BaseClickHouseDictionaryMixin:
     """Mixin class for ClickHouse dictionary related functionality"""
@@ -256,6 +281,19 @@ class BaseClickHouseProcessor(BaseProcessor, BaseClickHouseTableMixin):
     def get_materialized_views(self) -> list:
         """Return list of ClickHouse materialized views used by this processor. Override in child classes if multiple views are used."""
         return self.materialized_views
+
+    def load_materialized_views(self, env_var_name: str, mv_class: type[BaseClickHouseMaterializedViewMixin]) -> None:
+        """Load materialized views from environment variable into self.materialized_views"""
+        # Accept a comma separated list of agg windows - e.g. 5m, 12h, 1d, 1w, 3mo, 10y, etc
+        mv_str = os.getenv(env_var_name, None)
+        if not mv_str:
+            return
+        mv_str = mv_str.strip()
+        for agg_window in mv_str.split(','):
+            agg_window = agg_window.strip()
+            if not agg_window:
+                continue
+            self.materialized_views.append(mv_class(source_table_name=self.table, agg_window=agg_window))
 
     def get_ip_ref_extensions(self, env_var_name: str) -> list:
         """Get list of extension names that should have IP reference fields from environment variable"""

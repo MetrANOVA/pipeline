@@ -251,6 +251,74 @@ class TestBaseClickHouseMaterializedViewMixin(unittest.TestCase):
         self.assertIsNotNone(self.mixin.logger)
         self.assertIsNone(self.mixin.cluster_name)
     
+    def test_init_with_agg_window(self):
+        """Test initialization with aggregation window."""
+        mixin = BaseClickHouseMaterializedViewMixin(source_table_name="source_table", agg_window="5m")
+        self.assertEqual(mixin.source_table_name, "source_table")
+        self.assertEqual(mixin.agg_window, "5m")
+        self.assertEqual(mixin.agg_window_ch_interval, "5 MINUTE")
+    
+    def test_init_with_various_agg_windows(self):
+        """Test initialization with various aggregation window formats."""
+        test_cases = [
+            ("10s", "10 SECOND"),
+            ("15m", "15 MINUTE"),
+            ("12h", "12 HOUR"),
+            ("7d", "7 DAY"),
+            ("2w", "2 WEEK"),
+            ("3mo", "3 MONTH"),
+            ("1y", "1 YEAR")
+        ]
+        for agg_window, expected_interval in test_cases:
+            with self.subTest(agg_window=agg_window):
+                mixin = BaseClickHouseMaterializedViewMixin(agg_window=agg_window)
+                self.assertEqual(mixin.agg_window, agg_window)
+                self.assertEqual(mixin.agg_window_ch_interval, expected_interval)
+    
+    def test_agg_window_to_ch_interval_seconds(self):
+        """Test agg_window_to_ch_interval with seconds."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("30s"), "30 SECOND")
+    
+    def test_agg_window_to_ch_interval_minutes(self):
+        """Test agg_window_to_ch_interval with minutes."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("5m"), "5 MINUTE")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("15m"), "15 MINUTE")
+    
+    def test_agg_window_to_ch_interval_hours(self):
+        """Test agg_window_to_ch_interval with hours."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("1h"), "1 HOUR")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("12h"), "12 HOUR")
+    
+    def test_agg_window_to_ch_interval_days(self):
+        """Test agg_window_to_ch_interval with days."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("1d"), "1 DAY")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("30d"), "30 DAY")
+    
+    def test_agg_window_to_ch_interval_weeks(self):
+        """Test agg_window_to_ch_interval with weeks."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("1w"), "1 WEEK")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("4w"), "4 WEEK")
+    
+    def test_agg_window_to_ch_interval_months(self):
+        """Test agg_window_to_ch_interval with months."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("1mo"), "1 MONTH")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("3mo"), "3 MONTH")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("12mo"), "12 MONTH")
+    
+    def test_agg_window_to_ch_interval_years(self):
+        """Test agg_window_to_ch_interval with years."""
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("1y"), "1 YEAR")
+        self.assertEqual(self.mixin.agg_window_to_ch_interval("10y"), "10 YEAR")
+    
+    def test_agg_window_to_ch_interval_invalid_format(self):
+        """Test agg_window_to_ch_interval with invalid format raises ValueError."""
+        invalid_windows = ["5", "5x", "abc", "5minutes", "5 m", ""]
+        for invalid_window in invalid_windows:
+            with self.subTest(invalid_window=invalid_window):
+                with self.assertRaises(ValueError) as context:
+                    self.mixin.agg_window_to_ch_interval(invalid_window)
+                self.assertIn("Invalid aggregation window format", str(context.exception))
+    
     def test_create_mv_command_basic(self):
         """Test basic materialized view creation command."""
         self.mixin.mv_name = "test_mv"
@@ -1096,6 +1164,147 @@ class TestBaseClickHouseProcessorAdditional(unittest.TestCase):
         
         self.assertIsInstance(processor.ch_dictionaries, list)
         self.assertEqual(processor.ch_dictionaries, [])
+    
+    @patch.dict(os.environ, {'TEST_MV_WINDOWS': '5m,1h,1d'})
+    def test_load_materialized_views(self):
+        """Test loading materialized views from environment variable."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "test_table"
+        
+        # Create a mock MV class
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            def __init__(self, source_table_name="", agg_window=""):
+                super().__init__(source_table_name, agg_window)
+                self.mv_name = f"test_mv_{agg_window}"
+        
+        processor.load_materialized_views('TEST_MV_WINDOWS', MockMVClass)
+        
+        self.assertEqual(len(processor.materialized_views), 3)
+        self.assertEqual(processor.materialized_views[0].agg_window, "5m")
+        self.assertEqual(processor.materialized_views[0].source_table_name, "test_table")
+        self.assertEqual(processor.materialized_views[0].agg_window_ch_interval, "5 MINUTE")
+        self.assertEqual(processor.materialized_views[1].agg_window, "1h")
+        self.assertEqual(processor.materialized_views[1].agg_window_ch_interval, "1 HOUR")
+        self.assertEqual(processor.materialized_views[2].agg_window, "1d")
+        self.assertEqual(processor.materialized_views[2].agg_window_ch_interval, "1 DAY")
+    
+    @patch.dict(os.environ, {'TEST_MV_WINDOWS': '1w, 1mo, 1y'})
+    def test_load_materialized_views_with_spaces(self):
+        """Test loading materialized views handles spaces in environment variable."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "test_table"
+        
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            def __init__(self, source_table_name="", agg_window=""):
+                super().__init__(source_table_name, agg_window)
+        
+        processor.load_materialized_views('TEST_MV_WINDOWS', MockMVClass)
+        
+        self.assertEqual(len(processor.materialized_views), 3)
+        self.assertEqual(processor.materialized_views[0].agg_window, "1w")
+        self.assertEqual(processor.materialized_views[1].agg_window, "1mo")
+        self.assertEqual(processor.materialized_views[2].agg_window, "1y")
+    
+    def test_load_materialized_views_empty_env(self):
+        """Test load_materialized_views with empty environment variable."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "test_table"
+        
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            pass
+        
+        processor.load_materialized_views('NON_EXISTENT_VAR', MockMVClass)
+        
+        self.assertEqual(len(processor.materialized_views), 0)
+    
+    @patch.dict(os.environ, {'TEST_MV_WINDOWS': ''})
+    def test_load_materialized_views_empty_string(self):
+        """Test load_materialized_views with empty string environment variable."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "test_table"
+        
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            pass
+        
+        processor.load_materialized_views('TEST_MV_WINDOWS', MockMVClass)
+        
+        self.assertEqual(len(processor.materialized_views), 0)
+    
+    @patch.dict(os.environ, {'TEST_MV_WINDOWS': '5m,,1h,  ,1d'})
+    def test_load_materialized_views_with_empty_values(self):
+        """Test load_materialized_views filters out empty values."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "test_table"
+        
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            def __init__(self, source_table_name="", agg_window=""):
+                super().__init__(source_table_name, agg_window)
+        
+        processor.load_materialized_views('TEST_MV_WINDOWS', MockMVClass)
+        
+        # Should only create MVs for non-empty values
+        self.assertEqual(len(processor.materialized_views), 3)
+        self.assertEqual(processor.materialized_views[0].agg_window, "5m")
+        self.assertEqual(processor.materialized_views[1].agg_window, "1h")
+        self.assertEqual(processor.materialized_views[2].agg_window, "1d")
+    
+    @patch.dict(os.environ, {'TEST_MV_WINDOWS': '5m'})
+    def test_load_materialized_views_single_value(self):
+        """Test load_materialized_views with single aggregation window."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "source_table"
+        
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            def __init__(self, source_table_name="", agg_window=""):
+                super().__init__(source_table_name, agg_window)
+        
+        processor.load_materialized_views('TEST_MV_WINDOWS', MockMVClass)
+        
+        self.assertEqual(len(processor.materialized_views), 1)
+        self.assertEqual(processor.materialized_views[0].agg_window, "5m")
+        self.assertEqual(processor.materialized_views[0].source_table_name, "source_table")
+    
+    @patch.dict(os.environ, {'TEST_MV_WINDOWS': '10s,30m,6h,14d,2w,6mo,5y'})
+    def test_load_materialized_views_multiple_types(self):
+        """Test load_materialized_views with multiple aggregation window types."""
+        from metranova.processors.clickhouse.base import BaseClickHouseProcessor, BaseClickHouseMaterializedViewMixin
+        
+        processor = BaseClickHouseProcessor(self.mock_pipeline)
+        processor.table = "metrics_table"
+        
+        class MockMVClass(BaseClickHouseMaterializedViewMixin):
+            def __init__(self, source_table_name="", agg_window=""):
+                super().__init__(source_table_name, agg_window)
+        
+        processor.load_materialized_views('TEST_MV_WINDOWS', MockMVClass)
+        
+        self.assertEqual(len(processor.materialized_views), 7)
+        # Verify each aggregation window and its converted interval
+        expected = [
+            ("10s", "10 SECOND"),
+            ("30m", "30 MINUTE"),
+            ("6h", "6 HOUR"),
+            ("14d", "14 DAY"),
+            ("2w", "2 WEEK"),
+            ("6mo", "6 MONTH"),
+            ("5y", "5 YEAR")
+        ]
+        for i, (agg_window, expected_interval) in enumerate(expected):
+            self.assertEqual(processor.materialized_views[i].agg_window, agg_window)
+            self.assertEqual(processor.materialized_views[i].agg_window_ch_interval, expected_interval)
+            self.assertEqual(processor.materialized_views[i].source_table_name, "metrics_table")
         
     def test_get_table_names_default(self):
         """Test get_table_names returns single table name."""
