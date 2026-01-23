@@ -144,6 +144,10 @@ class BaseClickHouseMaterializedViewMixin(BaseClickHouseTableMixin):
         self.source_table_name = source_table_name
         self.mv_name = ""
         self.mv_select_query = ""
+        self.policy_override = False
+        self.policy_level = ""
+        self.policy_scope = []
+
         #format agg_window if exists. Can by used by child classes in select query, env vars, etc.
         self.agg_window = agg_window
         if self.agg_window:
@@ -201,6 +205,22 @@ class BaseClickHouseMaterializedViewMixin(BaseClickHouseTableMixin):
                 return f"{value} {unit_map[unit]}"
 
         raise ValueError(f"Invalid aggregation window format: {window}")
+
+    def policy_override_terms(self) -> tuple[str, str]:
+        """Return policy level and scope terms for use in select query based on override settings"""
+        policy_level_term = "policy_level"
+        policy_scope_term = "policy_scope"
+        if self.policy_override:
+            if not self.policy_level:
+                raise ValueError("Policy override is enabled but policy_level is not set")
+            if self.policy_scope is None or not isinstance(self.policy_scope, list):
+                raise ValueError("Policy override is enabled but policy_scope is not set or not a list")
+            #strip each item in policy_scope
+            self.policy_scope = [item.strip() for item in self.policy_scope if item.strip()]
+            policy_level_term = f"'{self.policy_level}' AS policy_level"
+            policy_scope_term = f"['{','.join(self.policy_scope)}'] AS policy_scope"
+        
+        return policy_level_term, policy_scope_term 
 
 class BaseClickHouseDictionaryMixin:
     """Mixin class for ClickHouse dictionary related functionality"""

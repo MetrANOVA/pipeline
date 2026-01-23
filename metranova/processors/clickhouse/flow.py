@@ -150,6 +150,9 @@ class MaterializedViewByEdgeAS(BaseClickHouseMaterializedViewMixin):
         self.table_ttl = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_TTL', '5 YEAR')
         self.table_ttl_column = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_TTL_COLUMN', 'start_time')
         self.partition_by = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_PARTITION_BY', "toYYYYMMDD(start_time)")
+        self.policy_level = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_POLICY_LEVEL', 'tlp:green')
+        self.policy_scope = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_POLICY_SCOPE', 'comm:re').split(',')
+        self.policy_override = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_POLICY_OVERRIDE', 'true').lower() in ('true', '1', 'yes')
         self.table_engine = 'SummingMergeTree'
         # note; The opts are a single parameter passed as a tuple. The create_tabla_command will add the surrounding parantheses
         # Example: SummingMergeTree((flow_count, bit_count, packet_count))
@@ -185,12 +188,14 @@ class MaterializedViewByEdgeAS(BaseClickHouseMaterializedViewMixin):
         # Materialized View settings
         extension_select_term = self.build_extension_select_term()
         self.mv_name = self.table + "_mv"
+        #determine how we are handling policy fields
+        policy_level_term, policy_scope_term = self.policy_override_terms()
         self.mv_select_query = f"""
             SELECT
                 toStartOfInterval(start_time, INTERVAL {self.agg_window_ch_interval}) AS start_time, 
                 policy_originator,
-                policy_level,
-                policy_scope,
+                {policy_level_term},
+                {policy_scope_term},
                 {extension_select_term}src_as_id,
                 src_as_ref,
                 dst_as_id,
@@ -258,6 +263,9 @@ class MaterializedViewByInterface(BaseClickHouseMaterializedViewMixin):
         self.table_ttl = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_INTERFACE_{agg_window_upper}_TTL', '5 YEAR')
         self.table_ttl_column = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_INTERFACE_{agg_window_upper}_TTL_COLUMN', 'start_time')
         self.partition_by = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_INTERFACE_{agg_window_upper}_PARTITION_BY', "toYYYYMMDD(start_time)")
+        self.policy_level = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_INTERFACE_{agg_window_upper}_POLICY_LEVEL', 'tlp:green')
+        self.policy_scope = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_INTERFACE_{agg_window_upper}_POLICY_SCOPE', 'comm:re').split(',')
+        self.policy_override = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_INTERFACE_{agg_window_upper}_POLICY_OVERRIDE', 'true').lower() in ('true', '1', 'yes')
         self.table_engine = 'SummingMergeTree'
         # note: The opts are a single parameter passed as a tuple. The create_table_command will add the surrounding parantheses
         # Example: SummingMergeTree((flow_count, bit_count, packet_count))
@@ -284,12 +292,14 @@ class MaterializedViewByInterface(BaseClickHouseMaterializedViewMixin):
         ]
         self.allow_nullable_key = True
         self.mv_name = self.table + "_mv"
+        #determine how we are handling policy fields
+        policy_level_term, policy_scope_term = self.policy_override_terms()
         self.mv_select_query = f"""
             SELECT
                 toStartOfInterval(start_time, INTERVAL {self.agg_window_ch_interval}) AS start_time, 
                 policy_originator,
-                policy_level,
-                policy_scope,
+                {policy_level_term},
+                {policy_scope_term},
                 device_id,
                 device_ref,
                 in_interface_id,
@@ -329,6 +339,9 @@ class MaterializedViewByIPVersion(BaseClickHouseMaterializedViewMixin):
         self.table_ttl = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_TTL', '5 YEAR')
         self.table_ttl_column = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_TTL_COLUMN', 'start_time')
         self.partition_by = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_PARTITION_BY', "toYYYYMMDD(start_time)")
+        self.policy_level = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_POLICY_LEVEL', 'tlp:green')
+        self.policy_scope = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_POLICY_SCOPE', 'comm:re').split(',')
+        self.policy_override = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_POLICY_OVERRIDE', 'true').lower() in ('true', '1', 'yes')
         self.table_engine = 'SummingMergeTree'
         # note: The opts are a single parameter passed as a tuple. The create_table_command will add the surrounding parantheses
         # Example: SummingMergeTree((flow_count, bit_count, packet_count))
@@ -347,13 +360,16 @@ class MaterializedViewByIPVersion(BaseClickHouseMaterializedViewMixin):
         ]
         self.allow_nullable_key = True
         self.mv_name = self.table + "_mv"
+        
+        #determine how we are handling policy fields
+        policy_level_term, policy_scope_term = self.policy_override_terms()
         # Note: this doesn't do any de-duplication or filtering, just aggregates by IP version across all flows seen
         self.mv_select_query = f"""
             SELECT
                 toStartOfInterval(start_time, INTERVAL {self.agg_window_ch_interval}) AS start_time, 
                 policy_originator,
-                policy_level,
-                policy_scope,
+                {policy_level_term},
+                {policy_scope_term},
                 ip_version,
                 1 AS flow_count,
                 bit_count,

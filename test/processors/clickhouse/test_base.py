@@ -424,6 +424,124 @@ class TestBaseClickHouseMaterializedViewMixin(unittest.TestCase):
         result = self.mixin.build_extension_select_term("nonexistent")
         
         self.assertEqual(result, "")
+    
+    def test_policy_override_initialization(self):
+        """Test that policy override fields are initialized correctly."""
+        self.assertFalse(self.mixin.policy_override)
+        self.assertEqual(self.mixin.policy_level, "")
+        self.assertEqual(self.mixin.policy_scope, [])
+    
+    def test_policy_override_terms_default(self):
+        """Test policy_override_terms returns default field names when override is False."""
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        self.assertEqual(policy_level_term, "policy_level")
+        self.assertEqual(policy_scope_term, "policy_scope")
+    
+    def test_policy_override_terms_with_override(self):
+        """Test policy_override_terms with policy override enabled."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:green"
+        self.mixin.policy_scope = ["scope1", "scope2", "scope3"]
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        self.assertEqual(policy_level_term, "'tlp:green' AS policy_level")
+        self.assertEqual(policy_scope_term, "['scope1,scope2,scope3'] AS policy_scope")
+    
+    def test_policy_override_terms_with_single_scope(self):
+        """Test policy_override_terms with single scope item."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:amber"
+        self.mixin.policy_scope = ["public"]
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        self.assertEqual(policy_level_term, "'tlp:amber' AS policy_level")
+        self.assertEqual(policy_scope_term, "['public'] AS policy_scope")
+    
+    def test_policy_override_terms_with_whitespace(self):
+        """Test policy_override_terms strips whitespace from scope items."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:red"
+        self.mixin.policy_scope = ["  scope1  ", "scope2", "  scope3"]
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        # Should strip whitespace
+        self.assertEqual(policy_scope_term, "['scope1,scope2,scope3'] AS policy_scope")
+    
+    def test_policy_override_terms_filters_empty_strings(self):
+        """Test policy_override_terms filters out empty strings from scope."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:white"
+        self.mixin.policy_scope = ["scope1", "", "  ", "scope2"]
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        # Should filter out empty and whitespace-only strings
+        self.assertEqual(policy_scope_term, "['scope1,scope2'] AS policy_scope")
+    
+    def test_policy_override_terms_missing_level(self):
+        """Test policy_override_terms raises ValueError when policy_level is not set."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = ""
+        self.mixin.policy_scope = ["scope1"]
+        
+        with self.assertRaises(ValueError) as context:
+            self.mixin.policy_override_terms()
+        self.assertIn("policy_level is not set", str(context.exception))
+    
+    def test_policy_override_terms_missing_scope(self):
+        """Test policy_override_terms raises ValueError when policy_scope is None."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:amber"
+        self.mixin.policy_scope = None
+        
+        with self.assertRaises(ValueError) as context:
+            self.mixin.policy_override_terms()
+        self.assertIn("policy_scope is not set or not a list", str(context.exception))
+    
+    def test_policy_override_terms_scope_not_list(self):
+        """Test policy_override_terms raises ValueError when policy_scope is not a list."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:green"
+        self.mixin.policy_scope = "not_a_list"
+        
+        with self.assertRaises(ValueError) as context:
+            self.mixin.policy_override_terms()
+        self.assertIn("policy_scope is not set or not a list", str(context.exception))
+    
+    def test_policy_override_terms_empty_scope_list(self):
+        """Test policy_override_terms with empty policy_scope list."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:red"
+        self.mixin.policy_scope = []
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        self.assertEqual(policy_level_term, "'tlp:red' AS policy_level")
+        self.assertEqual(policy_scope_term, "[''] AS policy_scope")
+    
+    def test_policy_override_terms_special_characters_in_level(self):
+        """Test policy_override_terms with special characters in policy_level."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "custom:level-1.0"
+        self.mixin.policy_scope = ["internal"]
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        self.assertEqual(policy_level_term, "'custom:level-1.0' AS policy_level")
+    
+    def test_policy_override_terms_complex_scopes(self):
+        """Test policy_override_terms with complex scope names."""
+        self.mixin.policy_override = True
+        self.mixin.policy_level = "tlp:amber"
+        self.mixin.policy_scope = ["org:research", "team:security", "project:alpha"]
+        
+        policy_level_term, policy_scope_term = self.mixin.policy_override_terms()
+        
+        self.assertEqual(policy_scope_term, "['org:research,team:security,project:alpha'] AS policy_scope")
 
 
 class TestBaseClickHouseDictionaryMixin(unittest.TestCase):

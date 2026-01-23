@@ -635,6 +635,94 @@ class TestMaterializedViewByEdgeAS(unittest.TestCase):
         self.assertIn("dictGetOrNull('meta_application_dict'", mv.mv_select_query)
         self.assertIn("protocol, application_port", mv.mv_select_query)
         self.assertIn("AS application_id", mv.mv_select_query)
+    
+    def test_policy_override_default_enabled(self):
+        """Test that policy override is enabled by default for MaterializedViewByEdgeAS."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
+        
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="1h")
+        
+        # Should be enabled by default
+        self.assertTrue(mv.policy_override)
+        self.assertEqual(mv.policy_level, "tlp:green")
+        self.assertEqual(mv.policy_scope, ["comm:re"])
+    
+    def test_policy_override_in_mv_query_when_enabled(self):
+        """Test that MV SELECT query uses policy override terms when enabled."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
+        
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="1h")
+        
+        # Should have override terms in query
+        self.assertIn("'tlp:green' AS policy_level", mv.mv_select_query)
+        self.assertIn("['comm:re'] AS policy_scope", mv.mv_select_query)
+        # Should still reference policy_originator from source
+        self.assertIn("policy_originator,", mv.mv_select_query)
+    
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_1H_POLICY_OVERRIDE': 'false'
+    })
+    def test_policy_override_disabled(self):
+        """Test MaterializedViewByEdgeAS with policy override disabled."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
+        
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="1h")
+        
+        self.assertFalse(mv.policy_override)
+        # Query should use source fields without override
+        self.assertIn("policy_level", mv.mv_select_query)
+        self.assertIn("policy_scope", mv.mv_select_query)
+        # Should NOT have the override terms
+        self.assertNotIn("'tlp:green' AS policy_level", mv.mv_select_query)
+        self.assertNotIn("AS policy_scope", mv.mv_select_query)
+    
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_POLICY_LEVEL': 'tlp:amber',
+        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_POLICY_SCOPE': 'internal,restricted',
+        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_POLICY_OVERRIDE': 'true'
+    })
+    def test_policy_override_custom_settings(self):
+        """Test MaterializedViewByEdgeAS with custom policy override settings."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
+        
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="5m")
+        
+        self.assertTrue(mv.policy_override)
+        self.assertEqual(mv.policy_level, "tlp:amber")
+        self.assertEqual(mv.policy_scope, ["internal", "restricted"])
+        
+        # Query should use custom override values
+        self.assertIn("'tlp:amber' AS policy_level", mv.mv_select_query)
+        self.assertIn("['internal,restricted'] AS policy_scope", mv.mv_select_query)
+    
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_1D_POLICY_LEVEL': 'tlp:red',
+        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_1D_POLICY_SCOPE': 'confidential',
+        'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_1D_POLICY_OVERRIDE': '1'  # Test with '1' instead of 'true'
+    })
+    def test_policy_override_with_numeric_true(self):
+        """Test that policy override works with '1' value."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
+        
+        mv = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="1d")
+        
+        self.assertTrue(mv.policy_override)
+        self.assertIn("'tlp:red' AS policy_level", mv.mv_select_query)
+        self.assertIn("['confidential'] AS policy_scope", mv.mv_select_query)
+    
+    def test_policy_settings_per_aggregation_window(self):
+        """Test that different aggregation windows can have different policy settings."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByEdgeAS
+        
+        # Each agg window should use its own environment variables
+        mv_5m = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="5m")
+        mv_1h = MaterializedViewByEdgeAS(source_table_name="data_flow", agg_window="1h")
+        
+        # Both should have defaults
+        self.assertEqual(mv_5m.policy_level, "tlp:green")
+        self.assertEqual(mv_1h.policy_level, "tlp:green")
+        self.assertTrue(mv_5m.policy_override)
+        self.assertTrue(mv_1h.policy_override)
 
 
 class TestMaterializedViewByInterface(unittest.TestCase):
@@ -902,6 +990,62 @@ class TestMaterializedViewByInterface(unittest.TestCase):
         self.assertIn("flow_count", column_names)
         self.assertIn("bit_count", column_names)
         self.assertIn("packet_count", column_names)
+    
+    def test_policy_override_default_enabled(self):
+        """Test that policy override is enabled by default for MaterializedViewByInterface."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByInterface
+        
+        mv = MaterializedViewByInterface(source_table_name="data_flow", agg_window="1h")
+        
+        # Should be enabled by default
+        self.assertTrue(mv.policy_override)
+        self.assertEqual(mv.policy_level, "tlp:green")
+        self.assertEqual(mv.policy_scope, ["comm:re"])
+    
+    def test_policy_override_in_mv_query_when_enabled(self):
+        """Test that MV SELECT query uses policy override terms when enabled."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByInterface
+        
+        mv = MaterializedViewByInterface(source_table_name="data_flow", agg_window="1h")
+        
+        # Should have override terms in query
+        self.assertIn("'tlp:green' AS policy_level", mv.mv_select_query)
+        self.assertIn("['comm:re'] AS policy_scope", mv.mv_select_query)
+        # Should still reference policy_originator from source
+        self.assertIn("policy_originator,", mv.mv_select_query)
+    
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_FLOW_MV_BY_INTERFACE_1H_POLICY_OVERRIDE': 'false'
+    })
+    def test_policy_override_disabled(self):
+        """Test MaterializedViewByInterface with policy override disabled."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByInterface
+        
+        mv = MaterializedViewByInterface(source_table_name="data_flow", agg_window="1h")
+        
+        self.assertFalse(mv.policy_override)
+        # Query should use source fields without override
+        self.assertNotIn("'tlp:green' AS policy_level", mv.mv_select_query)
+        self.assertNotIn("AS policy_scope", mv.mv_select_query)
+    
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_FLOW_MV_BY_INTERFACE_5M_POLICY_LEVEL': 'tlp:white',
+        'CLICKHOUSE_FLOW_MV_BY_INTERFACE_5M_POLICY_SCOPE': 'public,external',
+        'CLICKHOUSE_FLOW_MV_BY_INTERFACE_5M_POLICY_OVERRIDE': 'yes'  # Test with 'yes'
+    })
+    def test_policy_override_custom_settings(self):
+        """Test MaterializedViewByInterface with custom policy override settings."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByInterface
+        
+        mv = MaterializedViewByInterface(source_table_name="data_flow", agg_window="5m")
+        
+        self.assertTrue(mv.policy_override)
+        self.assertEqual(mv.policy_level, "tlp:white")
+        self.assertEqual(mv.policy_scope, ["public", "external"])
+        
+        # Query should use custom override values
+        self.assertIn("'tlp:white' AS policy_level", mv.mv_select_query)
+        self.assertIn("['public,external'] AS policy_scope", mv.mv_select_query)
 
 
 class TestMaterializedViewByIPVersion(unittest.TestCase):
@@ -1151,6 +1295,81 @@ class TestMaterializedViewByIPVersion(unittest.TestCase):
         
         # Should be exactly 8 columns
         self.assertEqual(len(column_names), 8)
+    
+    def test_policy_override_default_enabled(self):
+        """Test that policy override is enabled by default for MaterializedViewByIPVersion."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="1h")
+        
+        # Should be enabled by default
+        self.assertTrue(mv.policy_override)
+        self.assertEqual(mv.policy_level, "tlp:green")
+        self.assertEqual(mv.policy_scope, ["comm:re"])
+    
+    def test_policy_override_in_mv_query_when_enabled(self):
+        """Test that MV SELECT query uses policy override terms when enabled."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="1h")
+        
+        # Should have override terms in query
+        self.assertIn("'tlp:green' AS policy_level", mv.mv_select_query)
+        self.assertIn("['comm:re'] AS policy_scope", mv.mv_select_query)
+        # Should still reference policy_originator from source
+        self.assertIn("policy_originator,", mv.mv_select_query)
+    
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_1D_POLICY_OVERRIDE': '0'  # Test with '0' for false
+    })
+    def test_policy_override_disabled(self):
+        """Test MaterializedViewByIPVersion with policy override disabled."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="1d")
+        
+        self.assertFalse(mv.policy_override)
+        # Query should use source fields without override
+        self.assertNotIn("'tlp:green' AS policy_level", mv.mv_select_query)
+        self.assertNotIn("AS policy_scope", mv.mv_select_query)
+    
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_1W_POLICY_LEVEL': 'custom:level',
+        'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_1W_POLICY_SCOPE': 'vpn:internal,region:us',
+        'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_1W_POLICY_OVERRIDE': 'TRUE'  # Test case insensitive
+    })
+    def test_policy_override_custom_settings(self):
+        """Test MaterializedViewByIPVersion with custom policy override settings."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="1w")
+        
+        self.assertTrue(mv.policy_override)
+        self.assertEqual(mv.policy_level, "custom:level")
+        self.assertEqual(mv.policy_scope, ["vpn:internal", "region:us"])
+        
+        # Query should use custom override values
+        self.assertIn("'custom:level' AS policy_level", mv.mv_select_query)
+        self.assertIn("['vpn:internal,region:us'] AS policy_scope", mv.mv_select_query)
+    
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_1MO_POLICY_LEVEL': 'tlp:amber',
+        'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_1MO_POLICY_SCOPE': 'research',
+        'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_1MO_POLICY_OVERRIDE': 'true'
+    })
+    def test_policy_override_single_scope(self):
+        """Test MaterializedViewByIPVersion with single scope value."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="1mo")
+        
+        self.assertTrue(mv.policy_override)
+        self.assertEqual(mv.policy_level, "tlp:amber")
+        self.assertEqual(mv.policy_scope, ["research"])
+        
+        # Query should use single scope value
+        self.assertIn("'tlp:amber' AS policy_level", mv.mv_select_query)
+        self.assertIn("['research'] AS policy_scope", mv.mv_select_query)
 
 if __name__ == '__main__':
     # Run tests with verbose output
