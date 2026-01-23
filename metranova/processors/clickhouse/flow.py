@@ -93,6 +93,7 @@ class BaseFlowProcessor(BaseDataProcessor):
         # Enable materialized views - they accept a comma separated list of agg windows - e.g. 5m, 12h, 1d, 1w, 3mo, 10y, etc
         self.load_materialized_views('CLICKHOUSE_FLOW_MV_BY_EDGE_AS', MaterializedViewByEdgeAS)
         self.load_materialized_views('CLICKHOUSE_FLOW_MV_BY_INTERFACE', MaterializedViewByInterface)
+        self.load_materialized_views('CLICKHOUSE_FLOW_MV_BY_IP_VERSION', MaterializedViewByIPVersion)
 
     def parse_env_map_list(self, map_list_str: str | None) -> Dict[str, str]:
         result = {}
@@ -302,4 +303,60 @@ class MaterializedViewByInterface(BaseClickHouseMaterializedViewMixin):
                 packet_count
             FROM {self.source_table_name}
             WHERE in_interface_ref IS NOT NULL AND out_interface_ref IS NOT NULL
+        """
+
+class MaterializedViewByIPVersion(BaseClickHouseMaterializedViewMixin):
+    
+    def __init__(self, source_table_name: str = "", agg_window: str = ""):
+        super().__init__(source_table_name, agg_window)  
+        #check required parameters
+        if not agg_window:
+            raise ValueError("agg_window must be provided for MaterializedViewByIPVersion")
+        
+        #Target Table settings
+        self.column_defs = [
+            ['start_time', 'DateTime', True],
+            ['policy_originator', 'LowCardinality(Nullable(String))', True],
+            ['policy_level', 'LowCardinality(Nullable(String))', True],
+            ['policy_scope', 'Array(LowCardinality(String))', True],
+            ['ip_version', 'UInt8', True],
+            ['flow_count', 'UInt64', True],
+            ['bit_count', 'UInt64', True],
+            ['packet_count', 'UInt64', True]
+        ]
+        agg_window_upper = agg_window.upper()
+        self.table = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_TABLE', f'data_flow_by_ip_version_{agg_window}')
+        self.table_ttl = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_TTL', '5 YEAR')
+        self.table_ttl_column = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_TTL_COLUMN', 'start_time')
+        self.partition_by = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_PARTITION_BY', "toYYYYMMDD(start_time)")
+        self.table_engine = 'SummingMergeTree'
+        # note: The opts are a single parameter passed as a tuple. The create_table_command will add the surrounding parantheses
+        # Example: SummingMergeTree((flow_count, bit_count, packet_count))
+        # Replication Example: ReplicatedSummingMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}, (flow_count, bit_count, packet_count))
+        self.table_engine_opts = '(flow_count, bit_count, packet_count)'
+        self.primary_keys = [
+            "ip_version",
+            "start_time"
+        ]
+        self.order_by = [
+            "ip_version",
+            "start_time",
+            "policy_originator",
+            "policy_level",
+            "policy_scope"
+        ]
+        self.allow_nullable_key = True
+        self.mv_name = self.table + "_mv"
+        # Note: this doesn't do any de-duplication or filtering, just aggregates by IP version across all flows seen
+        self.mv_select_query = f"""
+            SELECT
+                toStartOfInterval(start_time, INTERVAL {self.agg_window_ch_interval}) AS start_time, 
+                policy_originator,
+                policy_level,
+                policy_scope,
+                ip_version,
+                1 AS flow_count,
+                bit_count,
+                packet_count
+            FROM {self.source_table_name}
         """

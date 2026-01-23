@@ -903,6 +903,255 @@ class TestMaterializedViewByInterface(unittest.TestCase):
         self.assertIn("bit_count", column_names)
         self.assertIn("packet_count", column_names)
 
+
+class TestMaterializedViewByIPVersion(unittest.TestCase):
+    def setUp(self):
+        """Set up test fixtures before each test method."""
+        self.mock_pipeline = MagicMock()
+    
+    def test_initialization_requires_agg_window(self):
+        """Test that MaterializedViewByIPVersion requires agg_window parameter."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        with self.assertRaises(ValueError) as context:
+            MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="")
+        self.assertIn("agg_window must be provided", str(context.exception))
+    
+    def test_initialization_with_agg_window(self):
+        """Test MaterializedViewByIPVersion initialization with aggregation window."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="5m")
+        
+        self.assertEqual(mv.source_table_name, "data_flow")
+        self.assertEqual(mv.agg_window, "5m")
+        self.assertEqual(mv.agg_window_ch_interval, "5 MINUTE")
+        self.assertEqual(mv.table, "data_flow_by_ip_version_5m")
+        self.assertEqual(mv.mv_name, "data_flow_by_ip_version_5m_mv")
+        self.assertEqual(mv.table_engine, "SummingMergeTree")
+        self.assertEqual(mv.table_engine_opts, "(flow_count, bit_count, packet_count)")
+    
+    def test_create_table_command_basic(self):
+        """Test create_table_command for MaterializedViewByIPVersion."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="1h")
+        result = mv.create_table_command()
+        
+        print("\n" + "="*80)
+        print("CREATE TABLE COMMAND OUTPUT (MaterializedViewByIPVersion - 1h):")
+        print("="*80)
+        print(result)
+        print("="*80)
+        
+        # Check table name and engine
+        self.assertIn("CREATE TABLE IF NOT EXISTS data_flow_by_ip_version_1h", result)
+        self.assertIn("ENGINE = SummingMergeTree((flow_count, bit_count, packet_count))", result)
+        
+        # Check for required columns
+        self.assertIn("`start_time` DateTime", result)
+        self.assertIn("`policy_originator` LowCardinality(Nullable(String))", result)
+        self.assertIn("`policy_level` LowCardinality(Nullable(String))", result)
+        self.assertIn("`policy_scope` Array(LowCardinality(String))", result)
+        self.assertIn("`ip_version` UInt8", result)
+        self.assertIn("`flow_count` UInt64", result)
+        self.assertIn("`bit_count` UInt64", result)
+        self.assertIn("`packet_count` UInt64", result)
+        
+        # Check settings
+        self.assertIn("PARTITION BY toYYYYMMDD(start_time)", result)
+        self.assertIn("PRIMARY KEY (`ip_version`,`start_time`)", result)
+        self.assertIn("TTL start_time + INTERVAL 5 YEAR", result)
+    
+    def test_create_mv_command_basic(self):
+        """Test create_mv_command for MaterializedViewByIPVersion."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="1d")
+        result = mv.create_mv_command()
+        
+        print("\n" + "="*80)
+        print("CREATE MV COMMAND OUTPUT (MaterializedViewByIPVersion - 1d):")
+        print("="*80)
+        print(result)
+        print("="*80)
+        
+        # Check materialized view structure
+        self.assertIn("CREATE MATERIALIZED VIEW IF NOT EXISTS data_flow_by_ip_version_1d_mv", result)
+        self.assertIn("TO data_flow_by_ip_version_1d", result)
+        self.assertIn("AS", result)
+        
+        # Check SELECT query elements
+        self.assertIn("toStartOfInterval(start_time, INTERVAL 1 DAY)", result)
+        self.assertIn("FROM data_flow", result)
+        self.assertIn("policy_originator", result)
+        self.assertIn("policy_level", result)
+        self.assertIn("policy_scope", result)
+        self.assertIn("ip_version", result)
+        self.assertIn("1 AS flow_count", result)
+        self.assertIn("bit_count", result)
+        self.assertIn("packet_count", result)
+        
+        # Should NOT have a WHERE clause (aggregates all flows)
+        self.assertNotIn("WHERE", result)
+    
+    def test_various_aggregation_windows(self):
+        """Test MaterializedViewByIPVersion with various aggregation windows."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        test_cases = [
+            ("5m", "5 MINUTE", "data_flow_by_ip_version_5m"),
+            ("1h", "1 HOUR", "data_flow_by_ip_version_1h"),
+            ("12h", "12 HOUR", "data_flow_by_ip_version_12h"),
+            ("1d", "1 DAY", "data_flow_by_ip_version_1d"),
+            ("1w", "1 WEEK", "data_flow_by_ip_version_1w"),
+            ("1mo", "1 MONTH", "data_flow_by_ip_version_1mo"),
+            ("1y", "1 YEAR", "data_flow_by_ip_version_1y")
+        ]
+        
+        for agg_window, expected_interval, expected_table in test_cases:
+            with self.subTest(agg_window=agg_window):
+                mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window=agg_window)
+                self.assertEqual(mv.agg_window, agg_window)
+                self.assertEqual(mv.agg_window_ch_interval, expected_interval)
+                self.assertEqual(mv.table, expected_table)
+                self.assertEqual(mv.mv_name, expected_table + "_mv")
+    
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_1H_TABLE': 'custom_ip_version_1h',
+        'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_1H_TTL': '10 YEAR',
+        'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_1H_PARTITION_BY': 'toYYYYMM(start_time)'
+    })
+    def test_custom_environment_variables(self):
+        """Test MaterializedViewByIPVersion with custom environment variables."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="1h")
+        
+        # Check custom values
+        self.assertEqual(mv.table, "custom_ip_version_1h")
+        self.assertEqual(mv.table_ttl, "10 YEAR")
+        self.assertEqual(mv.partition_by, "toYYYYMM(start_time)")
+        
+        result = mv.create_table_command()
+        self.assertIn("CREATE TABLE IF NOT EXISTS custom_ip_version_1h", result)
+        self.assertIn("TTL start_time + INTERVAL 10 YEAR", result)
+        self.assertIn("PARTITION BY toYYYYMM(start_time)", result)
+    
+    def test_order_by_configuration(self):
+        """Test that MaterializedViewByIPVersion has correct order_by configuration."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="5m")
+        
+        # Check that order_by includes all necessary columns
+        expected_order = ["ip_version", "start_time", "policy_originator", "policy_level", "policy_scope"]
+        self.assertEqual(mv.order_by, expected_order)
+    
+    def test_primary_keys_configuration(self):
+        """Test that MaterializedViewByIPVersion has correct primary_keys configuration."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="1d")
+        
+        expected_primary_keys = ["ip_version", "start_time"]
+        self.assertEqual(mv.primary_keys, expected_primary_keys)
+    
+    def test_allow_nullable_key(self):
+        """Test that MaterializedViewByIPVersion allows nullable keys."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="1h")
+        
+        self.assertTrue(mv.allow_nullable_key)
+        
+        # Verify it's in the table command
+        result = mv.create_table_command()
+        self.assertIn("allow_nullable_key = 1", result)
+    
+    @patch.dict(os.environ, {'CLICKHOUSE_REPLICATION': 'true'})
+    def test_with_replication(self):
+        """Test MaterializedViewByIPVersion with replication enabled."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="5m")
+        result = mv.create_table_command()
+        
+        # Should use ReplicatedSummingMergeTree
+        self.assertIn("ReplicatedSummingMergeTree", result)
+        self.assertIn("/clickhouse/tables/{shard}/{database}/{table}", result)
+        self.assertIn("{replica}", result)
+    
+    def test_mv_select_query_uses_interval(self):
+        """Test that the MV SELECT query uses the correct interval."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        test_cases = [
+            ("5m", "5 MINUTE"),
+            ("1h", "1 HOUR"),
+            ("1d", "1 DAY"),
+            ("1w", "1 WEEK")
+        ]
+        
+        for agg_window, expected_interval in test_cases:
+            with self.subTest(agg_window=agg_window):
+                mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window=agg_window)
+                self.assertIn(f"INTERVAL {expected_interval}", mv.mv_select_query)
+    
+    def test_mv_select_query_no_filtering(self):
+        """Test that the MV SELECT query does not filter flows (aggregates all)."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="1h")
+        
+        # Should NOT have any WHERE clause - aggregates all flows
+        self.assertNotIn("WHERE", mv.mv_select_query)
+    
+    def test_mv_select_query_structure(self):
+        """Test that the MV SELECT query has correct structure."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="1h")
+        
+        # Check for required fields
+        self.assertIn("start_time", mv.mv_select_query)
+        self.assertIn("policy_originator", mv.mv_select_query)
+        self.assertIn("policy_level", mv.mv_select_query)
+        self.assertIn("policy_scope", mv.mv_select_query)
+        self.assertIn("ip_version", mv.mv_select_query)
+        self.assertIn("1 AS flow_count", mv.mv_select_query)
+        self.assertIn("bit_count", mv.mv_select_query)
+        self.assertIn("packet_count", mv.mv_select_query)
+        
+        # Should NOT have device or interface fields
+        self.assertNotIn("device_id", mv.mv_select_query)
+        self.assertNotIn("in_interface", mv.mv_select_query)
+        self.assertNotIn("out_interface", mv.mv_select_query)
+        self.assertNotIn("src_as", mv.mv_select_query)
+        self.assertNotIn("dst_as", mv.mv_select_query)
+    
+    def test_column_definitions(self):
+        """Test that MaterializedViewByIPVersion has correct column definitions."""
+        from metranova.processors.clickhouse.flow import MaterializedViewByIPVersion
+        
+        mv = MaterializedViewByIPVersion(source_table_name="data_flow", agg_window="5m")
+        
+        # Extract column names from column_defs
+        column_names = [col[0] for col in mv.column_defs]
+        
+        # Check for required columns (minimal set)
+        self.assertIn("start_time", column_names)
+        self.assertIn("policy_originator", column_names)
+        self.assertIn("policy_level", column_names)
+        self.assertIn("policy_scope", column_names)
+        self.assertIn("ip_version", column_names)
+        self.assertIn("flow_count", column_names)
+        self.assertIn("bit_count", column_names)
+        self.assertIn("packet_count", column_names)
+        
+        # Should be exactly 8 columns
+        self.assertEqual(len(column_names), 8)
+
 if __name__ == '__main__':
     # Run tests with verbose output
     unittest.main(verbosity=2)
