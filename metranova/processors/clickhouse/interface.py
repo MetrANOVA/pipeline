@@ -44,8 +44,8 @@ class InterfaceMetadataProcessor(BaseMetadataProcessor):
                 ['sap_name', 'Nullable(String)', True]
             ],
             "vrtr": [
-                ['vrtr_id', 'Nullable(LowCardinality(String))', True],
-                ['vrtr_name', 'Nullable(LowCardinality(String))', True]
+                ['vrtr_id', 'LowCardinality(Nullable(String))', True],
+                ['vrtr_name', 'LowCardinality(Nullable(String))', True]
             ],
             "vrtr_interface": [
                 ['vrtr_interface_encap', 'Nullable(UInt32)', True],
