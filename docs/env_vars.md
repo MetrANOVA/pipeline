@@ -161,6 +161,7 @@ Dictionaries provide fast lookup capabilities for metadata enrichment. Each meta
 |----------|---------|-------------|
 | `CLICKHOUSE_METADATA_FORCE_UPDATE` | `false` | Force metadata updates even if no changes detected |
 | `CLICKHOUSE_AS_METADATA_EXTENSIONS` | (none) | Comma-separated list of AS metadata extensions (e.g., `peeringdb`) |
+| `CLICKHOUSE_IF_METADATA_EXTENSIONS` | (none) | Comma-separated list of interface metadata extensions (e.g., `sap,vrtr,vrtr_interface`) |
 
 ## ClickHouse Processor Policy Settings
 
