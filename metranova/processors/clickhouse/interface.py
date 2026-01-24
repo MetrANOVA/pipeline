@@ -54,7 +54,7 @@ class InterfaceMetadataProcessor(BaseMetadataProcessor):
             ]
         }
         # determine columns to use from environment
-        self.extension_defs['ext'] = self.get_extension_defs('CLICKHOUSE_AS_METADATA_EXTENSIONS', extension_options)
+        self.extension_defs['ext'] = self.get_extension_defs('CLICKHOUSE_IF_METADATA_EXTENSIONS', extension_options)
         self.val_id_field = ['id']
         self.required_fields = [['id'], ['device_id'], ['name'], ['type']]
         self.self_ref_fields = ['port_interface', 'remote_interface', 'lag_member_interface']
