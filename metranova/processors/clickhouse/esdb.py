@@ -12,7 +12,7 @@ Data model:
 - org_types: List of types for this organization (e.g., ESnet Site, Commercial Peer)
 - org_funding_agency: Funding source (e.g., NSF)
 - org_hide: True if visibility is Hidden or Hide Flow Data
-- asn: AS number of this organization
+- as_id: AS number of this organization
 """
 import logging
 import os
@@ -32,7 +32,7 @@ class MetaIPServiceProcessor(BaseMetadataProcessor):
         self.ipservice_url_pattern = os.getenv('IP_SERVICE_URL_MATCH_PATTERN', 'esdb')
         
         # Type formatting
-        self.int_fields = ['asn']
+        self.int_fields = ['as_id']
         self.bool_fields = ['org_hide']
         self.array_fields = ['service_prefix_group_name', 'service_label', 'service_type', 'org_types']
         
@@ -58,7 +58,7 @@ class MetaIPServiceProcessor(BaseMetadataProcessor):
             ['org_hide', 'Bool', True],
             
             # ASN
-            ['asn', 'Nullable(UInt32)', True],
+            ['as_id', 'Nullable(UInt32)', True],
         ])
 
     def match_message(self, value):
@@ -112,7 +112,7 @@ class MetaIPServiceProcessor(BaseMetadataProcessor):
                 'org_types': org_info.get('types', []),
                 'org_funding_agency': org_info.get('funding_agency'),
                 'org_hide': org_info.get('hide', False),
-                'asn': asn,
+                'as_id': asn,
             }
             
             return ip_record
@@ -325,7 +325,6 @@ Data model:
 - org_full_name: Full organization name (e.g., Lawrence Berkeley National Lab)
 - org_hide: True if visibility is Hidden or tags contain 'hide'
 - org_tag: Array of tags associated with organization
-- org_tag_str: String version of tags (useful for aggregations)
 - org_type: List of types for this organization (e.g., ESnet Site, Commercial Peer)
 - org_funding_agency: Funding source (e.g., NSF)
 - peer_as_id: AS number of peer organization
@@ -364,7 +363,6 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
             ['org_full_name', 'Nullable(String)', True],
             ['org_hide', 'Bool', True],
             ['org_tag', 'Array(String)', True],
-            ['org_tag_str', 'Nullable(String)', True],
             ['org_type', 'Array(String)', True],
             ['org_funding_agency', 'LowCardinality(Nullable(String))', True],
             
@@ -426,7 +424,6 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
                     'org_full_name': org_info.get('full_name'),
                     'org_hide': org_info.get('hide', False),
                     'org_tag': org_info.get('tags', []),
-                    'org_tag_str': org_info.get('tags_str'),
                     'org_type': org_info.get('types', []),
                     'org_funding_agency': org_info.get('funding_agency'),
                 })
@@ -436,7 +433,6 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
                     'org_full_name': None,
                     'org_hide': False,
                     'org_tag': [],
-                    'org_tag_str': None,
                     'org_type': [],
                     'org_funding_agency': None,
                 })

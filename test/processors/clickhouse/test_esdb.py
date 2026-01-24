@@ -38,7 +38,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         self.assertEqual(processor.table, 'meta_ip_esdb')
         self.assertEqual(processor.val_id_field, ['id'])
         self.assertEqual(processor.required_fields, [['id'], ['ip_subnet']])
-        self.assertEqual(processor.int_fields, ['asn'])
+        self.assertEqual(processor.int_fields, ['as_id'])
         self.assertEqual(processor.bool_fields, ['org_hide'])
         self.assertIn('service_prefix_group_name', processor.array_fields)
         self.assertIn('service_label', processor.array_fields)
@@ -68,7 +68,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
             'id', 'ref', 'hash', 'insert_time', 'ext', 'tag',
             'ip_subnet', 'service_prefix_group_name', 'service_label',
             'service_type', 'org_short_name', 'org_full_name',
-            'org_types', 'org_funding_agency', 'org_hide', 'asn'
+            'org_types', 'org_funding_agency', 'org_hide', 'as_id'
         ]
         
         for expected_col in expected_columns:
@@ -90,7 +90,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         self.assertEqual(column_types['org_types'], 'Array(String)')
         self.assertEqual(column_types['org_funding_agency'], 'LowCardinality(Nullable(String))')
         self.assertEqual(column_types['org_hide'], 'Bool')
-        self.assertEqual(column_types['asn'], 'Nullable(UInt32)')
+        self.assertEqual(column_types['as_id'], 'Nullable(UInt32)')
 
     def test_create_table_command(self):
         """Test CREATE TABLE command generation."""
@@ -256,7 +256,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         self.assertEqual(result['org_types'], ['Research Site'])
         self.assertEqual(result['org_funding_agency'], 'TESTFUND')
         self.assertEqual(result['org_hide'], False)
-        self.assertEqual(result['asn'], 64496)
+        self.assertEqual(result['as_id'], 64496)
 
     def test_build_ip_record_multiple_services(self):
         """Test building IP record with multiple service values (merged)."""
@@ -335,7 +335,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         result = processor._build_ip_record('10.0.0.0/8', service_info, org_info, None)
         
         self.assertIsNotNone(result)
-        self.assertIsNone(result['asn'])
+        self.assertIsNone(result['as_id'])
 
     # ==================== _extract_ip_records tests ====================
 
@@ -385,7 +385,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         self.assertEqual(record1['org_types'], ['Research Site'])
         self.assertEqual(record1['org_funding_agency'], 'TESTFUND')
         self.assertFalse(record1['org_hide'])
-        self.assertEqual(record1['asn'], 64496)
+        self.assertEqual(record1['as_id'], 64496)
 
     def test_extract_ip_records_duplicate_prefix_merging_deduplicates(self):
         """Test that duplicate values are deduplicated when merging prefixes."""
@@ -614,7 +614,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         self.assertEqual(record['org_full_name'], 'Organization One')
         self.assertEqual(record['org_funding_agency'], 'FUND1')
         self.assertEqual(record['org_types'], ['Research Site'])
-        self.assertEqual(record['asn'], 64496)
+        self.assertEqual(record['as_id'], 64496)
 
     def test_extract_ip_records_hidden_visibility(self):
         """Test extraction with Hidden visibility."""
@@ -861,7 +861,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         result = processor._extract_ip_records(ipservice_data)
         
         self.assertEqual(len(result), 1)
-        self.assertIsNone(result[0]['asn'])
+        self.assertIsNone(result[0]['as_id'])
 
     def test_extract_ip_records_null_service_type(self):
         """Test extracting IP records when serviceType is null."""
@@ -1082,7 +1082,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
             'org_types': ['Research Site'],
             'org_funding_agency': 'TESTFUND',
             'org_hide': False,
-            'asn': 64496
+            'as_id': 64496
         }
         
         result = processor.build_metadata_fields(value)
@@ -1096,7 +1096,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         self.assertEqual(result['org_types'], ['Research Site'])
         self.assertEqual(result['org_funding_agency'], 'TESTFUND')
         self.assertFalse(result['org_hide'])
-        self.assertEqual(result['asn'], 64496)
+        self.assertEqual(result['as_id'], 64496)
 
     def test_build_metadata_fields_ip_subnet_validation(self):
         """Test IP subnet validation in metadata fields."""
@@ -1379,7 +1379,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         expected_columns = [
             'id', 'ref', 'hash', 'insert_time', 'ext', 'tag',
             'connection_name', 'svc_edge_id', 'org_short_name',
-            'org_full_name', 'org_hide', 'org_tag', 'org_tag_str',
+            'org_full_name', 'org_hide', 'org_tag',
             'org_type', 'org_funding_agency', 'peer_as_id',
             'peer_ipv4', 'peer_ipv6'
         ]
@@ -1400,7 +1400,6 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         self.assertEqual(column_types['org_full_name'], 'Nullable(String)')
         self.assertEqual(column_types['org_hide'], 'Bool')
         self.assertEqual(column_types['org_tag'], 'Array(String)')
-        self.assertEqual(column_types['org_tag_str'], 'Nullable(String)')
         self.assertEqual(column_types['org_type'], 'Array(String)')
         self.assertEqual(column_types['org_funding_agency'], 'LowCardinality(Nullable(String))')
         self.assertEqual(column_types['peer_as_id'], 'Nullable(UInt32)')
@@ -1582,7 +1581,6 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         self.assertEqual(result['org_funding_agency'], 'TESTFUND')
         self.assertFalse(result['org_hide'])
         self.assertEqual(result['org_tag'], ['primary'])
-        self.assertEqual(result['org_tag_str'], 'primary')
         self.assertEqual(result['peer_as_id'], 64496)
         self.assertEqual(result['peer_ipv4'], '192.0.2.1')
         self.assertEqual(result['peer_ipv6'], '2001:db8::1')
@@ -1604,7 +1602,6 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         self.assertIsNone(result['org_full_name'])
         self.assertEqual(result['org_type'], [])
         self.assertEqual(result['org_tag'], [])
-        self.assertIsNone(result['org_tag_str'])
         self.assertFalse(result['org_hide'])
 
     def test_build_service_edge_record_no_peer_info(self):
@@ -1712,7 +1709,6 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         
         self.assertIsNotNone(result)
         self.assertEqual(len(result['org_tag']), 3)
-        self.assertEqual(result['org_tag_str'], 'primary,transit,backup')
 
     def test_build_service_edge_record_ipv4_only_peer(self):
         """Test building service edge record with IPv4-only peer."""
@@ -2697,7 +2693,6 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
             'org_full_name': 'Test Organization',
             'org_hide': False,
             'org_tag': ['primary'],
-            'org_tag_str': 'primary',
             'org_type': ['Research Site'],
             'org_funding_agency': 'TESTFUND',
             'peer_as_id': 64496,
@@ -2713,7 +2708,6 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         self.assertEqual(result['org_full_name'], 'Test Organization')
         self.assertFalse(result['org_hide'])
         self.assertEqual(result['org_tag'], ['primary'])
-        self.assertEqual(result['org_tag_str'], 'primary')
         self.assertEqual(result['org_type'], ['Research Site'])
         self.assertEqual(result['org_funding_agency'], 'TESTFUND')
         self.assertEqual(result['peer_as_id'], 64496)
