@@ -33,7 +33,7 @@ class MetaIPServiceProcessor(BaseMetadataProcessor):
         
         # Type formatting
         self.int_fields = ['as_id']
-        self.bool_fields = ['org_hide']
+        self.boolean_fields = ['org_hide']
         self.array_fields = ['service_prefix_group_name', 'service_label', 'service_type', 'org_types']
         
         # ID and required fields
@@ -43,7 +43,7 @@ class MetaIPServiceProcessor(BaseMetadataProcessor):
         # Column definitions
         self.column_defs.extend([
             # IP subnet
-            ['ip_subnet', 'Tuple(IPv6, UInt8)', True],
+            ['ip_subnet', 'Array(Tuple(IPv6, UInt8))', True],
             
             # Service fields (arrays to handle multiple services per prefix)
             ['service_prefix_group_name', 'Array(String)', True],
@@ -103,7 +103,7 @@ class MetaIPServiceProcessor(BaseMetadataProcessor):
             
             ip_record = {
                 'id': prefix_ip,  # Use prefix as unique ID
-                'ip_subnet': ip_subnet,
+                'ip_subnet': [ip_subnet],
                 'service_prefix_group_name': service_info.get('prefix_group_name', []),
                 'service_label': service_info.get('label', []),
                 'service_type': service_info.get('type', []),
@@ -294,23 +294,10 @@ class MetaIPServiceProcessor(BaseMetadataProcessor):
         """Extract and format IP Service/ESDB IP metadata fields"""
         formatted_record = super().build_metadata_fields(value)
         
-        # Validate and format IP subnet
-        ip_subnet = formatted_record.get('ip_subnet')
-        if isinstance(ip_subnet, (list, tuple)) and len(ip_subnet) == 2:
-            try:
-                formatted_record['ip_subnet'] = (str(ip_subnet[0]), int(ip_subnet[1]))
-            except (ValueError, TypeError):
-                self.logger.warning(f"Invalid ip_subnet: {ip_subnet}")
-                formatted_record['ip_subnet'] = None
-        
-        # Ensure arrays are lists
-        for field in self.array_fields:
-            if not isinstance(formatted_record.get(field), list):
-                formatted_record[field] = []
-        
-        # Ensure bool field
-        formatted_record['org_hide'] = bool(formatted_record.get('org_hide', False))
-        
+        self.format_array_fields(formatted_record)
+        self.format_boolean_fields(formatted_record)
+        self.format_int_fields(formatted_record)
+
         return formatted_record
 
 """
@@ -345,7 +332,7 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
         
         # Type formatting
         self.int_fields = ['peer_as_id']
-        self.bool_fields = ['org_hide']
+        self.boolean_fields = ['org_hide']
         self.array_fields = ['org_tag', 'org_type']
         
         # ID and required fields

@@ -39,7 +39,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         self.assertEqual(processor.val_id_field, ['id'])
         self.assertEqual(processor.required_fields, [['id'], ['ip_subnet']])
         self.assertEqual(processor.int_fields, ['as_id'])
-        self.assertEqual(processor.bool_fields, ['org_hide'])
+        self.assertEqual(processor.boolean_fields, ['org_hide'])
         self.assertIn('service_prefix_group_name', processor.array_fields)
         self.assertIn('service_label', processor.array_fields)
         self.assertIn('service_type', processor.array_fields)
@@ -81,7 +81,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         
         column_types = {col[0]: col[1] for col in processor.column_defs}
         
-        self.assertEqual(column_types['ip_subnet'], 'Tuple(IPv6, UInt8)')
+        self.assertEqual(column_types['ip_subnet'], 'Array(Tuple(IPv6, UInt8))')
         self.assertEqual(column_types['service_prefix_group_name'], 'Array(String)')
         self.assertEqual(column_types['service_label'], 'Array(String)')
         self.assertEqual(column_types['service_type'], 'Array(String)')
@@ -247,7 +247,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         
         self.assertIsNotNone(result)
         self.assertEqual(result['id'], '192.0.2.0/24')
-        self.assertEqual(result['ip_subnet'], ('192.0.2.0', 24))
+        self.assertEqual(result['ip_subnet'], [('192.0.2.0', 24)])
         self.assertEqual(result['service_prefix_group_name'], ['TESTLAB-Primary-v4'])
         self.assertEqual(result['service_label'], ['Primary'])
         self.assertEqual(result['service_type'], ['IPv4'])
@@ -376,7 +376,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         
         # Check first record
         record1 = next(r for r in result if r['id'] == '192.0.2.0/24')
-        self.assertEqual(record1['ip_subnet'], ('192.0.2.0', 24))
+        self.assertEqual(record1['ip_subnet'], [('192.0.2.0', 24)])
         self.assertEqual(record1['service_prefix_group_name'], ['TESTLAB-Primary-v4'])
         self.assertEqual(record1['service_label'], ['Primary'])
         self.assertEqual(record1['service_type'], ['IPv4'])
@@ -1025,7 +1025,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         
         # Check IPv6 record
         record = next(r for r in result if r['id'] == '2001:db8::/32')
-        self.assertEqual(record['ip_subnet'], ('2001:db8::', 32))
+        self.assertEqual(record['ip_subnet'], [('2001:db8::', 32)])
         self.assertEqual(record['service_type'], ['IPv6'])
 
     def test_extract_ip_records_mixed_ipv4_ipv6(self):
@@ -1073,7 +1073,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         processor = MetaIPServiceProcessor(self.mock_pipeline)
         
         value = {
-            'ip_subnet': ('192.0.2.0', 24),
+            'ip_subnet': [('192.0.2.0', 24)],
             'service_prefix_group_name': ['Test-v4'],
             'service_label': ['Primary'],
             'service_type': ['IPv4'],
@@ -1087,7 +1087,7 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         
         result = processor.build_metadata_fields(value)
         
-        self.assertEqual(result['ip_subnet'], ('192.0.2.0', 24))
+        self.assertEqual(result['ip_subnet'], [('192.0.2.0', 24)])
         self.assertEqual(result['service_prefix_group_name'], ['Test-v4'])
         self.assertEqual(result['service_label'], ['Primary'])
         self.assertEqual(result['service_type'], ['IPv4'])
@@ -1097,24 +1097,6 @@ class TestMetaIPServiceProcessor(unittest.TestCase):
         self.assertEqual(result['org_funding_agency'], 'TESTFUND')
         self.assertFalse(result['org_hide'])
         self.assertEqual(result['as_id'], 64496)
-
-    def test_build_metadata_fields_ip_subnet_validation(self):
-        """Test IP subnet validation in metadata fields."""
-        processor = MetaIPServiceProcessor(self.mock_pipeline)
-        
-        value = {
-            'ip_subnet': ['192.0.2.0', 24],  # List instead of tuple
-            'service_prefix_group_name': ['Test'],
-            'service_label': [],
-            'service_type': [],
-            'org_types': [],
-            'org_hide': False
-        }
-        
-        result = processor.build_metadata_fields(value)
-        
-        # Should convert to tuple
-        self.assertEqual(result['ip_subnet'], ('192.0.2.0', 24))
 
     def test_build_metadata_fields_ensures_arrays(self):
         """Test that array fields are converted to lists."""
@@ -1353,7 +1335,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         self.assertEqual(processor.val_id_field, ['id'])
         self.assertEqual(processor.required_fields, [['id']])
         self.assertEqual(processor.int_fields, ['peer_as_id'])
-        self.assertEqual(processor.bool_fields, ['org_hide'])
+        self.assertEqual(processor.boolean_fields, ['org_hide'])
         self.assertIn('org_tag', processor.array_fields)
         self.assertIn('org_type', processor.array_fields)
         self.assertEqual(processor.service_edge_url_pattern, 'esdb')
