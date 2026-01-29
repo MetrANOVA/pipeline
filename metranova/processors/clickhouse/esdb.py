@@ -320,7 +320,7 @@ Handles Service Database interface/service edge information including organizati
 Data model:
 - One record per service edge (keyed by device::service_edge_name format)
 - connection_name: Name of physical connection (for physical ports)
-- svc_edge_id: ID of service edge (for service edge interfaces)
+- service_edge_id: ID of service edge (for service edge interfaces)
 - org_short_name: Short name for the organization (e.g., LBNL)
 - org_full_name: Full organization name (e.g., Lawrence Berkeley National Lab)
 - org_hide: True if visibility is Hidden or tags contain 'hide'
@@ -333,12 +333,12 @@ Data model:
 """
 
 class MetaServiceEdgeProcessor(BaseMetadataProcessor):
-    """Processor for meta_esdb_service_edge table - Interface/ESDB service edge metadata"""
+    """Processor for meta_interface_esdb table - Interface/ESDB service edge metadata"""
     
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.logger = logger
-        self.table = os.getenv('CLICKHOUSE_ESDB_SERVICE_EDGE_TABLE', 'meta_esdb_service_edge')
+        self.table = os.getenv('CLICKHOUSE_ESDB_SERVICE_EDGE_TABLE', 'meta_interface_esdb')
         
         # Service Edge URL pattern for matching GraphQLConsumer messages
         self.service_edge_url_pattern = os.getenv('SERVICE_EDGE_URL_MATCH_PATTERN', 'esdb')
@@ -356,7 +356,7 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
         self.column_defs.extend([
             # Connection/Service Edge identifiers
             ['connection_name', 'Nullable(String)', True],
-            ['svc_edge_id', 'Nullable(String)', True],
+            ['service_edge_id', 'Nullable(String)', True],
             
             # Organization fields
             ['org_short_name', 'LowCardinality(Nullable(String))', True],
@@ -407,14 +407,14 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
         """
         return f"{device_name}::{service_edge_name}"
     
-    def _build_service_edge_record(self, interface_id, connection_name=None, svc_edge_id=None,
+    def _build_service_edge_record(self, interface_id, connection_name=None, service_edge_id=None,
                                    org_info=None, peer_info=None):
         """Build a service edge record"""
         try:
             record = {
                 'id': interface_id,
                 'connection_name': connection_name,
-                'svc_edge_id': svc_edge_id,
+                'service_edge_id': service_edge_id,
             }
             
             # Add organization info
@@ -572,7 +572,7 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
                 interface_id = self._build_service_edge_key(device_name, service_edge_name)
                 
                 # Get service edge ID and connection name
-                svc_edge_id = se.get('id')
+                service_edge_id = se.get('id')
                 
                 # Get connection name from physicalConnection
                 physical_conn = se.get('physicalConnection') or {}
@@ -683,7 +683,7 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
                 record = self._build_service_edge_record(
                     interface_id=interface_id,
                     connection_name=connection_name,
-                    svc_edge_id=svc_edge_id,
+                    service_edge_id=service_edge_id,
                     org_info=org_info,
                     peer_info=peer_info
                 )

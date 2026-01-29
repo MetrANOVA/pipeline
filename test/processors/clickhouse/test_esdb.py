@@ -1349,7 +1349,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         """Test processor initializes with correct default values."""
         processor = MetaServiceEdgeProcessor(self.mock_pipeline)
         
-        self.assertEqual(processor.table, 'meta_esdb_service_edge')
+        self.assertEqual(processor.table, 'meta_interface_esdb')
         self.assertEqual(processor.val_id_field, ['id'])
         self.assertEqual(processor.required_fields, [['id']])
         self.assertEqual(processor.int_fields, ['peer_as_id'])
@@ -1378,7 +1378,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         
         expected_columns = [
             'id', 'ref', 'hash', 'insert_time', 'ext', 'tag',
-            'connection_name', 'svc_edge_id', 'org_short_name',
+            'connection_name', 'service_edge_id', 'org_short_name',
             'org_full_name', 'org_hide', 'org_tag',
             'org_type', 'org_funding_agency', 'peer_as_id',
             'peer_ipv4', 'peer_ipv6'
@@ -1395,7 +1395,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         column_types = {col[0]: col[1] for col in processor.column_defs}
         
         self.assertEqual(column_types['connection_name'], 'Nullable(String)')
-        self.assertEqual(column_types['svc_edge_id'], 'Nullable(String)')
+        self.assertEqual(column_types['service_edge_id'], 'Nullable(String)')
         self.assertEqual(column_types['org_short_name'], 'LowCardinality(Nullable(String))')
         self.assertEqual(column_types['org_full_name'], 'Nullable(String)')
         self.assertEqual(column_types['org_hide'], 'Bool')
@@ -1412,7 +1412,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         
         result = processor.create_table_command()
         
-        self.assertIn("CREATE TABLE IF NOT EXISTS meta_esdb_service_edge", result)
+        self.assertIn("CREATE TABLE IF NOT EXISTS meta_interface_esdb", result)
         self.assertIn("ENGINE = MergeTree", result)
         self.assertIn("ORDER BY", result)
 
@@ -1422,7 +1422,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         """Test match_message with standard table field (backward compatibility)."""
         processor = MetaServiceEdgeProcessor(self.mock_pipeline)
         
-        msg = {'table': 'meta_esdb_service_edge', 'data': []}
+        msg = {'table': 'meta_interface_esdb', 'data': []}
         result = processor.match_message(msg)
         
         self.assertTrue(result)
@@ -1566,7 +1566,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         result = processor._build_service_edge_record(
             interface_id='router-test1::se_test_100',
             connection_name='test-connection-1',
-            svc_edge_id='100',
+            service_edge_id='100',
             org_info=org_info,
             peer_info=peer_info
         )
@@ -1574,7 +1574,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result['id'], 'router-test1::se_test_100')
         self.assertEqual(result['connection_name'], 'test-connection-1')
-        self.assertEqual(result['svc_edge_id'], '100')
+        self.assertEqual(result['service_edge_id'], '100')
         self.assertEqual(result['org_short_name'], 'TESTORG')
         self.assertEqual(result['org_full_name'], 'Test Organization')
         self.assertEqual(result['org_type'], ['Research Site'])
@@ -1592,7 +1592,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         result = processor._build_service_edge_record(
             interface_id='router-test1::se_test_100',
             connection_name=None,
-            svc_edge_id='100',
+            service_edge_id='100',
             org_info=None,
             peer_info=None
         )
@@ -1621,7 +1621,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         result = processor._build_service_edge_record(
             interface_id='router-test1::se_test_100',
             connection_name=None,
-            svc_edge_id='100',
+            service_edge_id='100',
             org_info=org_info,
             peer_info=None
         )
@@ -1648,7 +1648,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         result = processor._build_service_edge_record(
             interface_id='router-test1::se_test_100',
             connection_name=None,
-            svc_edge_id='100',
+            service_edge_id='100',
             org_info=org_info,
             peer_info=None
         )
@@ -1674,7 +1674,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         result = processor._build_service_edge_record(
             interface_id='router-test1::se_test_100',
             connection_name=None,
-            svc_edge_id='100',
+            service_edge_id='100',
             org_info=org_info,
             peer_info=None
         )
@@ -1702,7 +1702,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         result = processor._build_service_edge_record(
             interface_id='router-test1::se_test_100',
             connection_name=None,
-            svc_edge_id='100',
+            service_edge_id='100',
             org_info=org_info,
             peer_info=None
         )
@@ -1722,7 +1722,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         result = processor._build_service_edge_record(
             interface_id='router-test1::se_test_100',
             connection_name=None,
-            svc_edge_id='100',
+            service_edge_id='100',
             org_info=None,
             peer_info=peer_info
         )
@@ -1744,7 +1744,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         result = processor._build_service_edge_record(
             interface_id='router-test1::se_test_100',
             connection_name=None,
-            svc_edge_id='100',
+            service_edge_id='100',
             org_info=None,
             peer_info=peer_info
         )
@@ -1841,7 +1841,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         
         self.assertEqual(record['id'], 'router-test1::se_test_100')
         self.assertEqual(record['connection_name'], 'test-connection-1')
-        self.assertEqual(record['svc_edge_id'], '100')
+        self.assertEqual(record['service_edge_id'], '100')
         self.assertEqual(record['org_short_name'], 'TESTORG')
         self.assertEqual(record['org_full_name'], 'Test Organization')
         self.assertEqual(record['org_type'], ['Research Site'])
@@ -2688,7 +2688,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         
         value = {
             'connection_name': 'test-connection-1',
-            'svc_edge_id': '100',
+            'service_edge_id': '100',
             'org_short_name': 'TESTORG',
             'org_full_name': 'Test Organization',
             'org_hide': False,
@@ -2703,7 +2703,7 @@ class TestMetaServiceEdgeProcessor(unittest.TestCase):
         result = processor.build_metadata_fields(value)
         
         self.assertEqual(result['connection_name'], 'test-connection-1')
-        self.assertEqual(result['svc_edge_id'], '100')
+        self.assertEqual(result['service_edge_id'], '100')
         self.assertEqual(result['org_short_name'], 'TESTORG')
         self.assertEqual(result['org_full_name'], 'Test Organization')
         self.assertFalse(result['org_hide'])
