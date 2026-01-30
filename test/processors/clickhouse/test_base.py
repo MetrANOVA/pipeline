@@ -236,6 +236,136 @@ class TestBaseClickHouseTableMixin(unittest.TestCase):
         result = self.mixin.create_table_command()
         
         self.assertIn("ENGINE = ReplicatedMergeTree('/custom/replica/path', '{custom_replica}')", result)
+    
+    def test_create_table_command_with_ip_ref_extensions(self):
+        """Test table creation with IP reference extensions."""
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [
+            ['id', 'String', True],
+            ['value', 'Int32', True],
+            ['ext', None, True]  # Extension column
+        ]
+        self.mixin.order_by = ['id']
+        self.mixin.extension_columns = {"ext": True}
+        self.mixin.extension_defs = {"ext": []}
+        self.mixin.ip_ref_extensions = ['as', 'geo', 'org']
+        
+        result = self.mixin.create_table_command()
+        
+        # Should have JSON column with IP ref fields
+        self.assertIn("`ext` JSON(", result)
+        self.assertIn("`src_ip_as_ref` Nullable(String)", result)
+        self.assertIn("`dst_ip_as_ref` Nullable(String)", result)
+        self.assertIn("`src_ip_geo_ref` Nullable(String)", result)
+        self.assertIn("`dst_ip_geo_ref` Nullable(String)", result)
+        self.assertIn("`src_ip_org_ref` Nullable(String)", result)
+        self.assertIn("`dst_ip_org_ref` Nullable(String)", result)
+    
+    def test_create_table_command_with_extension_defs_and_ip_ref_extensions(self):
+        """Test table creation with both extension definitions and IP reference extensions."""
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [
+            ['id', 'String', True],
+            ['value', 'Int32', True],
+            ['ext', None, True]
+        ]
+        self.mixin.order_by = ['id']
+        self.mixin.extension_columns = {"ext": True}
+        self.mixin.extension_defs = {
+            "ext": [
+                ["custom_field1", "String"],
+                ["custom_field2", "UInt64"]
+            ]
+        }
+        self.mixin.ip_ref_extensions = ['as', 'geo']
+        
+        result = self.mixin.create_table_command()
+        
+        # Should have JSON column with both custom fields and IP ref fields
+        self.assertIn("`ext` JSON(", result)
+        self.assertIn("`custom_field1` String", result)
+        self.assertIn("`custom_field2` UInt64", result)
+        self.assertIn("`src_ip_as_ref` Nullable(String)", result)
+        self.assertIn("`dst_ip_as_ref` Nullable(String)", result)
+        self.assertIn("`src_ip_geo_ref` Nullable(String)", result)
+        self.assertIn("`dst_ip_geo_ref` Nullable(String)", result)
+    
+    def test_create_table_command_with_only_ip_ref_extensions_no_other_ext(self):
+        """Test table creation with only IP reference extensions and no other extension fields."""
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [
+            ['id', 'String', True],
+            ['ext', None, True]
+        ]
+        self.mixin.order_by = ['id']
+        self.mixin.extension_columns = {"ext": True}
+        self.mixin.extension_defs = {"ext": []}  # Empty extension defs
+        self.mixin.ip_ref_extensions = ['as']
+        
+        result = self.mixin.create_table_command()
+        
+        # Should still have JSON column with only IP ref fields
+        self.assertIn("`ext` JSON(", result)
+        self.assertIn("`src_ip_as_ref` Nullable(String)", result)
+        self.assertIn("`dst_ip_as_ref` Nullable(String)", result)
+    
+    def test_create_table_command_without_ip_ref_extensions_uses_plain_json(self):
+        """Test that extension column without definitions or IP refs uses plain JSON."""
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [
+            ['id', 'String', True],
+            ['ext', None, True]
+        ]
+        self.mixin.order_by = ['id']
+        self.mixin.extension_columns = {"ext": True}
+        # Remove ext from extension_defs so it uses plain JSON
+        self.mixin.extension_defs = {}
+        self.mixin.ip_ref_extensions = []  # No IP ref extensions
+        
+        result = self.mixin.create_table_command()
+        
+        # Should use plain JSON column without structure
+        self.assertIn("`ext` JSON", result)
+        self.assertNotIn("`ext` JSON(", result)  # Should not have parentheses
+    
+    def test_create_table_command_with_multiple_ip_ref_extensions(self):
+        """Test table creation with multiple IP reference extensions."""
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [
+            ['id', 'String', True],
+            ['ext', None, True]
+        ]
+        self.mixin.order_by = ['id']
+        self.mixin.extension_columns = {"ext": True}
+        self.mixin.extension_defs = {"ext": []}
+        self.mixin.ip_ref_extensions = ['as', 'geo', 'org', 'custom']
+        
+        result = self.mixin.create_table_command()
+        
+        # Verify all IP ref extensions are present for both src and dst
+        for ext in ['as', 'geo', 'org', 'custom']:
+            self.assertIn(f"`src_ip_{ext}_ref` Nullable(String)", result)
+            self.assertIn(f"`dst_ip_{ext}_ref` Nullable(String)", result)
+    
+    def test_create_table_command_ip_ref_fields_have_commas(self):
+        """Test that IP reference fields are properly separated by commas."""
+        self.mixin.table = "test_table"
+        self.mixin.column_defs = [
+            ['id', 'String', True],
+            ['ext', None, True]
+        ]
+        self.mixin.order_by = ['id']
+        self.mixin.extension_columns = {"ext": True}
+        self.mixin.extension_defs = {"ext": [["field1", "String"]]}
+        self.mixin.ip_ref_extensions = ['as', 'geo']
+        
+        result = self.mixin.create_table_command()
+        
+        # Check that commas properly separate fields
+        self.assertIn("`field1` String,", result)
+        self.assertIn("`src_ip_as_ref` Nullable(String),", result)
+        # Last dst field before closing should not have trailing comma issues
+        self.assertIn("`dst_ip_geo_ref` Nullable(String)", result)
 
 
 class TestBaseClickHouseMaterializedViewMixin(unittest.TestCase):

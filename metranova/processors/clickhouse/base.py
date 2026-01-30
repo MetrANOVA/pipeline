@@ -35,6 +35,9 @@ class BaseClickHouseTableMixin:
         self.column_defs = []
         # dict where key is extension field name and value is array in same format as column_defs but only those columns that are extensions
         self.extension_defs = {"ext": []}
+        # list of reference fields that will be used if lookups to ip cacher and src dst IP then loaded in ext
+        # if var name is <value> then assumes lookup table of meta_<value>, and creates fields like ext.src_<value>_ref and ext.dst_<value>_ref
+        self.ip_ref_extensions = []
         # dictionary where key is extension field name and value is dict of options for that extension. Populated via get_extension_defs()
         self.extension_enabled = defaultdict(dict)
         # additional table settings
@@ -79,7 +82,7 @@ class BaseClickHouseTableMixin:
             if has_columns:
                 create_table_cmd += ","
             # handle extension columns. This code is somewhat redundant with wrapping code but keeps things clearer
-            if col_def[0] in self.extension_columns and col_def[0] in self.extension_defs:
+            if col_def[0] in self.extension_columns and (col_def[0] in self.extension_defs or self.ip_ref_extensions):
                 #ignore column definition from main list, use extension_defs instead
                 create_table_cmd += "\n    `{}` JSON(".format(col_def[0])
                 ext_has_columns = False
@@ -87,6 +90,12 @@ class BaseClickHouseTableMixin:
                     if ext_has_columns:
                         create_table_cmd += ","
                     create_table_cmd += "\n        `{}` {}".format(ext_col_def[0], ext_col_def[1])
+                    ext_has_columns = True
+                for ip_ref_ext in self.ip_ref_extensions:
+                    if ext_has_columns:
+                        create_table_cmd += ","
+                    create_table_cmd += "\n        `{}_ip_{}_ref` Nullable(String)".format("src", ip_ref_ext)
+                    create_table_cmd += ",\n        `{}_ip_{}_ref` Nullable(String)".format("dst", ip_ref_ext)
                     ext_has_columns = True
                 create_table_cmd += "\n    )"
             elif col_def[0] in self.extension_columns:
@@ -286,9 +295,6 @@ class BaseClickHouseProcessor(BaseProcessor, BaseClickHouseTableMixin):
         super().__init__(pipeline)
         # setup logger
         self.logger = logger
-        # list of reference fields that will be used if lookups to ip cacher and src dst IP then loaded in ext
-        # if var name is <value> then assumes lookup table of meta_<value>, and creates fields like ext.src_<value>_ref and ext.dst_<value>_ref
-        self.ip_ref_extensions = []
         # List of clickhouse dictionaries (as BaseClickHouseDictionaryMixin objects) to build
         self.ch_dictionaries = []
         # List of materailized views to build (as BaseClickHouseMaterializedViewMixin objects)
