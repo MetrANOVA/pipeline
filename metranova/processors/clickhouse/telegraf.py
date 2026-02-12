@@ -96,7 +96,7 @@ class IFMIBInterfaceTrafficProcessor(BaseInterfaceTrafficProcessor):
             return None
 
         # Format device name using configured formatter
-        device = self.format_hostname(device, self.device_format)
+        device = self.format_hostname(device, None)
 
         interface_name = self.pipeline.cacher("redis").lookup(
             self.ifname_lookup_table, f"{device}::{oid_index}"
