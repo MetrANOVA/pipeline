@@ -1,4 +1,29 @@
 ###
+# Setup how hostnames are formatted.
+#
+_hostname_formats:
+  # Simple splitting. 
+  # Ex: rtr.chic.net -> "rtr"
+  short_hostname:
+    type: split
+    delimiter: '.'
+    index: 0
+    description: "First componenet of the hostname."
+
+  # Regex Splitting
+  # Ex: rtr.chic.net -> rtr.chic
+  site:
+    type: regex
+    pattern: '^([^.]+\.[^.]+)\.'
+    group: 1
+    description: "First two componenets of the hostname."
+
+  fqdn:
+    type: none
+    description: "Full hostname."
+
+
+###
 # Set default resource id path to device:oidIndex for rules where not specified
 # Note: You can only set a defult resource_id. Any other options must be set per rule.
 _default:
