@@ -245,7 +245,7 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
             # Use hostname formatter for all other formats
             return self.format_hostname(value, format_type)
 
-    return value
+        return value
 
     def lookup_value(
         self, value: str, prefix_parts: list[str], lookup_table: str | None
