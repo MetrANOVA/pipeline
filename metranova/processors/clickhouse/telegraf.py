@@ -217,9 +217,9 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
         """Format value based on specified format type."""
         if format_type is None:
             return value
-        if format_type == "short_hostname":
-            return value.split(".")[0]
-        elif format_type == "tmnxsapid":
+
+        # Special formats that aren't hostname formats
+        if format_type == "tmnxsapid":
             formatted_val = TmnxPortId.decode_sap(value, ext)
             if formatted_val is not None:
                 return formatted_val
@@ -228,26 +228,24 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
             if formatted_val is not None:
                 return formatted_val
         elif format_type == "regex":
-            # this is a regex pattern with named groups - we want to extract the named group "value"
-            # any additional groups should be added to the dict ext
+            # Inline regex (for special cases with ext dict)
             regex_pattern = format_opts.get("pattern", None)
             if regex_pattern is None:
                 return value
             match = re.match(regex_pattern, value)
             if not match:
                 return value
-            # Extract the named group "value"
-            # if not present, return original value
             if "value" not in match.groupdict():
                 return value
             extracted_value = match.group("value")
-            # Add any additional named groups to the ext dict
             add_ext = {k: v for k, v in match.groupdict().items() if k != "value"}
             ext.update(add_ext)
             return extracted_value
+        else:
+            # Use hostname formatter for all other formats
+            return self.format_hostname(value, format_type)
 
-        # Future: implement more formats as needed
-        return value
+    return value
 
     def lookup_value(
         self, value: str, prefix_parts: list[str], lookup_table: str | None
