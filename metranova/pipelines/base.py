@@ -1,5 +1,6 @@
 import importlib
 import logging
+import os
 import threading
 from typing import Dict, List, Optional
 
@@ -154,11 +155,30 @@ class YAMLPipeline(BasePipeline):
         # load hostname formatter
         from metranova.utils.hostname_formatter import HostnameFormatter
 
-        hostname_formats = yaml_config.get("_hostname_formats", {})
-        self.hostname_formatter = HostnameFormatter(hostname_formats)
+        telegraf_mappings_path = os.getenv(
+            "TELEGRAF_MAPPINGS_PATH", "/app/conf/telegraf_mappings.yml"
+        )
+        hostname_formats = []
+        default_format = "short_name"
 
-        # Set default format if specified
-        default_format = yaml_config.get("_default_hostname_format", "short")
+        try:
+            with open(telegraf_mappings_path, "r") as f:
+                telegraf_config = yaml.safe_load(f)
+                if telegraf_config:
+                    hostname_formats = telegraf_config.get("_hostname_formats", {})
+                    default_format = telegraf_config.get(
+                        "_default_hostname_format", "short_name"
+                    )
+                    self.logger.info(
+                        f"Loaded {len(hostname_formats)} hostname formats from {telegraf_mappings_path}"
+                    )
+        except Exception as e:
+            self.logger.warning(
+                f"Could not load hostname formats from {telegraf_mappings_path}: {e}"
+            )
+
+        # Create hostname formatter
+        self.hostname_formatter = HostnameFormatter(hostname_formats)
         self.hostname_formatter.set_default_format(default_format)
 
         # load consumers
@@ -236,4 +256,3 @@ class YAMLPipeline(BasePipeline):
                 required_class=BaseWriter,
             )
             self.writers.extend(writer_instances)
-
