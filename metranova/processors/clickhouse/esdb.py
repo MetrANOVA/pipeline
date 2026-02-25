@@ -76,9 +76,12 @@ class MetaIPServiceProcessor(BaseMetadataProcessor):
         # Check for GraphQLConsumer message with IP Service/ESDB URL
         url = value.get('url', '')
         if self.ipservice_url_pattern in url:
-            return True
+            # Additional check: verify this is actually service data
+            data = value.get('data', {}).get('data', {})
+            if 'serviceList' in data:
+                return True
         
-        return False
+        return False   
     
     def _parse_ip_subnet(self, ip_subnet_str):
         """Parse IP subnet string into tuple format"""
@@ -488,7 +491,12 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
                                     "shortName": "TEST"
                                 },
                                 "visibility": "HIDDEN",
-                                "tags": ["Transit", "hide"]
+                                "tags": [
+                                    {
+                                        "id": "1",
+                                        "name": "Test Tag"
+                                    }
+                                    ]
                             },
                             "bgpNeighbors": [
                                 {
@@ -552,7 +560,7 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
                 device_name = device.get('name')
                 
                 if not device_name:
-                    self.logger.warning(f"Skipping service edge without device name: {service_edge_name}")
+                    self.logger.warning(f"Skipping service edge without device name as Loopbacks have no equipment interface: {service_edge_name}")
                     continue
                 
                 # Build the interface ID using device::service_edge_name format
@@ -602,14 +610,12 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
                 # Process tags
                 tags = org.get('tags', []) or []
                 for tag in tags:
-                    if tag:
-                        org_info['tags'].append(tag)
-                        if tag.lower() == 'hide':
-                            org_info['hide'] = True
-                
-                # Build tags string
-                if org_info['tags']:
-                    org_info['tags_str'] = ','.join(org_info['tags'])
+                    if isinstance(tag, dict):
+                        tag_name = tag.get('name', '')
+                        if tag_name:
+                            org_info['tags'].append(tag_name)
+                            if tag_name.lower() == 'hide':
+                                org_info['hide'] = True
                 
                 # Extract peer info from BGP neighbors
                 peer_info = None
