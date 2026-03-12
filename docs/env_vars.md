@@ -193,6 +193,15 @@ Dictionaries provide fast lookup capabilities for metadata enrichment. Each meta
 | `CLICKHOUSE_CACHER_MAX_SIZE` | `100000000` | Maximum number of cache entries (100 million) |
 | `CLICKHOUSE_CACHER_MAX_TTL` | `86400` | Cache entry TTL in seconds (1 day) |
 | `CLICKHOUSE_CACHER_REFRESH_INTERVAL` | `600` | Seconds between cache refresh operations |
+| `CLICKHOUSE_RANGED_CACHER_CONFIGS` | (empty) | Comma-separated ranged mappings in the format `lookup_table:clickhouse_table:min_col:max_col:key_col:val_col` ( `clickhouse_table:min_col:max_col:key_col:val_col` is also supported) |
+| `CLICKHOUSE_RANGED_CACHER_LOOKUP_TABLE` | `CLICKHOUSE_RANGED_CACHER_TABLE` | Fallback lookup-table alias used as the local cache key |
+| `CLICKHOUSE_RANGED_CACHER_TABLE` | `meta_application_dict` | Fallback single ranged table name when `CLICKHOUSE_RANGED_CACHER_CONFIGS` is unset |
+| `CLICKHOUSE_RANGED_CACHER_MIN_COLUMN` | `port_range_min` | Fallback minimum port column name |
+| `CLICKHOUSE_RANGED_CACHER_MAX_COLUMN` | `port_range_max` | Fallback maximum port column name |
+| `CLICKHOUSE_RANGED_CACHER_KEY_COLUMN` | `protocol` | Fallback key column name for the first cache key |
+| `CLICKHOUSE_RANGED_CACHER_VAL_COLUMN` | `id` | Fallback value column name stored at `key -> port` |
+| `CLICKHOUSE_RANGED_CACHER_PROTOCOL_COLUMN` | `protocol` | Fallback key column name (used when `CLICKHOUSE_RANGED_CACHER_KEY_COLUMN` is unset) |
+| `CLICKHOUSE_RANGED_CACHER_ID_COLUMN` | `id` | Fallback value column name (used when `CLICKHOUSE_RANGED_CACHER_VAL_COLUMN` is unset) |
 
 ## Kafka Consumer Settings
 

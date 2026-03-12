@@ -262,10 +262,21 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         self.lookup_interface(formatted_record["device_id"], value.get("iface_in", None), formatted_record, "in")
         self.lookup_interface(formatted_record["device_id"], value.get("iface_out", None), formatted_record, "out")
 
-        # todo: determine application port - use dst port if available, else src port
-        application_port = value.get("port_dst", None)
-        if application_port is None:
+        #determine application port - by finding lowest recognized port in src and dst, since we don't always know which is client and which is server. If neither are recognized ports, will just use dst port as application port if available
+        src_app_lookup = self.pipeline.cacher("clickhouse_ranged").lookup_dict_key("meta_application", value.get("port_src", None), value.get("ip_proto", None))
+        dst_app_lookup = self.pipeline.cacher("clickhouse_ranged").lookup_dict_key("meta_application", value.get("port_dst", None), value.get("ip_proto", None))
+        application_port = None
+        if src_app_lookup and dst_app_lookup:
+            #use the smaller port number of the two if both are recognized application ports
+            try:
+                application_port = min(int(src_app_lookup), int(dst_app_lookup))
+            except ValueError:
+                application_port = None
+        elif src_app_lookup:
             application_port = value.get("port_src", None)
+        else:
+            #default to dst port if no recognized app port in src - this is common since often only server port is well known app port
+            application_port = value.get("port_dst", None)
 
         # determine ip version - use quick method based on presence of ':' in ip address
         ip_version = 4

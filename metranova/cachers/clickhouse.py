@@ -1,6 +1,7 @@
 from ipaddress import IPv6Address
 import logging
 import os
+import re
 import time
 from cachetools import TTLCache
 from typing import Optional
@@ -154,3 +155,212 @@ class ClickHouseCacher(BaseCacher):
         except Exception as e:
             logger.error(f"Failed to load metadata from table {table}: {e}")
             raise
+
+class ClickHouseRangedCacher(ClickHouseCacher):
+    """Caches range-based mappings as protocol -> port -> id per configured table."""
+
+    def __init__(self):
+        BaseCacher.__init__(self)
+        self.logger = logger
+        self.cache = ClickHouseConnector()
+        self.cache_max_size = int(os.getenv('CLICKHOUSE_CACHER_MAX_SIZE', '100000000'))
+        self.cache_max_ttl = int(os.getenv('CLICKHOUSE_CACHER_MAX_TTL', '86400'))
+        self.local_cache = TTLCache(maxsize=self.cache_max_size, ttl=self.cache_max_ttl)
+        self.cache_refresh_interval = int(os.getenv('CLICKHOUSE_CACHER_REFRESH_INTERVAL', '600'))
+        self.range_configs = self._parse_range_configs()
+        if not self.range_configs:
+            self.logger.warning("No valid ranged cacher configurations were found")
+
+        # Keep this for compatibility with parent cacher interface expectations.
+        self.tables = [cfg['lookup_table'] for cfg in self.range_configs]
+
+        # Prime cache and start refresh thread if needed.
+        self.start_refresh_thread()
+
+    @staticmethod
+    def _identifier_is_safe(identifier: str) -> bool:
+        return bool(re.match(r'^[A-Za-z_][A-Za-z0-9_\.]*$', identifier or ''))
+
+    def _parse_range_configs(self):
+        """Parse range cacher sources from env.
+
+        Format for CLICKHOUSE_RANGED_CACHER_CONFIGS:
+        lookup_table:clickhouse_table:min_col:max_col:key_col:val_col
+        [,lookup_table:clickhouse_table:min_col:max_col:key_col:val_col...]
+
+        Backward compatible format:
+        clickhouse_table:min_col:max_col:key_col:val_col
+        """
+        configs_raw = os.getenv('CLICKHOUSE_RANGED_CACHER_CONFIGS', '').strip()
+        parsed_configs = []
+
+        if configs_raw:
+            chunks = [chunk.strip() for chunk in configs_raw.split(',') if chunk.strip()]
+            for chunk in chunks:
+                parts = [part.strip() for part in chunk.split(':')]
+                if len(parts) == 6:
+                    lookup_table, table, min_col, max_col, key_col, val_col = parts
+                elif len(parts) == 5:
+                    table, min_col, max_col, key_col, val_col = parts
+                    lookup_table = table
+                else:
+                    self.logger.warning(
+                        f"Skipping invalid CLICKHOUSE_RANGED_CACHER_CONFIGS entry: {chunk}"
+                    )
+                    continue
+                parsed_configs.append({
+                    'lookup_table': lookup_table,
+                    'table': table,
+                    'min_col': min_col,
+                    'max_col': max_col,
+                    'key_col': key_col,
+                    'val_col': val_col,
+                })
+        else:
+            table = os.getenv('CLICKHOUSE_RANGED_CACHER_TABLE', 'meta_application_dict').strip()
+            parsed_configs.append({
+                'lookup_table': os.getenv('CLICKHOUSE_RANGED_CACHER_LOOKUP_TABLE', table).strip(),
+                'table': table,
+                'min_col': os.getenv('CLICKHOUSE_RANGED_CACHER_MIN_COLUMN', 'port_range_min').strip(),
+                'max_col': os.getenv('CLICKHOUSE_RANGED_CACHER_MAX_COLUMN', 'port_range_max').strip(),
+                'key_col': os.getenv(
+                    'CLICKHOUSE_RANGED_CACHER_KEY_COLUMN',
+                    os.getenv('CLICKHOUSE_RANGED_CACHER_PROTOCOL_COLUMN', 'protocol')
+                ).strip(),
+                'val_col': os.getenv(
+                    'CLICKHOUSE_RANGED_CACHER_VAL_COLUMN',
+                    os.getenv('CLICKHOUSE_RANGED_CACHER_ID_COLUMN', 'id')
+                ).strip(),
+            })
+
+        valid_configs = []
+        for cfg in parsed_configs:
+            identifiers = [
+                cfg['lookup_table'],
+                cfg['table'],
+                cfg['min_col'],
+                cfg['max_col'],
+                cfg['key_col'],
+                cfg['val_col'],
+            ]
+            if all(self._identifier_is_safe(name) for name in identifiers):
+                valid_configs.append(cfg)
+            else:
+                self.logger.warning(f"Skipping ranged cacher config with invalid identifiers: {cfg}")
+        return valid_configs
+
+    def build_query(self, config) -> str:
+        return (
+            f"SELECT DISTINCT {config['min_col']}, {config['max_col']}, "
+            f"{config['key_col']}, {config['val_col']} "
+            f"FROM {config['table']}"
+        )
+
+    def query_table(self, config):
+        """Load range metadata from a configured ClickHouse table."""
+        logger.info(f"Loading ranged metadata from table: {config['table']}")
+
+        try:
+            query = self.build_query(config)
+            logger.debug(f"Executing ranged query: {query}")
+
+            start_time = time.time()
+            result = self.cache.client.query(query)
+            query_time = time.time() - start_time
+            if not result:
+                logger.warning(f"No result returned from ranged query for table {config['table']}")
+                return None
+
+            rows = result.result_rows
+            logger.info(
+                f"Ranged query completed in {query_time:.2f}s, found {len(rows)} records for {config['table']}"
+            )
+
+            if not rows:
+                logger.warning(f"No ranged data found in table {config['table']}")
+                return None
+
+            return rows
+
+        except Exception as e:
+            logger.error(f"Failed to load ranged metadata from table {config['table']}: {e}")
+            raise
+
+    def prime(self):
+        for config in self.range_configs:
+            self.prime_table(config)
+
+    def prime_table(self, config):
+        """Preload range records as protocol -> port -> id."""
+        if self.cache.client is None:
+            logger.debug("ClickHouse client not available, skipping ranged cache priming")
+            return
+
+        table = config['table']
+        lookup_table = config['lookup_table']
+        try:
+            rows = self.query_table(config)
+            if not rows:
+                logger.debug(f"No rows returned for ranged table {table}, skipping priming")
+                return
+
+            table_cache = {}
+            expanded_ports = 0
+            for row in rows:
+                if len(row) < 4:
+                    self.logger.debug(f"Skipping ranged row with insufficient columns: {row}")
+                    continue
+
+                port_min, port_max, row_key, row_val = row[0], row[1], row[2], row[3]
+                if port_min is None or port_max is None or row_key is None:
+                    continue
+
+                try:
+                    start_port = int(port_min)
+                    end_port = int(port_max)
+                except (TypeError, ValueError):
+                    self.logger.debug(f"Skipping ranged row with invalid ports: {row}")
+                    continue
+
+                if end_port < start_port:
+                    start_port, end_port = end_port, start_port
+
+                protocol_key = str(row_key).lower()
+                protocol_cache = table_cache.setdefault(protocol_key, {})
+                for port in range(start_port, end_port + 1):
+                    protocol_cache[port] = row_val
+                    expanded_ports += 1
+
+            self.local_cache[lookup_table] = table_cache
+            logger.info(
+                "Loaded ranged cache for "
+                f"{lookup_table} (source={table}): protocols={len(table_cache)}, expanded_ports={expanded_ports}"
+            )
+        except Exception as e:
+            logger.info(f"Could not load ranged metadata for table {table}: {e}")
+
+    def lookup(self, table, key: str) -> Optional[str]:
+        if key is None or table is None:
+            return None
+
+        protocol = None
+        port = None
+
+        if isinstance(key, (tuple, list)) and len(key) == 2:
+            protocol, port = key[0], key[1]
+        elif isinstance(key, str) and ':' in key:
+            protocol, port = key.split(':', 1)
+        else:
+            return None
+
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            return None
+
+        protocol_key = str(protocol).lower()
+        table_cache = self.local_cache.get(table, {})
+        return table_cache.get(protocol_key, {}).get(port, None)
+
+    def lookup_port(self, table: str, protocol: str, port: int) -> Optional[str]:
+        return self.lookup(table, (protocol, port))
