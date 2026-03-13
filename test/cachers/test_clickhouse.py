@@ -451,7 +451,7 @@ class TestClickHouseRangedCacher(unittest.TestCase):
         }
         self.assertEqual(self.cacher.lookup('meta_application_dict', ('tcp', 443)), 'app-https')
         self.assertEqual(self.cacher.lookup('meta_application_dict', 'TCP:443'), 'app-https')
-        self.assertEqual(self.cacher.lookup_port('meta_application_dict', 'tcp', 443), 'app-https')
+        self.assertEqual(self.cacher.lookup_key_range('meta_application_dict', 'tcp', 443), 'app-https')
 
     def test_lookup_invalid_inputs(self):
         self.cacher.local_cache['meta_application_dict'] = {'tcp': {80: 'app-http'}}

@@ -157,7 +157,7 @@ class ClickHouseCacher(BaseCacher):
             raise
 
 class ClickHouseRangedCacher(ClickHouseCacher):
-    """Caches range-based mappings as protocol -> port -> id per configured table."""
+    """Caches range-based mappings as key -> range_val -> id per configured table."""
 
     def __init__(self):
         BaseCacher.__init__(self)
@@ -225,7 +225,7 @@ class ClickHouseRangedCacher(ClickHouseCacher):
                 'max_col': os.getenv('CLICKHOUSE_RANGED_CACHER_MAX_COLUMN', 'port_range_max').strip(),
                 'key_col': os.getenv(
                     'CLICKHOUSE_RANGED_CACHER_KEY_COLUMN',
-                    os.getenv('CLICKHOUSE_RANGED_CACHER_PROTOCOL_COLUMN', 'protocol')
+                    os.getenv('CLICKHOUSE_RANGED_CACHER_KEY_COLUMN', 'protocol')
                 ).strip(),
                 'val_col': os.getenv(
                     'CLICKHOUSE_RANGED_CACHER_VAL_COLUMN',
@@ -291,7 +291,7 @@ class ClickHouseRangedCacher(ClickHouseCacher):
             self.prime_table(config)
 
     def prime_table(self, config):
-        """Preload range records as protocol -> port -> id."""
+        """Preload range records as key -> range_val -> id."""
         if self.cache.client is None:
             logger.debug("ClickHouse client not available, skipping ranged cache priming")
             return
@@ -305,36 +305,36 @@ class ClickHouseRangedCacher(ClickHouseCacher):
                 return
 
             table_cache = {}
-            expanded_ports = 0
+            expanded_range_vals = 0
             for row in rows:
                 if len(row) < 4:
                     self.logger.debug(f"Skipping ranged row with insufficient columns: {row}")
                     continue
 
-                port_min, port_max, row_key, row_val = row[0], row[1], row[2], row[3]
-                if port_min is None or port_max is None or row_key is None:
+                range_min, range_max, row_key, row_val = row[0], row[1], row[2], row[3]
+                if range_min is None or range_max is None or row_key is None:
                     continue
 
                 try:
-                    start_port = int(port_min)
-                    end_port = int(port_max)
+                    start_range = int(range_min)
+                    end_range = int(range_max)
                 except (TypeError, ValueError):
-                    self.logger.debug(f"Skipping ranged row with invalid ports: {row}")
+                    self.logger.debug(f"Skipping ranged row with invalid range vals: {row}")
                     continue
 
-                if end_port < start_port:
-                    start_port, end_port = end_port, start_port
+                if end_range < start_range:
+                    start_range, end_range = end_range, start_range
 
-                protocol_key = str(row_key).lower()
-                protocol_cache = table_cache.setdefault(protocol_key, {})
-                for port in range(start_port, end_port + 1):
-                    protocol_cache[port] = row_val
-                    expanded_ports += 1
+                lookup_key = str(row_key).lower()
+                key_cache = table_cache.setdefault(lookup_key, {})
+                for range_val in range(start_range, end_range + 1):
+                    key_cache[range_val] = row_val
+                    expanded_range_vals += 1
 
             self.local_cache[lookup_table] = table_cache
             logger.info(
                 "Loaded ranged cache for "
-                f"{lookup_table} (source={table}): protocols={len(table_cache)}, expanded_ports={expanded_ports}"
+                f"{lookup_table} (source={table}): keys={len(table_cache)}, expanded_ranges={expanded_range_vals}"
             )
         except Exception as e:
             logger.info(f"Could not load ranged metadata for table {table}: {e}")
@@ -343,24 +343,24 @@ class ClickHouseRangedCacher(ClickHouseCacher):
         if key is None or table is None:
             return None
 
-        protocol = None
-        port = None
+        lookup_key = None
+        range_val = None
 
         if isinstance(key, (tuple, list)) and len(key) == 2:
-            protocol, port = key[0], key[1]
+            lookup_key, range_val = key[0], key[1]
         elif isinstance(key, str) and ':' in key:
-            protocol, port = key.split(':', 1)
+            lookup_key, range_val = key.split(':', 1)
         else:
             return None
 
         try:
-            port = int(port)
+            range_val = int(range_val)
         except (TypeError, ValueError):
             return None
 
-        protocol_key = str(protocol).lower()
+        lookup_key = str(lookup_key).lower()
         table_cache = self.local_cache.get(table, {})
-        return table_cache.get(protocol_key, {}).get(port, None)
+        return table_cache.get(lookup_key, {}).get(range_val, None)
 
-    def lookup_port(self, table: str, protocol: str, port: int) -> Optional[str]:
-        return self.lookup(table, (protocol, port))
+    def lookup_key_range(self, table: str, key: str, range_val: int) -> Optional[str]:
+        return self.lookup(table, (key, range_val))
