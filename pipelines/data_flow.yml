@@ -4,6 +4,8 @@ consumers:
 cachers:
   - type: metranova.cachers.clickhouse.ClickHouseCacher
     name: clickhouse
+  - type: metranova.cachers.clickhouse.ClickHouseRangedCacher
+    name: clickhouse_ranged
   - type: metranova.cachers.ip.IPCacher
     name: ip
 

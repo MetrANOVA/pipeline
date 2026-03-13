@@ -262,10 +262,23 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         self.lookup_interface(formatted_record["device_id"], value.get("iface_in", None), formatted_record, "in")
         self.lookup_interface(formatted_record["device_id"], value.get("iface_out", None), formatted_record, "out")
 
-        # todo: determine application port - use dst port if available, else src port
-        application_port = value.get("port_dst", None)
-        if application_port is None:
-            application_port = value.get("port_src", None)
+        #determine application port - by finding lowest recognized port in src and dst, since we don't always know which is client and which is server. If neither are recognized ports, will just use dst port as application port if available
+        src_port = value.get("port_src", 0)
+        dst_port = value.get("port_dst", 0)
+        src_app_lookup = self.pipeline.cacher("clickhouse_ranged").lookup_key_range("meta_application", value.get("ip_proto", None), src_port)
+        dst_app_lookup = self.pipeline.cacher("clickhouse_ranged").lookup_key_range("meta_application", value.get("ip_proto", None), dst_port)
+        application_port = 0
+        if src_app_lookup and dst_app_lookup:
+            #use the smaller port number of the two if both are recognized application ports
+            try:
+                application_port = min(int(src_port), int(dst_port))
+            except ValueError:
+                application_port = 0
+        elif src_app_lookup:
+            application_port = src_port
+        elif dst_app_lookup:
+            #default to dst port if no recognized app port in src - this is common since often only server port is well known app port
+            application_port = dst_port
 
         # determine ip version - use quick method based on presence of ':' in ip address
         ip_version = 4
@@ -300,8 +313,8 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             "policy_level": self.policy_level,
             "ext": orjson.dumps(ext).decode('utf-8'),
             "flow_type": flow_type,
-            "src_port": value.get("port_src", None),
-            "dst_port": value.get("port_dst", None),
+            "src_port": src_port,
+            "dst_port": dst_port,
             "protocol": value.get("ip_proto", None),
             "ip_version": ip_version,
             "application_port": application_port,
