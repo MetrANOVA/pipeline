@@ -276,7 +276,7 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
                 application_port = 0
         elif src_app_lookup:
             application_port = src_port
-        else:
+        elif dst_app_lookup:
             #default to dst port if no recognized app port in src - this is common since often only server port is well known app port
             application_port = dst_port
 
