@@ -200,7 +200,7 @@ Dictionaries provide fast lookup capabilities for metadata enrichment. Each meta
 | `CLICKHOUSE_RANGED_CACHER_MAX_COLUMN` | `port_range_max` | Fallback maximum port column name |
 | `CLICKHOUSE_RANGED_CACHER_KEY_COLUMN` | `protocol` | Fallback key column name for the first cache key |
 | `CLICKHOUSE_RANGED_CACHER_VAL_COLUMN` | `id` | Fallback value column name stored at `key -> port` |
-| `CLICKHOUSE_RANGED_CACHER_PROTOCOL_COLUMN` | `protocol` | Fallback key column name (used when `CLICKHOUSE_RANGED_CACHER_KEY_COLUMN` is unset) |
+| `CLICKHOUSE_RANGED_CACHER_KEY_COLUMN` | `protocol` | Fallback key column name (used when `CLICKHOUSE_RANGED_CACHER_KEY_COLUMN` is unset) |
 | `CLICKHOUSE_RANGED_CACHER_ID_COLUMN` | `id` | Fallback value column name (used when `CLICKHOUSE_RANGED_CACHER_VAL_COLUMN` is unset) |
 
 ## Kafka Consumer Settings
