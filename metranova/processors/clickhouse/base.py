@@ -420,8 +420,8 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         
         # check if value["data"] is a list
         if not isinstance(value["data"], list):
-            self.logger.warning("Expected 'data' to be a list, got %s", type(value["data"]))
-            return []
+            self.logger.debug("Expected 'data' to be a list, got %s. Converting to list.", type(value["data"]))
+            value["data"] = [value["data"]]
         
         #iterate over records in value["data"] and build formatted records
         formatted_records = []

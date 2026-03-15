@@ -4,10 +4,18 @@ consumers:
 cachers:
   - type: metranova.cachers.clickhouse.ClickHouseCacher
     name: clickhouse
+  - type: metranova.cachers.redis.RedisCacher
+    name: redis
 writers:
   - type: metranova.writers.clickhouse.ClickHouseWriter
     processors:
+      - metranova.processors.clickhouse.iri.FacilityMetadataProcessor
+      - metranova.processors.clickhouse.iri.SiteMetadataProcessor
       - metranova.processors.clickhouse.iri.ResourceMetadataProcessor
       - metranova.processors.clickhouse.iri.ResourceDataProcessor
       - metranova.processors.clickhouse.iri.IncidentMetadataProcessor
       - metranova.processors.clickhouse.iri.EventMetadataProcessor
+  - type: metranova.writers.redis.RedisWriter
+    processors:
+      - metranova.processors.redis.iri.SiteToFacilityProcessor
+      - metranova.processors.redis.iri.ResourceToSiteProcessor

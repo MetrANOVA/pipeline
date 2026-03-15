@@ -2,6 +2,7 @@ from ipaddress import IPv6Address
 import logging
 import os
 import re
+import threading
 import time
 from cachetools import TTLCache
 from typing import Optional
@@ -15,6 +16,7 @@ class ClickHouseCacher(BaseCacher):
     def __init__(self):
         super().__init__()
         self.logger = logger
+        self.prime_lock = threading.Lock()
         self.cache = ClickHouseConnector()
         self.cache_max_size = int(os.getenv('CLICKHOUSE_CACHER_MAX_SIZE', '100000000')) #defaults to large 100 million entries
         self.cache_max_ttl = int(os.getenv('CLICKHOUSE_CACHER_MAX_TTL', '86400')) #defaults to large 1 hour TTL
@@ -30,8 +32,9 @@ class ClickHouseCacher(BaseCacher):
         self.start_refresh_thread()
 
     def prime(self):
-        for table in self.tables:
-            self.prime_table(table)
+        with self.prime_lock:
+            for table in self.tables:
+                self.prime_table(table)
     
     def prime_table(self, table):
         """Preload any necessary data into local cache"""
