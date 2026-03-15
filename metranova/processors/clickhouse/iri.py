@@ -145,7 +145,8 @@ class EventMetadataProcessor(IRIBaseMetadataProcessor):
 
     def __init__(self, pipeline):
         super().__init__(pipeline)
-        self.url_match = r'/status/incidents/.+/events$'
+        # match urls like /status/incidents/{incident_id}/events OR /status/events. The latter is a new API spec so need to support both for now. Future can remove support for the former once all data sources are updated to new API spec.
+        self.url_match = r'/status/(incidents/.+/)?events$'
         self.table = os.getenv('CLICKHOUSE_IRI_EVENT_TABLE', 'meta_iri_event')
         self.column_defs.extend([
             ['last_modified', 'DateTime', True],

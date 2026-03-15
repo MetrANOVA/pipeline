@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from metranova.connectors.http import HTTPConnector
 from metranova.consumers.base import TimedIntervalConsumer
 from metranova.pipelines.base import BasePipeline
@@ -25,7 +26,13 @@ class IncidentEventConsumer(TimedIntervalConsumer):
             logger.warning(f"IRI_INCIDENT_EVENT_CONSUMER_URLS environment variable is empty")
 
     def consume_messages(self):
+        run_once = False
         for url in self.urls:
+            #prime caches if needed
+            if run_once:
+                self.pre_consume_messages()  # run pre_consume_messages before each URL after the first to allow for priming cachers between calls
+            else:
+                run_once = True
             try:
                 #first fetch incidents
                 result = self.datasource.client.get(url)
@@ -36,6 +43,10 @@ class IncidentEventConsumer(TimedIntervalConsumer):
                     'data': result.json()
                 }
                 self.pipeline.process_message(msg)
+                #sleep for a few seconds to allow clickhouse to update
+                time.sleep(5)
+                #re-prime caches after processing incidents to allow any related data to be available for event processing
+                self.pre_consume_messages()
                 #next fetch events for each incident
                 for incident in msg.get('data', []):
                     incident_id = incident.get('id', None)
