@@ -135,7 +135,7 @@ class SiteMetadataProcessor(IRIBaseMetadataProcessor):
         formatted_record['short_name'] = value.get('short_name', None)
         formatted_record['operating_organization'] = value.get('operating_organization', None)
         formatted_record['country_name'] = value.get('country_name', None)
-        formatted_record['country_sub_name'] = value.get('country_sub_name', None)
+        formatted_record['country_sub_name'] = value.get('state_or_province_name', None)
         formatted_record['street_address'] = value.get('street_address', None)
 
         #lookup facility_id from redis cacher
