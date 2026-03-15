@@ -19,6 +19,9 @@ class TestHTTPConsumer(unittest.TestCase):
         """Set up test fixtures before each test method."""
         self.mock_pipeline = Mock()
         self.mock_pipeline.process_message = Mock()
+        # TimedIntervalConsumer.pre_consume_messages iterates pipeline.cachers.values().
+        # Use a real dict to mirror BasePipeline behavior.
+        self.mock_pipeline.cachers = {}
         
         self.env_patcher = patch.dict(os.environ, {
             'HTTP_CONSUMER_UPDATE_INTERVAL': '3600',

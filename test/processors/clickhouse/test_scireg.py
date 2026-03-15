@@ -319,19 +319,22 @@ class TestScienceRegistryProcessor(unittest.TestCase):
         self.assertEqual(result, [])
     
     def test_build_message_non_list_data(self):
-        """Test build_message with non-list data field."""
+        """Test build_message coerces a single dict in data to a one-item list."""
         processor = ScienceRegistryProcessor(self.mock_pipeline)
-        
-        with patch.object(processor.logger, 'warning') as mock_warning:
-            input_data = {
-                "data": "not a list"
+
+        input_data = {
+            "data": {
+                "scireg_id": "test123",
+                "addresses": ["192.168.1.1"],
+                "org_name": "Test Organization"
             }
-            
-            result = processor.build_message(input_data, {})
-            
-            # Should log warning and return empty list
-            mock_warning.assert_called_with("Expected 'data' to be a list, got %s", str)
-            self.assertEqual(result, [])
+        }
+
+        result = processor.build_message(input_data, {})
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["organization_name"], "Test Organization")
+        self.assertEqual(result[0]["organization_ref"], "mock_org_ref")
     
     def test_build_message_missing_required_fields(self):
         """Test build_message with missing required fields."""
