@@ -3,7 +3,7 @@ import logging
 import re
 import orjson
 import os
-from metranova.processors.clickhouse.base import BaseDataGenericMetricProcessor, BaseMetadataProcessor
+from metranova.processors.clickhouse.base import BaseClickHouseDictionaryMixin, BaseDataGenericMetricProcessor, BaseMetadataProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,9 @@ class FacilityMetadataProcessor(IRIBaseMetadataProcessor):
         super().__init__(pipeline)
         self.url_match = r'/facility$'
         self.table = os.getenv('CLICKHOUSE_IRI_FACILITY_TABLE', 'meta_iri_facility')
+        self.dictionary_enabled = os.getenv('CLICKHOUSE_IRI_FACILITY_DICTIONARY_ENABLED', 'true').lower() in ('true', '1', 'yes')
+        if self.dictionary_enabled:
+            self.ch_dictionaries.append(FacilityDictionary(self.table))
         self.column_defs.extend([
             ['last_modified', 'DateTime', True],
             ['short_name', 'LowCardinality(Nullable(String))', True],
@@ -108,6 +111,9 @@ class SiteMetadataProcessor(IRIBaseMetadataProcessor):
         super().__init__(pipeline)
         self.url_match = r'/facility/sites$'
         self.table = os.getenv('CLICKHOUSE_IRI_SITE_TABLE', 'meta_iri_site')
+        self.dictionary_enabled = os.getenv('CLICKHOUSE_IRI_SITE_DICTIONARY_ENABLED', 'true').lower() in ('true', '1', 'yes')
+        if self.dictionary_enabled:
+            self.ch_dictionaries.append(SiteDictionary(self.table))
         self.column_defs.extend([
             ['last_modified', 'DateTime', True],
             ['facility_id', 'LowCardinality(Nullable(String))', True],
@@ -372,4 +378,48 @@ class ResourceDataProcessor(IRIBaseDataProcessor):
     def load_resource_types(self):
         return ['iri_resource']
 
-        
+class FacilityDictionary(BaseClickHouseDictionaryMixin):
+    def __init__(self, source_table_name: str):
+        super().__init__(source_table_name)
+        self.dictionary_name = os.getenv('CLICKHOUSE_IRI_FACILITY_DICTIONARY_NAME', 'meta_facility_dict')
+        self.column_defs = [
+            ['id', 'String'],
+            ['uri', 'String'],
+            ['name', 'Nullable(String)'],
+            ['description', 'Nullable(String)'],
+            ['last_modified', 'DateTime', True],
+            ['short_name', 'Nullable(String)', True],
+            ['organization_name', 'Nullable(String)', True],
+            ['support_uri', 'Nullable(String)', True]
+        ]
+        self.primary_keys = ["id"]
+        #miniumum and maximum lifetime in seconds
+        self.lifetime_min = os.getenv('CLICKHOUSE_IRI_FACILITY_DICTIONARY_LIFETIME_MIN', "600")
+        self.lifetime_max = os.getenv('CLICKHOUSE_IRI_FACILITY_DICTIONARY_LIFETIME_MAX', "3600")
+        #set the layout, will be the full layout definition
+        self.layout = "COMPLEX_KEY_HASHED()"
+
+class SiteDictionary(BaseClickHouseDictionaryMixin):
+    def __init__(self, source_table_name: str):
+        super().__init__(source_table_name)
+        self.dictionary_name = os.getenv('CLICKHOUSE_IRI_SITE_DICTIONARY_NAME', 'meta_site_dict')
+        self.column_defs = [
+            ['id', 'String'],
+            ['uri', 'String'],
+            ['name', 'Nullable(String)'],
+            ['description', 'Nullable(String)'],
+            ['last_modified', 'DateTime', True],
+            ['short_name', 'Nullable(String)', True],
+            ['operating_organization', 'Nullable(String)', True],
+            ['country_name', 'Nullable(String)', True],
+            ['country_sub_name', 'Nullable(String)', True],
+            ['street_address', 'Nullable(String)', True],
+            ['facility_id', 'Nullable(String)', True],
+            ['facility_ref', 'Nullable(String)', True]
+        ]
+        self.primary_keys = ["id"]
+        #miniumum and maximum lifetime in seconds
+        self.lifetime_min = os.getenv('CLICKHOUSE_IRI_SITE_DICTIONARY_LIFETIME_MIN', "600")
+        self.lifetime_max = os.getenv('CLICKHOUSE_IRI_SITE_DICTIONARY_LIFETIME_MAX', "3600")
+        #set the layout, will be the full layout definition
+        self.layout = "COMPLEX_KEY_HASHED()"
