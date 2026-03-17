@@ -20,6 +20,12 @@ from metranova.processors.clickhouse.base import BaseMetadataProcessor
 
 logger = logging.getLogger(__name__)
 
+# Known anomalies where last-word extraction gives wrong/misleading type
+ROLE_TYPE_OVERRIDES = {
+    'oob management': 'oob-management',
+    'cellular gateway': 'cellular-gateway',
+}
+
 class MetaIPServiceProcessor(BaseMetadataProcessor):
     """Processor for meta_ip_esdb table - ESnet IP Service/ESDB service IP metadata"""
     
@@ -736,3 +742,256 @@ class MetaServiceEdgeProcessor(BaseMetadataProcessor):
                 formatted_record['peer_as_id'] = None
         
         return formatted_record  
+
+
+"""
+Processor for ESDB Device metadata
+Handles Service Database equipment/device information including location, manufacturer, and network details.
+
+Data model:
+- One record per device (keyed by device name)
+- hostname: Fully qualified hostname of the device
+- state: Operational state of the device (e.g. Active, Inactive)
+- network: The network it belongs to (e.g. ESnet5)
+- os: Operating system of the device (e.g. SROS, JUNOS)
+- role: Purpose of the device (e.g. Core Router, Access Switch)
+- manufacturer: Hardware vendor (e.g. Nokia, Juniper)
+- model: Vendor-specific model name (e.g. 7750 TEST-12)
+- location_name: Short name for where the device is located (e.g. TEST-HUB)
+- location_type: Type of location (e.g. HUB, Site)
+- latitude: Latitude of device location
+- longitude: Longitude of device location
+"""
+
+class MetaDeviceProcessor(BaseMetadataProcessor):
+    """Processor for meta_device table - ESDB device/equipment metadata"""
+
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        self.logger = logger
+        self.table = os.getenv('CLICKHOUSE_ESDB_DEVICE_TABLE', 'meta_device')
+
+        # Device URL pattern for matching GraphQLConsumer messages
+        self.device_url_pattern = os.getenv('DEVICE_URL_MATCH_PATTERN', 'esdb')
+
+        # Type formatting
+        self.float_fields = ['latitude', 'longitude']
+        self.array_fields = ['location_type', 'loopback_ip']
+
+        # ID and required fields
+        self.val_id_field = ['id']
+        self.required_fields = [['id']]
+
+        # Column definitions
+        self.column_defs.extend([
+            # Device identifiers
+            ['hostname', 'Nullable(String)', True],
+            ['type', 'LowCardinality(String)', True],
+            ['loopback_ip', 'Array(IPv6)', True],
+
+            # Device state and classification
+            ['state', 'LowCardinality(Nullable(String))', True],
+            ['network', 'LowCardinality(Nullable(String))', True],
+            ['os', 'LowCardinality(Nullable(String))', True],
+            ['role', 'LowCardinality(Nullable(String))', True],
+
+            # Hardware info
+            ['manufacturer', 'LowCardinality(Nullable(String))', True],
+            ['model', 'LowCardinality(Nullable(String))', True],
+
+            # Location fields
+            ['location_name', 'LowCardinality(Nullable(String))', True],
+            ['location_type', 'Array(String)', True],
+            ['latitude', 'Nullable(Float64)', True],
+            ['longitude', 'Nullable(Float64)', True],
+        ])
+
+    def _derive_type_from_role(self, role):
+        """
+        Derive device type from role name by extracting the last word, lowercased.
+        Anomalous roles that don't follow the last-word pattern are handled via
+        explicit overrides.
+
+        Examples:
+            "Core Router"             -> "router"
+            "Management Switch"       -> "switch"
+            "Tap Aggregation Switch"  -> "switch"
+            "Border Leaf Switch"      -> "switch"
+            "OOB Management"          -> "oob-management"  (override)
+            "Cellular Gateway"        -> "cellular-gateway" (override)
+            "OLS"                     -> "ols"
+            "Power"                   -> "power"
+            "Server"                  -> "server"
+            None                      -> "unknown"
+
+        Args:
+            role: Role name string from ESDB
+
+        Returns:
+            Device type string
+        """
+        if not role:
+            return 'unknown'
+
+        role_normalized = role.strip().lower()
+
+        # Check overrides first before applying last-word extraction
+        if role_normalized in ROLE_TYPE_OVERRIDES:
+            return ROLE_TYPE_OVERRIDES[role_normalized]
+
+        return role_normalized.split()[-1]
+
+    def match_message(self, value):
+        """
+        Match messages for this processor.
+
+        Matches messages that either:
+        1. Have table field matching this processor's table (standard metadata pattern)
+        2. Come from GraphQLConsumer with ESDB URL and equipmentList data structure
+        """
+        if value.get('table') == self.table:
+            return super().match_message(value)
+        
+        # Check for GraphQLConsumer message with device/equipment URL
+        url = value.get('url', '')
+        if self.device_url_pattern in url:
+            # Additional check: verify this is actually device/equipment data
+            data = value.get('data', {}).get('data', {})
+            if 'equipmentList' in data:
+                return True
+
+        return False
+
+    def _build_device_record(self, device):
+        """
+        Build a device record from a GraphQL equipment entry.
+
+        Expected GraphQL structure:
+        {
+            "id": "123",
+            "hostname": "test-123.example.com",
+            "equipmentState": {"name": "Active"},
+            "network": {"name": "TestNetwork"},
+            "os": {"name": "SROS"},
+            "role": {"name": "Core Router"},
+            "model": {
+                "name": "1234 TEST-12",
+                "manufacturer": {"shortName": "Nokia"}
+            },
+            "location": {
+                "shortName": "TEST-HUB",
+                "fullName": "Test Hub",
+                "latitude": 41.8781,
+                "longitude": -87.6298,
+                "locationType": {"name": "HUB"}
+            }
+        }
+        """
+        try:
+            device_id = device.get('id')
+            if not device_id:
+                self.logger.warning("Skipping device without id")
+                return None
+
+            # Get nested object values safely
+            state = (device.get('equipmentState') or {}).get('name')
+            network = (device.get('network') or {}).get('name')
+            os_name = (device.get('os') or {}).get('name')
+            role = (device.get('role') or {}).get('name')
+
+            # Derive type from role
+            device_type = self._derive_type_from_role(role)
+
+            # Get model and manufacturer
+            model_obj = device.get('model') or {}
+            manufacturer = (model_obj.get('manufacturer') or {}).get('shortName')
+            model_name = model_obj.get('name')
+
+            # Get location fields
+            location = device.get('location') or {}
+            location_name = location.get('shortName')
+            latitude = location.get('latitude')
+            longitude = location.get('longitude')
+
+            # Get location type as array
+            location_type = []
+            loc_type_name = (location.get('locationType') or {}).get('name')
+            if loc_type_name:
+                location_type = [loc_type_name]
+
+            return {
+                'id': device_id,
+                'type': device_type,
+                'hostname': device.get('hostname'),
+                'state': state,
+                'network': network,
+                'os': os_name,
+                'role': role,
+                'manufacturer': manufacturer,
+                'model': model_name,
+                'location_name': location_name,
+                'location_type': location_type,
+                'latitude': latitude,
+                'longitude': longitude,
+                # Fields not available in ESDB GraphQL - left for other data sources
+                'loopback_ip': [],
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error building device record for {device.get('id')}: {e}")
+            return None
+
+    def _extract_device_records(self, device_data):
+        """Extract device records from ESDB GraphQL equipmentList response."""
+        device_records = []
+
+        if not device_data:
+            self.logger.warning("No device data to process")
+            return device_records
+
+        devices = device_data.get('data', {}).get('equipmentList', {}).get('list', [])
+
+        self.logger.debug(f"Found {len(devices)} devices in ESDB response")
+
+        if not devices:
+            self.logger.warning("No devices found in ESDB data")
+            return device_records
+
+        for device in devices:
+            try:
+                record = self._build_device_record(device)
+                if record:
+                    device_records.append(record)
+            except Exception as e:
+                self.logger.error(f"Error processing device {device.get('id')}: {e}")
+                continue
+
+        self.logger.info(f"Extracted {len(device_records)} device records from ESDB data")
+        return device_records
+
+    def build_message(self, msg: dict, metadata: dict) -> list:
+        """
+        Build message - handles both standard metadata format and GraphQLConsumer format.
+
+        GraphQLConsumer passes: {'url': url, 'status_code': ..., 'data': result.json()}
+        Standard format passes:  {'data': [...]}
+        """
+        raw_data = msg.get('data', {})
+        if isinstance(raw_data, dict) and 'data' in raw_data and 'equipmentList' in raw_data.get('data', {}):
+            device_records = self._extract_device_records(raw_data)
+            if not device_records:
+                self.logger.warning("No device records extracted from ESDB data")
+                return []
+            msg = {'data': device_records}
+
+        return super().build_message(msg, metadata)
+
+
+    def build_metadata_fields(self, value: dict) -> dict:
+        """Extract and format device metadata fields"""
+        formatted_record = super().build_metadata_fields(value)
+
+        self.format_array_fields(formatted_record)
+        self.format_float_fields(formatted_record)
+
+        return formatted_record
