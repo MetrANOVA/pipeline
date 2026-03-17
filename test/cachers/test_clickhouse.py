@@ -10,7 +10,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from metranova.cachers.clickhouse import ClickHouseCacher
+from metranova.cachers.clickhouse import ClickHouseCacher, ClickHouseRangedCacher
 
 
 class TestClickHouseCacher(unittest.TestCase):
@@ -322,6 +322,143 @@ class TestClickHouseCacher(unittest.TestCase):
         
         with self.assertRaises(Exception):
             self.cacher.query_table('meta_device')
+
+class TestClickHouseRangedCacher(unittest.TestCase):
+    """Unit tests for ClickHouseRangedCacher class."""
+
+    def setUp(self):
+        with patch('metranova.cachers.clickhouse.ClickHouseConnector') as mock_connector:
+            mock_instance = Mock()
+            mock_instance.client = None
+            mock_connector.return_value = mock_instance
+
+            with patch.dict(os.environ, {
+                'CLICKHOUSE_CACHER_REFRESH_INTERVAL': '0',
+                'CLICKHOUSE_CACHER_MAX_SIZE': '1000',
+                'CLICKHOUSE_CACHER_MAX_TTL': '60',
+                'CLICKHOUSE_RANGED_CACHER_CONFIGS': 'meta_application_dict:meta_application_dict:port_range_min:port_range_max:protocol:id'
+            }, clear=False):
+                self.cacher = ClickHouseRangedCacher()
+
+    def tearDown(self):
+        if hasattr(self.cacher, 'close'):
+            self.cacher.close()
+
+    def test_init_default_ranged_config(self):
+        with patch('metranova.cachers.clickhouse.ClickHouseConnector') as mock_connector:
+            mock_instance = Mock()
+            mock_instance.client = None
+            mock_connector.return_value = mock_instance
+
+            with patch.dict(os.environ, {
+                'CLICKHOUSE_CACHER_REFRESH_INTERVAL': '0',
+                'CLICKHOUSE_RANGED_CACHER_CONFIGS': ''
+            }, clear=False):
+                cacher = ClickHouseRangedCacher()
+                self.assertEqual(len(cacher.range_configs), 1)
+                cfg = cacher.range_configs[0]
+                self.assertEqual(cfg['lookup_table'], 'meta_application_dict')
+                self.assertEqual(cfg['table'], 'meta_application_dict')
+                self.assertEqual(cfg['min_col'], 'port_range_min')
+                self.assertEqual(cfg['max_col'], 'port_range_max')
+                self.assertEqual(cfg['key_col'], 'protocol')
+                self.assertEqual(cfg['val_col'], 'id')
+                cacher.close()
+
+    def test_parse_multiple_ranged_configs(self):
+        with patch('metranova.cachers.clickhouse.ClickHouseConnector') as mock_connector:
+            mock_instance = Mock()
+            mock_instance.client = None
+            mock_connector.return_value = mock_instance
+
+            with patch.dict(os.environ, {
+                'CLICKHOUSE_CACHER_REFRESH_INTERVAL': '0',
+                'CLICKHOUSE_RANGED_CACHER_CONFIGS': (
+                    'lookup_app:meta_application_dict:port_range_min:port_range_max:protocol:id,'
+                    'lookup_other:meta_other:min_port:max_port:proto:app_id'
+                )
+            }, clear=False):
+                cacher = ClickHouseRangedCacher()
+                self.assertEqual(len(cacher.range_configs), 2)
+                self.assertEqual(cacher.tables, ['lookup_app', 'lookup_other'])
+                cacher.close()
+
+    def test_parse_legacy_five_part_config_sets_lookup_table_to_source(self):
+        with patch('metranova.cachers.clickhouse.ClickHouseConnector') as mock_connector:
+            mock_instance = Mock()
+            mock_instance.client = None
+            mock_connector.return_value = mock_instance
+
+            with patch.dict(os.environ, {
+                'CLICKHOUSE_CACHER_REFRESH_INTERVAL': '0',
+                'CLICKHOUSE_RANGED_CACHER_CONFIGS': 'meta_application_dict:port_range_min:port_range_max:protocol:id'
+            }, clear=False):
+                cacher = ClickHouseRangedCacher()
+                self.assertEqual(len(cacher.range_configs), 1)
+                cfg = cacher.range_configs[0]
+                self.assertEqual(cfg['lookup_table'], 'meta_application_dict')
+                self.assertEqual(cfg['table'], 'meta_application_dict')
+                cacher.close()
+
+    def test_build_query_uses_configured_columns(self):
+        cfg = {
+            'lookup_table': 'meta_application_dict',
+            'table': 'meta_application_dict',
+            'min_col': 'port_range_min',
+            'max_col': 'port_range_max',
+            'key_col': 'protocol',
+            'val_col': 'id'
+        }
+        query = self.cacher.build_query(cfg)
+        self.assertEqual(
+            query,
+            'SELECT DISTINCT port_range_min, port_range_max, protocol, id FROM meta_application_dict'
+        )
+
+    def test_prime_table_builds_protocol_port_cache(self):
+        self.cacher.cache.client = Mock()
+        cfg = self.cacher.range_configs[0]
+        mock_rows = [
+            (80, 81, 'TCP', 'app-http'),
+            (53, 53, 'udp', 'app-dns')
+        ]
+
+        with patch.object(self.cacher, 'query_table', return_value=mock_rows):
+            self.cacher.prime_table(cfg)
+
+        table_cache = self.cacher.local_cache['meta_application_dict']
+        self.assertEqual(table_cache['tcp'][80], 'app-http')
+        self.assertEqual(table_cache['tcp'][81], 'app-http')
+        self.assertEqual(table_cache['udp'][53], 'app-dns')
+
+    def test_prime_table_swaps_reverse_ranges(self):
+        self.cacher.cache.client = Mock()
+        cfg = self.cacher.range_configs[0]
+        mock_rows = [
+            (105, 100, 'tcp', 'app-x')
+        ]
+
+        with patch.object(self.cacher, 'query_table', return_value=mock_rows):
+            self.cacher.prime_table(cfg)
+
+        table_cache = self.cacher.local_cache['meta_application_dict']['tcp']
+        self.assertEqual(table_cache[100], 'app-x')
+        self.assertEqual(table_cache[105], 'app-x')
+
+    def test_lookup_by_tuple_and_string(self):
+        self.cacher.local_cache['meta_application_dict'] = {
+            'tcp': {443: 'app-https'}
+        }
+        self.assertEqual(self.cacher.lookup('meta_application_dict', ('tcp', 443)), 'app-https')
+        self.assertEqual(self.cacher.lookup('meta_application_dict', 'TCP:443'), 'app-https')
+        self.assertEqual(self.cacher.lookup_key_range('meta_application_dict', 'tcp', 443), 'app-https')
+
+    def test_lookup_invalid_inputs(self):
+        self.cacher.local_cache['meta_application_dict'] = {'tcp': {80: 'app-http'}}
+        self.assertIsNone(self.cacher.lookup(None, ('tcp', 80)))
+        self.assertIsNone(self.cacher.lookup('meta_application_dict', None))
+        self.assertIsNone(self.cacher.lookup('meta_application_dict', 'tcp:not_an_int'))
+        self.assertIsNone(self.cacher.lookup('meta_application_dict', 'tcp'))
 
 
 if __name__ == '__main__':

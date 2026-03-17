@@ -3,7 +3,7 @@ import logging
 import re
 import orjson
 import os
-from metranova.processors.clickhouse.base import BaseDataGenericMetricProcessor, BaseMetadataProcessor
+from metranova.processors.clickhouse.base import BaseClickHouseDictionaryMixin, BaseDataGenericMetricProcessor, BaseMetadataProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +76,83 @@ class IRIBaseMetadataProcessor(BaseMetadataProcessor):
         
         return formatted_record
 
+class FacilityMetadataProcessor(IRIBaseMetadataProcessor):
+    
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        self.url_match = r'/facility$'
+        self.table = os.getenv('CLICKHOUSE_IRI_FACILITY_TABLE', 'meta_iri_facility')
+        self.dictionary_enabled = os.getenv('CLICKHOUSE_IRI_FACILITY_DICTIONARY_ENABLED', 'true').lower() in ('true', '1', 'yes')
+        if self.dictionary_enabled:
+            self.ch_dictionaries.append(FacilityDictionary(self.table))
+        self.column_defs.extend([
+            ['last_modified', 'DateTime', True],
+            ['short_name', 'LowCardinality(Nullable(String))', True],
+            ['organization_name', 'LowCardinality(Nullable(String))', True],
+            ['support_uri', 'LowCardinality(Nullable(String))', True]
+        ])
+        self.required_fields = [['id'], ['self_uri'], ['last_modified']]
+
+    def build_metadata_fields(self, value: dict) -> dict:
+        # Call parent to build initial record
+        formatted_record = super().build_metadata_fields(value)
+
+        #add remaining fields to formatted_record
+        formatted_record['last_modified'] = self.format_time_value(value.get('last_modified'))
+        formatted_record['short_name'] = value.get('short_name', None)
+        formatted_record['organization_name'] = value.get('organization_name', None)
+        formatted_record['support_uri'] = value.get('support_uri', None)
+        
+        return formatted_record
+
+class SiteMetadataProcessor(IRIBaseMetadataProcessor):
+
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        self.url_match = r'/facility/sites$'
+        self.table = os.getenv('CLICKHOUSE_IRI_SITE_TABLE', 'meta_iri_site')
+        self.dictionary_enabled = os.getenv('CLICKHOUSE_IRI_SITE_DICTIONARY_ENABLED', 'true').lower() in ('true', '1', 'yes')
+        if self.dictionary_enabled:
+            self.ch_dictionaries.append(SiteDictionary(self.table))
+        self.column_defs.extend([
+            ['last_modified', 'DateTime', True],
+            ['facility_id', 'LowCardinality(Nullable(String))', True],
+            ['facility_ref', 'Nullable(String)', True],
+            ['short_name', 'LowCardinality(Nullable(String))', True],
+            ['operating_organization', 'LowCardinality(Nullable(String))', True],
+            ['country_name', 'LowCardinality(Nullable(String))', True],
+            ['country_sub_name', 'LowCardinality(Nullable(String))', True],
+            ['street_address', 'Nullable(String)', True]
+        ])
+        self.required_fields = [['id'], ['self_uri'], ['last_modified']]
+
+    def build_metadata_fields(self, value: dict) -> dict:
+        # Call parent to build initial record
+        formatted_record = super().build_metadata_fields(value)
+
+        #add remaining fields to formatted_record
+        formatted_record['last_modified'] = self.format_time_value(value.get('last_modified'))
+        formatted_record['short_name'] = value.get('short_name', None)
+        formatted_record['operating_organization'] = value.get('operating_organization', None)
+        formatted_record['country_name'] = value.get('country_name', None)
+        formatted_record['country_sub_name'] = value.get('state_or_province_name', None)
+        formatted_record['street_address'] = value.get('street_address', None)
+
+        #lookup facility_id from redis cacher
+        facility_id = self.pipeline.cacher("redis").lookup("iri_site_to_facility", value.get('id', None))
+        formatted_record['facility_id'] = facility_id
+        #lookup facility_ref from clickhouse cacher using facility_id
+        facility_ref = self.pipeline.cacher("clickhouse").lookup_dict_key("meta_iri_facility", facility_id, 'ref') if facility_id else None
+        formatted_record['facility_ref'] = facility_ref
+        
+        return formatted_record
+
 class EventMetadataProcessor(IRIBaseMetadataProcessor):
 
     def __init__(self, pipeline):
         super().__init__(pipeline)
-        self.url_match = r'/status/incidents/.+/events$'
+        # match urls like /status/incidents/{incident_id}/events OR /status/events. The latter is a new API spec so need to support both for now. Future can remove support for the former once all data sources are updated to new API spec.
+        self.url_match = r'/status/(incidents/.+/)?events$'
         self.table = os.getenv('CLICKHOUSE_IRI_EVENT_TABLE', 'meta_iri_event')
         self.column_defs.extend([
             ['last_modified', 'DateTime', True],
@@ -163,7 +235,9 @@ class ResourceMetadataProcessor(IRIBaseMetadataProcessor):
             ['group', 'LowCardinality(Nullable(String))', True],
             ['capability_id', 'Array(LowCardinality(String))', True],
             ['site_id', 'LowCardinality(Nullable(String))', True],
-            ['facility_id', 'LowCardinality(Nullable(String))', True]
+            ['site_ref', 'Nullable(String)', True],
+            ['facility_id', 'LowCardinality(Nullable(String))', True],
+            ['facility_ref', 'Nullable(String)', True]
         ])
         self.required_fields = [['id'], ['resource_type'], ['self_uri']]
 
@@ -175,8 +249,16 @@ class ResourceMetadataProcessor(IRIBaseMetadataProcessor):
         formatted_record['type'] = value.get('resource_type')
         formatted_record['group'] = value.get('group')
         formatted_record['capability_id'] = value.get('capability_uris', [])
-        formatted_record['site_id'] = None #todo: lookup
-        formatted_record['facility_id'] = None #todo: lookup
+        #lookup site id from redis cacher
+        site_id = self.pipeline.cacher("redis").lookup("iri_resource_to_site", value.get('id', None))
+        formatted_record['site_id'] = site_id
+        #lookup site ref from clickhouse cacher using site_id
+        formatted_record['site_ref'] = self.pipeline.cacher("clickhouse").lookup_dict_key("meta_iri_site", site_id, 'ref') if site_id else None
+        #lookup facility id from redis cacher using site_id
+        facility_id = self.pipeline.cacher("redis").lookup("iri_site_to_facility", site_id) if site_id else None
+        formatted_record['facility_id'] = facility_id
+        #lookup facility ref from clickhouse cacher using facility_id
+        formatted_record['facility_ref'] = self.pipeline.cacher("clickhouse").lookup_dict_key("meta_iri_facility", facility_id, 'ref') if facility_id else None
 
         #build a hash with all the keys and values from value['data']
         return formatted_record
@@ -296,4 +378,48 @@ class ResourceDataProcessor(IRIBaseDataProcessor):
     def load_resource_types(self):
         return ['iri_resource']
 
-        
+class FacilityDictionary(BaseClickHouseDictionaryMixin):
+    def __init__(self, source_table_name: str):
+        super().__init__(source_table_name)
+        self.dictionary_name = os.getenv('CLICKHOUSE_IRI_FACILITY_DICTIONARY_NAME', 'meta_facility_dict')
+        self.column_defs = [
+            ['id', 'String'],
+            ['uri', 'String'],
+            ['name', 'Nullable(String)'],
+            ['description', 'Nullable(String)'],
+            ['last_modified', 'DateTime', True],
+            ['short_name', 'Nullable(String)', True],
+            ['organization_name', 'Nullable(String)', True],
+            ['support_uri', 'Nullable(String)', True]
+        ]
+        self.primary_keys = ["id"]
+        #miniumum and maximum lifetime in seconds
+        self.lifetime_min = os.getenv('CLICKHOUSE_IRI_FACILITY_DICTIONARY_LIFETIME_MIN', "600")
+        self.lifetime_max = os.getenv('CLICKHOUSE_IRI_FACILITY_DICTIONARY_LIFETIME_MAX', "3600")
+        #set the layout, will be the full layout definition
+        self.layout = "COMPLEX_KEY_HASHED()"
+
+class SiteDictionary(BaseClickHouseDictionaryMixin):
+    def __init__(self, source_table_name: str):
+        super().__init__(source_table_name)
+        self.dictionary_name = os.getenv('CLICKHOUSE_IRI_SITE_DICTIONARY_NAME', 'meta_site_dict')
+        self.column_defs = [
+            ['id', 'String'],
+            ['uri', 'String'],
+            ['name', 'Nullable(String)'],
+            ['description', 'Nullable(String)'],
+            ['last_modified', 'DateTime', True],
+            ['short_name', 'Nullable(String)', True],
+            ['operating_organization', 'Nullable(String)', True],
+            ['country_name', 'Nullable(String)', True],
+            ['country_sub_name', 'Nullable(String)', True],
+            ['street_address', 'Nullable(String)', True],
+            ['facility_id', 'Nullable(String)', True],
+            ['facility_ref', 'Nullable(String)', True]
+        ]
+        self.primary_keys = ["id"]
+        #miniumum and maximum lifetime in seconds
+        self.lifetime_min = os.getenv('CLICKHOUSE_IRI_SITE_DICTIONARY_LIFETIME_MIN', "600")
+        self.lifetime_max = os.getenv('CLICKHOUSE_IRI_SITE_DICTIONARY_LIFETIME_MAX', "3600")
+        #set the layout, will be the full layout definition
+        self.layout = "COMPLEX_KEY_HASHED()"

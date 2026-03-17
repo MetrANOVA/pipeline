@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from metranova.connectors.http import HTTPConnector
 from metranova.consumers.base import TimedIntervalConsumer
 from metranova.pipelines.base import BasePipeline
@@ -28,9 +29,18 @@ class HTTPConsumer(TimedIntervalConsumer):
             logger.info(f"Found {len(self.urls)} HTTP URLs: {self.urls}")
         else:
             logger.warning(f"{env_prefix}HTTP_CONSUMER_URLS environment variable is empty")
+        #load optional sleep time between polls. default is no sleep time.
+        self.sleep_per_url_time = int(os.getenv(f'{env_prefix}HTTP_CONSUMER_SLEEP_PER_URL_TIME', 0))
 
     def consume_messages(self):
+        run_once = False
         for url in self.urls:
+            #prime caches if needed
+            if run_once:
+                self.pre_consume_messages()  # run pre_consume_messages before each URL after the first to allow for priming cachers between calls
+            else:
+                run_once = True
+            #fetch url
             try:
                 result = self.datasource.client.get(url)
                 result.raise_for_status()
@@ -40,6 +50,10 @@ class HTTPConsumer(TimedIntervalConsumer):
                     'data': result.json()
                 }
                 self.pipeline.process_message(msg)
+                # Sleep if sleep_time is set
+                if self.sleep_per_url_time > 0:
+                    self.logger.debug(f"Sleeping for {self.sleep_per_url_time} seconds before next URL")
+                    time.sleep(self.sleep_per_url_time)
             except HTTPError as e:
                 self.logger.error("HTTP error {0}".format(e))
             except RequestException as e:
