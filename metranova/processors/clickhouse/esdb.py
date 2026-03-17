@@ -835,6 +835,9 @@ class MetaDeviceProcessor(BaseMetadataProcessor):
 
         role_normalized = role.strip().lower()
 
+        if not role_normalized:  # catches whitespace-only strings
+            return 'unknown'
+
         # Check overrides first before applying last-word extraction
         if role_normalized in ROLE_TYPE_OVERRIDES:
             return ROLE_TYPE_OVERRIDES[role_normalized]
