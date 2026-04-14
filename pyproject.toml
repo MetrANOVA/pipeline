@@ -21,7 +21,7 @@ dependencies = [
 metranova_core = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
-packages = ["pipeline"]
+packages = ["metranova"]
 
 [build-system]
 requires = ["hatchling>=1.25.0"]
