@@ -123,7 +123,8 @@ class ClickHouseCacher(BaseCacher):
         for field in fields:
             if field is not None:
                 query += f" AND {field.lstrip('@')} IS NOT NULL"
-        query += " GROUP BY id ORDER BY id"
+        #order by max_insert_time to ensure we get the most recent record for each id in case there are multiple records with the same id but different insert times (e.g., due to stale data repalced by newer data)
+        query += " GROUP BY id ORDER BY max_insert_time ASC, id ASC"
         if len(array_joins) > 0:
             query = "SELECT " + ", ".join(latest_fields) + f" FROM ({query}) ARRAY JOIN " + ", ".join(array_joins)
 
