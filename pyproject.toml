@@ -8,6 +8,7 @@ dependencies = [
     "cachetools==6.2.1",
     "clickhouse-connect==0.15.0",
     "confluent-kafka==2.14.0",
+    "metranova-core",
     "orjson==3.11.3",
     "pycountry==24.6.1",
     "pycountry-convert==0.7.2",
@@ -18,7 +19,8 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-metranova_core = { workspace = true }
+metranova = { workspace = true }
+metranova-core = { git = "https://github.com/MetrANOVA/api.git", subdirectory = "packages/metranova", branch = "js-shared-lib2" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["metranova"]
