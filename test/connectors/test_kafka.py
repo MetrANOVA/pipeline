@@ -154,6 +154,104 @@ class TestKafkaConnector(unittest.TestCase):
         
         call_args = mock_consumer.call_args[0][0]
         self.assertEqual(call_args['ssl.endpoint.identification.algorithm'], 'none')
+
+    @patch('metranova.connectors.kafka.Consumer')
+    @patch('metranova.connectors.kafka.os.path.exists')
+    @patch('metranova.connectors.kafka.os.urandom')
+    @patch.dict(os.environ, {
+        'KAFKA_SASL_USERNAME': 'alice',
+        'KAFKA_SASL_PASSWORD': 'secret',
+        'KAFKA_SSL_CA_LOCATION': '/app/conf/certificates/ca-cert',
+    })
+    def test_initialization_sasl_plain_with_tls(self, mock_urandom, mock_exists, mock_consumer):
+        """Test KafkaConnector initialization with SASL/PLAIN over TLS."""
+        mock_urandom.return_value = b'\x01\x02\x03\x04'
+        mock_exists.return_value = True
+        mock_consumer_instance = Mock()
+        mock_consumer.return_value = mock_consumer_instance
+
+        KafkaConnector()
+
+        call_args = mock_consumer.call_args[0][0]
+        self.assertEqual(call_args['security.protocol'], 'SASL_SSL')
+        self.assertEqual(call_args['sasl.mechanism'], 'PLAIN')
+        self.assertEqual(call_args['sasl.username'], 'alice')
+        self.assertEqual(call_args['sasl.password'], 'secret')
+        self.assertEqual(call_args['ssl.ca.location'], '/app/conf/certificates/ca-cert')
+        self.assertEqual(call_args['ssl.endpoint.identification.algorithm'], 'https')
+
+    @patch('metranova.connectors.kafka.Consumer')
+    @patch('metranova.connectors.kafka.os.path.exists')
+    @patch('metranova.connectors.kafka.os.urandom')
+    @patch.dict(os.environ, {
+        'KAFKA_SASL_USERNAME': 'alice',
+        'KAFKA_SASL_PASSWORD': 'secret',
+        'KAFKA_SSL_CA_LOCATION': '/app/conf/certificates/ca-cert',
+    })
+    def test_initialization_sasl_plain_without_ca(self, mock_urandom, mock_exists, mock_consumer):
+        """Test KafkaConnector initialization with SASL/PLAIN without CA cert."""
+        mock_urandom.return_value = b'\x01\x02\x03\x04'
+        mock_exists.return_value = False
+        mock_consumer_instance = Mock()
+        mock_consumer.return_value = mock_consumer_instance
+
+        KafkaConnector()
+
+        call_args = mock_consumer.call_args[0][0]
+        self.assertEqual(call_args['security.protocol'], 'SASL_PLAINTEXT')
+        self.assertEqual(call_args['sasl.mechanism'], 'PLAIN')
+        self.assertEqual(call_args['sasl.username'], 'alice')
+        self.assertEqual(call_args['sasl.password'], 'secret')
+        self.assertNotIn('ssl.ca.location', call_args)
+
+    @patch('metranova.connectors.kafka.Consumer')
+    @patch('metranova.connectors.kafka.os.path.exists')
+    @patch('metranova.connectors.kafka.os.urandom')
+    @patch.dict(os.environ, {
+        'KAFKA_SASL_USERNAME': 'alice',
+        'KAFKA_SASL_PASSWORD': 'secret',
+        'KAFKA_SSL_CA_LOCATION': '/app/conf/certificates/ca-cert',
+        'KAFKA_SSL_CERTIFICATE_LOCATION': '/app/conf/certificates/client-cert',
+        'KAFKA_SSL_KEY_LOCATION': '/app/conf/certificates/client-key',
+    })
+    def test_initialization_sasl_takes_precedence_over_ssl_client_auth(self, mock_urandom, mock_exists, mock_consumer):
+        """Test SASL/PLAIN config takes precedence over SSL client-certificate auth."""
+        mock_urandom.return_value = b'\x01\x02\x03\x04'
+        mock_exists.return_value = True
+        mock_consumer_instance = Mock()
+        mock_consumer.return_value = mock_consumer_instance
+
+        KafkaConnector()
+
+        call_args = mock_consumer.call_args[0][0]
+        self.assertEqual(call_args['security.protocol'], 'SASL_SSL')
+        self.assertEqual(call_args['sasl.mechanism'], 'PLAIN')
+        self.assertNotIn('ssl.certificate.location', call_args)
+        self.assertNotIn('ssl.key.location', call_args)
+
+    @patch('metranova.connectors.kafka.Consumer')
+    @patch('metranova.connectors.kafka.os.path.exists')
+    @patch('metranova.connectors.kafka.os.urandom')
+    @patch.dict(os.environ, {
+        'KAFKA_SASL_USERNAME': 'alice',
+        'KAFKA_SSL_CA_LOCATION': '/app/conf/certificates/ca-cert',
+        'KAFKA_SSL_CERTIFICATE_LOCATION': '/app/conf/certificates/client-cert',
+        'KAFKA_SSL_KEY_LOCATION': '/app/conf/certificates/client-key',
+    })
+    def test_initialization_partial_sasl_credentials_falls_back_to_ssl(self, mock_urandom, mock_exists, mock_consumer):
+        """Test partial SASL credentials do not enable SASL and fallback auth is used."""
+        mock_urandom.return_value = b'\x01\x02\x03\x04'
+        mock_exists.return_value = True
+        mock_consumer_instance = Mock()
+        mock_consumer.return_value = mock_consumer_instance
+
+        KafkaConnector()
+
+        call_args = mock_consumer.call_args[0][0]
+        self.assertEqual(call_args['security.protocol'], 'SSL')
+        self.assertNotIn('sasl.mechanism', call_args)
+        self.assertEqual(call_args['ssl.certificate.location'], '/app/conf/certificates/client-cert')
+        self.assertEqual(call_args['ssl.key.location'], '/app/conf/certificates/client-key')
     
     @patch('metranova.connectors.kafka.Consumer')
     @patch('metranova.connectors.kafka.os.path.exists')

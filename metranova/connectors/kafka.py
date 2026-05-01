@@ -11,7 +11,7 @@ class KafkaConnector(BaseConnector):
         self.logger = logger
         self.client = None
 
-        """Initialize Kafka consumer with SSL configuration"""
+        """Initialize Kafka consumer with SSL or SASL/PLAIN configuration"""
         try:
             # Get Kafka configuration from environment variables
             bootstrap_servers = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
@@ -25,6 +25,10 @@ class KafkaConnector(BaseConnector):
             ssl_certificate_location = os.getenv('KAFKA_SSL_CERTIFICATE_LOCATION', '/app/conf/certificates/client-cert')
             ssl_key_location = os.getenv('KAFKA_SSL_KEY_LOCATION', '/app/conf/certificates/client-key')
             ssl_key_password = os.getenv('KAFKA_SSL_KEY_PASSWORD')
+
+            # SASL/PLAIN configuration
+            sasl_username = os.getenv('KAFKA_SASL_USERNAME')
+            sasl_password = os.getenv('KAFKA_SASL_PASSWORD')
             
             # Base consumer configuration
             consumer_config = {
@@ -40,9 +44,32 @@ class KafkaConnector(BaseConnector):
                 'fetch.min.bytes': int(os.getenv('KAFKA_FETCH_MIN_BYTES', '1')),
                 'fetch.max.bytes': int(os.getenv('KAFKA_FETCH_MAX_BYTES', '52428800')),  # 50MB - default
             }
+
+            if (sasl_username and not sasl_password) or (sasl_password and not sasl_username):
+                self.logger.warning("Both KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD must be set to enable SASL/PLAIN")
             
-            # Add SSL configuration if certificates are provided
-            if ssl_ca_location and os.path.exists(ssl_ca_location):
+            # Prefer SASL/PLAIN when credentials are provided.
+            if sasl_username and sasl_password:
+                self.logger.info("Configuring Kafka SASL/PLAIN authentication")
+                consumer_config.update({
+                    'sasl.mechanism': 'PLAIN',
+                    'sasl.username': sasl_username,
+                    'sasl.password': sasl_password,
+                })
+
+                # Use TLS for broker verification when CA cert is available.
+                if ssl_ca_location and os.path.exists(ssl_ca_location):
+                    consumer_config.update({
+                        'security.protocol': 'SASL_SSL',
+                        'ssl.ca.location': ssl_ca_location,
+                        'ssl.endpoint.identification.algorithm': os.getenv('KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM', 'https'),
+                    })
+                else:
+                    self.logger.warning("CA certificate not found, using SASL_PLAINTEXT protocol")
+                    consumer_config['security.protocol'] = 'SASL_PLAINTEXT'
+
+            # Add SSL client-certificate configuration when SASL/PLAIN is not set.
+            elif ssl_ca_location and os.path.exists(ssl_ca_location):
                 self.logger.info("Configuring Kafka SSL authentication")
                 consumer_config.update({
                     'security.protocol': 'SSL',
