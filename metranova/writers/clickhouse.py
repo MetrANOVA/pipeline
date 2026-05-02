@@ -11,6 +11,7 @@ from metranova.writers.base import BaseWriter
 
 logger = logging.getLogger(__name__)
 
+
 class ClickHouseWriter(BaseWriter):
     def __init__(self, processors: List[BaseClickHouseProcessor]):
         super().__init__(processors)
@@ -36,26 +37,31 @@ class ClickHouseWriter(BaseWriter):
     def close(self):
         for batcher in self.batchers:
             batcher.close()
-        
+
         if self.datastore:
             self.datastore.close()
         logger.info("Datastore connection closed")
+
 
 class ClickHouseBatcher:
     def __init__(self, processor: BaseClickHouseProcessor):
         # Logger
         self.logger = logger
 
-        #Clickhouse Client and message processor
+        # Clickhouse Client and message processor
         # each batcher gets its own client to avoid threading issues
         self.client = ClickHouseConnector().client
         self.processor = processor
 
         # Batching configuration
-        self.batch_size = int(os.getenv('CLICKHOUSE_BATCH_SIZE', '1000'))
-        self.batch_timeout = float(os.getenv('CLICKHOUSE_BATCH_TIMEOUT', '30.0'))  # seconds
-        self.flush_interval = float(os.getenv('CLICKHOUSE_FLUSH_INTERVAL', '0.1'))  # seconds
-       
+        self.batch_size = int(os.getenv("CLICKHOUSE_BATCH_SIZE", "1000"))
+        self.batch_timeout = float(
+            os.getenv("CLICKHOUSE_BATCH_TIMEOUT", "30.0")
+        )  # seconds
+        self.flush_interval = float(
+            os.getenv("CLICKHOUSE_FLUSH_INTERVAL", "0.1")
+        )  # seconds
+
         # Batch state
         # self.batch is a dict where key is table name and value is list of messages for that table
         self.batch = defaultdict(list)
@@ -67,17 +73,19 @@ class ClickHouseBatcher:
             self.batch[table_name] = []
             self.create_table(table_name)
 
-        #create supporting dictionaries
+        # create supporting dictionaries
         for ch_dictionary in self.processor.get_ch_dictionaries():
             self.create_dictionary(ch_dictionary)
 
-        #create materialized views
+        # create materialized views
         for materialized_view in self.processor.get_materialized_views():
             self.create_materialized_view(materialized_view)
 
     def create_table(self, table_name):
         """Create the target table if it doesn't exist"""
-        create_table_cmd = self.processor.create_table_command(table_name=table_name) # store for reference
+        create_table_cmd = self.processor.create_table_command(
+            table_name=table_name
+        )  # store for reference
         if create_table_cmd is None:
             logger.info("No create_table_cmd defined, skipping table creation")
             return
@@ -92,13 +100,17 @@ class ClickHouseBatcher:
         """Create the target dictionary if it doesn't exist"""
         create_dict_cmd = ch_dictionary.create_dictionary_command()
         if create_dict_cmd is None:
-            logger.info("No create_dictionary_cmd defined, skipping dictionary creation")
+            logger.info(
+                "No create_dictionary_cmd defined, skipping dictionary creation"
+            )
             return
         try:
             self.client.command(create_dict_cmd)
             logger.info(f"Dictionary {ch_dictionary.dictionary_name} is ready")
         except Exception as e:
-            logger.error(f"Failed to create dictionary {ch_dictionary.dictionary_name}: {e}")
+            logger.error(
+                f"Failed to create dictionary {ch_dictionary.dictionary_name}: {e}"
+            )
             raise
 
     def create_materialized_view(self, materialized_view):
@@ -110,34 +122,45 @@ class ClickHouseBatcher:
             return
         create_mv_cmd = materialized_view.create_mv_command()
         if create_mv_cmd is None:
-            logger.info("No create_materialized_view_cmd defined, skipping materialized view creation")
+            logger.info(
+                "No create_materialized_view_cmd defined, skipping materialized view creation"
+            )
             return
         # Create the target table
         try:
-            self.logger.debug(f"Creating materialized view target table with command: {create_table_cmd}")
+            self.logger.debug(
+                f"Creating materialized view target table with command: {create_table_cmd}"
+            )
             self.client.command(create_table_cmd)
             logger.info(f"Materialized View Table {materialized_view.table} is ready")
         except Exception as e:
-            logger.error(f"Failed to create materialized view target table {materialized_view.table}: {e}")
+            logger.error(
+                f"Failed to create materialized view target table {materialized_view.table}: {e}"
+            )
             raise
         # Create materialized view
         try:
-            self.logger.debug(f"Creating materialized view with command: {create_mv_cmd}")
+            self.logger.debug(
+                f"Creating materialized view with command: {create_mv_cmd}"
+            )
             self.client.command(create_mv_cmd)
             logger.info(f"Materialized View {materialized_view.mv_name} is ready")
         except Exception as e:
-            logger.error(f"Failed to create materialized view {materialized_view.mv_name}: {e}")
+            logger.error(
+                f"Failed to create materialized view {materialized_view.mv_name}: {e}"
+            )
             raise
 
     def start_flush_timer(self):
         """Start background timer to flush batches periodically"""
+
         def flush_timer():
             while True:
-                # Check every flush_interval seconds. 
+                # Check every flush_interval seconds.
                 # Note that max clickhouse throughput is self.flush_interval * self.batch_size
-                time.sleep(self.flush_interval)  
+                time.sleep(self.flush_interval)
                 current_time = time.time()
-                
+
                 with self.batch_lock:
                     if (current_time - self.last_flush_time) >= self.batch_timeout:
                         for table_name in self.batch:
@@ -151,7 +174,7 @@ class ClickHouseBatcher:
         """Add message to batch and flush if needed"""
         if not msg:
             return
-        
+
         # Check if this processor should handle the message
         if not self.processor.match_message(msg):
             self.logger.debug("Message did not match processor criteria, skipping")
@@ -161,14 +184,16 @@ class ClickHouseBatcher:
         message_data = self.processor.build_message(msg, consumer_metadata)
         if message_data is None:
             return
-        
-        #append to batch
+
+        # append to batch
         with self.batch_lock:
-            #Note: message_data is a list of dicts so += adds all elements
+            # Note: message_data is a list of dicts so += adds all elements
             for formatted_msg in message_data:
-                table_name = formatted_msg.get('_clickhouse_table', self.processor.table)
+                table_name = formatted_msg.get(
+                    "_clickhouse_table", self.processor.table
+                )
                 self.batch[table_name].append(formatted_msg)
-            
+
             # Check if we need to flush
             for table_name in self.batch:
                 if len(self.batch[table_name]) >= self.batch_size:
@@ -177,37 +202,41 @@ class ClickHouseBatcher:
     def flush_batch(self, table_name):
         """Flush current batch to ClickHouse"""
         if not self.batch or not table_name or not self.batch.get(table_name, None):
-            #nothing to flush
+            # nothing to flush
             return
-        
+
         try:
             # Prepare data for insertion
             data_to_insert = []
             for msg in self.batch[table_name]:
-                data_to_insert.append(self.processor.message_to_columns(msg, table_name))
-            
+                data_to_insert.append(
+                    self.processor.message_to_columns(msg, table_name)
+                )
+
             # Insert batch into ClickHouse
             self.client.insert(
                 table=table_name,
                 data=data_to_insert,
-                column_names=self.processor.column_names()
+                column_names=self.processor.column_names(),
             )
 
-            self.logger.debug(f"Successfully inserted {len(data_to_insert)} messages into ClickHouse table {table_name}")
-            
+            self.logger.debug(
+                f"Successfully inserted {len(data_to_insert)} messages into ClickHouse table {table_name}"
+            )
+
             # Clear batch and update flush time
             self.batch[table_name].clear()
             self.last_flush_time = time.time()
-            
+
         except Exception as e:
             self.logger.error(f"Failed to insert batch into ClickHouse: {e}")
             self.logger.debug(f"table= {table_name}")
             self.logger.debug(f"column_names= {self.processor.column_names()}")
             self.logger.debug(f"data_to_insert= {data_to_insert}")
-    
+            self.last_flush_time = time.time()
+
     def close(self):
         with self.batch_lock:
             for table_name in self.batch:
                 self.logger.info("Flushing remaining messages before closing...")
                 self.flush_batch(table_name)
-

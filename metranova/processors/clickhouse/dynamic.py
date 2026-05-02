@@ -19,6 +19,11 @@ class DynamicProcessor(object):
         self.pipeline = pipeline
         logger.error(f"DynamicProcessor initialized with pipeline: {pipeline}")
 
+    @property
+    def table(self):
+        """Total hack to allow dynamic table names"""
+        return "dynamic_table"
+
     def match_message(self, value: dict) -> bool:
         logger.error(f"Matching message for value: {value.values()}")
         # load measurement types
