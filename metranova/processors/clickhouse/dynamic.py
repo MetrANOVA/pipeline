@@ -5,6 +5,7 @@ from typing import Iterator
 from metranova.processors.clickhouse.base import (
     BaseClickHouseMaterializedViewMixin,
 )
+from clickhouse_connect.driver.httpclient import HttpClient
 
 import orjson
 import yaml
@@ -87,3 +88,12 @@ class DynamicProcessor(object):
         self, extension_name: str, json_column_name: str = "ext"
     ) -> bool:
         return False
+
+    def set_clickhouse_client(self, client: HttpClient) -> None:
+        """Set the ClickHouse client for this processor and any child classes that need it
+
+        The primary purpose of this method is to grant the processor direct access to the ClickHouse client.
+        While in most cases the processor will declare the database schema itself, the dynamic pipeline is
+        required to access the type definitions directly as they are declared via API.
+        """
+        self.ch_client = client

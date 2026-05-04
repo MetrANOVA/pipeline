@@ -80,6 +80,8 @@ class ClickHouseBatcher:
         # create materialized views
         for materialized_view in self.processor.get_materialized_views():
             self.create_materialized_view(materialized_view)
+        
+        self.processor.set_clickhouse_client(self.client)
 
     def create_table(self, table_name):
         """Create the target table if it doesn't exist"""
