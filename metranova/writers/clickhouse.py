@@ -80,7 +80,7 @@ class ClickHouseBatcher:
         # create materialized views
         for materialized_view in self.processor.get_materialized_views():
             self.create_materialized_view(materialized_view)
-        
+
         self.processor.set_clickhouse_client(self.client)
 
     def create_table(self, table_name):
@@ -194,6 +194,10 @@ class ClickHouseBatcher:
                 table_name = formatted_msg.get(
                     "_clickhouse_table", self.processor.table
                 )
+                if "_clickhouse_table" in formatted_msg:
+                    del formatted_msg[
+                        "_clickhouse_table"
+                    ]  # remove table name from message before insertion
                 self.batch[table_name].append(formatted_msg)
 
             # Check if we need to flush
@@ -216,10 +220,14 @@ class ClickHouseBatcher:
                 )
 
             # Insert batch into ClickHouse
+            column_names = self.processor.column_names(table_name=table_name)
+            logger.info(
+                f"Table: {table_name}, Data: {str(data_to_insert)}, Columns: {str(column_names)}"
+            )
             self.client.insert(
                 table=table_name,
                 data=data_to_insert,
-                column_names=self.processor.column_names(),
+                column_names=column_names,
             )
 
             self.logger.debug(
@@ -233,7 +241,9 @@ class ClickHouseBatcher:
         except Exception as e:
             self.logger.error(f"Failed to insert batch into ClickHouse: {e}")
             self.logger.debug(f"table= {table_name}")
-            self.logger.debug(f"column_names= {self.processor.column_names()}")
+            self.logger.debug(
+                f"column_names= {self.processor.column_names(table_name=table_name)}"
+            )
             self.logger.debug(f"data_to_insert= {data_to_insert}")
             self.last_flush_time = time.time()
 
