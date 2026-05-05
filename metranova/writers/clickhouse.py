@@ -239,7 +239,9 @@ class ClickHouseBatcher:
             self.last_flush_time = time.time()
 
         except Exception as e:
-            self.logger.error(f"Failed to insert batch into ClickHouse: {e}")
+            self.logger.error(
+                f"Failed to insert batch into ClickHouse table {table_name}: {e}"
+            )
             self.logger.debug(f"table= {table_name}")
             self.logger.debug(
                 f"column_names= {self.processor.column_names(table_name=table_name)}"
