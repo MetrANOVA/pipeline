@@ -138,10 +138,6 @@ class DynamicProcessor(object):
                 return rd
         return None
 
-    @property
-    def table(self) -> str:
-        return "invalid_table"
-
     # TODO Review these methods for implemtation
 
     def get_ch_dictionaries(self) -> list:
@@ -174,14 +170,16 @@ class DynamicProcessor(object):
     # Everything below this not actually used. We just need it to satisfy the interface
     # requirements of the ClickHouse writer.
 
+    @property
+    def table(self) -> str:
+        return "invalid_table"
+
     def has_match_field(self, value: dict) -> bool:
         # load measurement types
-        logger.warning(f"Calling has_match_field. This isn't important.")
         return True
 
     def has_required_fields(self, value: dict) -> bool:
         # load measurement types
-        logger.warning(f"Calling has_required_fields. This isn't important.")
         return True
 
     def create_table_command(self, table_name=None) -> str:
