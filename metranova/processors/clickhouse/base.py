@@ -348,7 +348,7 @@ class BaseClickHouseProcessor(BaseProcessor, BaseClickHouseTableMixin):
                 ref_results[f"{direction}_ip_{ext}_ref"] = ref[0]
         return ref_results
 
-    def column_names(self) -> list:
+    def column_names(self, table_name: str = None) -> list:
         """Return list of column names for insertion into ClickHouse"""
         column_names = []
         columns_seen = {} #track columns seen so we don't add duplicates - can't use set since order matters
