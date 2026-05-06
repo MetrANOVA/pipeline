@@ -1,3 +1,4 @@
+import datetime
 import logging
 
 from metranova.processors.clickhouse.base import (
@@ -76,6 +77,7 @@ class DynamicProcessor(object):
     def __init__(self, pipeline):
         self.pipeline = pipeline
         self.resource_definitions = {}
+        self.resource_definitions_loaded_at = None
         logger.info(f"DynamicProcessor initialized with pipeline: {pipeline}")
 
     def set_clickhouse_client(self, client: HttpClient) -> None:
@@ -91,6 +93,7 @@ class DynamicProcessor(object):
         rdefs = self.api.get_data_types()
         for rd in rdefs:
             self.resource_definitions["data_" + rd["name"]] = ResourceDefinition(rd)
+        self.resource_definitions_loaded_at = datetime.datetime.now()
 
     def build_message(self, value: dict, src_metadata: dict) -> list[dict[str, any]]:
         rdef = self._find_resource_definition(value)
@@ -128,6 +131,17 @@ class DynamicProcessor(object):
     # These are helper methods
 
     def _find_resource_definition(self, value: dict) -> ResourceDefinition | None:
+        # NOTE: We reload resource definitions every minute. This is kinda hacky and
+        # should be replaced in the future.
+        if (
+            datetime.datetime.now() - self.resource_definitions_loaded_at
+            > datetime.timedelta(minutes=1)
+        ):
+            rdefs = self.api.get_data_types()
+            for rd in rdefs:
+                self.resource_definitions["data_" + rd["name"]] = ResourceDefinition(rd)
+            self.resource_definitions_loaded_at = datetime.datetime.now()
+
         for rd in self.resource_definitions.values():
             if rd.applies_to(value):
                 return rd
