@@ -648,8 +648,11 @@ class BaseDataProcessor(BaseClickHouseProcessor):
         The primary purpose of this method is to grant the processor direct access to the ClickHouse client.
         While in most cases the processor will declare the database schema itself, the dynamic pipeline is
         required to access the type definitions directly as they are declared via API.
+
+        NOTE: This method exists primarily to support the dynamic pipeline and may not be necessary for
+        other use cases.
         """
-        self.ch_client = client
+        return None
 
 
 class BaseDataGenericMetricProcessor(BaseDataProcessor):
