@@ -1,14 +1,9 @@
 import logging
-import os
-import re
-from typing import Iterator
+
 from metranova.processors.clickhouse.base import (
     BaseClickHouseMaterializedViewMixin,
 )
 from clickhouse_connect.driver.httpclient import HttpClient
-
-import orjson
-import yaml
 
 logger = logging.getLogger(__name__)
 
