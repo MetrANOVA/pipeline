@@ -213,6 +213,15 @@ Dictionaries provide fast lookup capabilities for metadata enrichment. Each meta
 | `KAFKA_TOPIC` | `metranova_flow` | Kafka topic to consume |
 | `KAFKA_CONSUMER_GROUP` | `ch-writer-group` | Consumer group ID |
 
+### SASL/PLAIN Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KAFKA_SASL_USERNAME` | (none) | SASL username for Kafka authentication |
+| `KAFKA_SASL_PASSWORD` | (none) | SASL password for Kafka authentication |
+
+When both `KAFKA_SASL_USERNAME` and `KAFKA_SASL_PASSWORD` are set, the connector uses SASL/PLAIN authentication. If `KAFKA_SSL_CA_LOCATION` exists, it uses `SASL_SSL`; otherwise it falls back to `SASL_PLAINTEXT`.
+
 ### SSL/TLS Configuration
 
 | Variable | Default | Description |
