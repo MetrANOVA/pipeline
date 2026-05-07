@@ -509,7 +509,7 @@ wheels = [
 [[package]]
 name = "metranova-core"
 version = "0.1.0"
-source = { git = "https://github.com/MetrANOVA/api.git?subdirectory=packages%2Fmetranova&branch=main#453435a6ccab7a54d070d8026bdb57d97558a9bb" }
+source = { git = "https://github.com/MetrANOVA/api.git?subdirectory=packages%2Fmetranova&branch=js-transformers#5ab1b9ead8b1e685094e039747049a1311b24c8a" }
 dependencies = [
     { name = "clickhouse-connect" },
     { name = "fastapi", extra = ["standard"] },
@@ -568,7 +568,7 @@ requires-dist = [
     { name = "cachetools", specifier = "==6.2.1" },
     { name = "clickhouse-connect", specifier = "==0.15.0" },
     { name = "confluent-kafka", specifier = "==2.14.0" },
-    { name = "metranova-core", git = "https://github.com/MetrANOVA/api.git?subdirectory=packages%2Fmetranova&branch=main" },
+    { name = "metranova-core", git = "https://github.com/MetrANOVA/api.git?subdirectory=packages%2Fmetranova&branch=js-transformers" },
     { name = "orjson", specifier = "==3.11.3" },
     { name = "pycountry", specifier = "==24.6.1" },
     { name = "pycountry-convert", specifier = "==0.7.2" },

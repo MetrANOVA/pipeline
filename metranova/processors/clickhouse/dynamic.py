@@ -1,9 +1,11 @@
 import datetime
+import json
 import logging
 
 from metranova.processors.clickhouse.base import (
     BaseClickHouseMaterializedViewMixin,
 )
+from metranova.transformer import Transformer, TransformerColumn
 from clickhouse_connect.driver.httpclient import HttpClient
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,47 @@ class MetranovaSyncApi:
         except Exception as e:
             logger.exception(f"Error retrieving all resource types: {e}")
             return None
+
+    def get_transformers(self) -> list[Transformer]:
+        """Get all transformers and their columns from ClickHouse"""
+        try:
+            transformers = list(
+                self.client.query("SELECT * FROM metranova.transformer").named_results()
+            )
+            columns = list(
+                self.client.query(
+                    "SELECT * FROM metranova.transformer_column"
+                ).named_results()
+            )
+        except Exception as e:
+            logger.exception(f"Error retrieving transformers: {e}")
+            return []
+
+        cols_by_ref: dict[str, list[TransformerColumn]] = {}
+        for col in columns:
+            tc = TransformerColumn(
+                id=col["id"],
+                match_value=col["match_value"],
+                vendor_match_field=col["vendor_match_field"],
+                vendor_match_value=col["vendor_match_value"],
+                target_column=col["target_column"],
+                operation=col["operation"],
+                config=json.loads(col["config"]),
+                default_value=col["default_value"] or "",
+                order=col["order"],
+            )
+            cols_by_ref.setdefault(col["transformer_ref"], []).append(tc)
+
+        return [
+            Transformer(
+                id=t["id"],
+                name=t["name"],
+                match_field=t["match_field"],
+                definition_ref=t["definition_ref"],
+                columns=sorted(cols_by_ref.get(t["ref"], []), key=lambda c: c.order),
+            )
+            for t in transformers
+        ]
 
 
 class ResourceDefinition:
@@ -78,6 +121,7 @@ class DynamicProcessor(object):
         self.pipeline = pipeline
         self.resource_definitions = {}
         self.resource_definitions_loaded_at = None
+        self.transformers = {}
         logger.info(f"DynamicProcessor initialized with pipeline: {pipeline}")
 
     def set_clickhouse_client(self, client: HttpClient) -> None:
@@ -95,6 +139,8 @@ class DynamicProcessor(object):
             self.resource_definitions["data_" + rd["name"]] = ResourceDefinition(rd)
         self.resource_definitions_loaded_at = datetime.datetime.now()
 
+        self.transformers = {t.id: t for t in self.api.get_transformers()}
+
     def build_message(self, value: dict, src_metadata: dict) -> list[dict[str, any]]:
         rdef = self._find_resource_definition(value)
         if rdef is None:
@@ -102,6 +148,12 @@ class DynamicProcessor(object):
                 f"No matching resource definition found for message with fields: {value.get('fields', {})} and tags: {value.get('tags', {})}"
             )
             return None
+
+        for transformer in self.transformers.values():
+            for column in transformer.columns:
+                if column.match_value == src_metadata.get(transformer.match_field):
+                    column.apply(value)
+
         logger.info(f"Built message: {value} with metadata: {src_metadata}")
         return rdef.to_rows(value, src_metadata)
 
@@ -141,6 +193,8 @@ class DynamicProcessor(object):
             for rd in rdefs:
                 self.resource_definitions["data_" + rd["name"]] = ResourceDefinition(rd)
             self.resource_definitions_loaded_at = datetime.datetime.now()
+
+            self.transformers = {t.id: t for t in self.api.get_transformers()}
 
         for rd in self.resource_definitions.values():
             if rd.applies_to(value):

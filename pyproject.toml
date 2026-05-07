@@ -20,7 +20,7 @@ dependencies = [
 
 [tool.uv.sources]
 metranova = { workspace = true }
-metranova-core = { git = "https://github.com/MetrANOVA/api.git", subdirectory = "packages/metranova", branch = "main" }
+metranova-core = { git = "https://github.com/MetrANOVA/api.git", subdirectory = "packages/metranova", branch = "js-transformers" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["metranova"]
