@@ -110,10 +110,11 @@ Materialized views provide pre-aggregated data for faster queries. Each material
 | `CLICKHOUSE_FLOW_MV_BY_EDGE_AS` | (none) | Comma-separated list of aggregation windows for edge AS materialized views (e.g., `5m,1h,1d,1w`) |
 | `CLICKHOUSE_FLOW_MV_BY_INTERFACE` | (none) | Comma-separated list of aggregation windows for interface materialized views (e.g., `5m,1h,1d`) |
 | `CLICKHOUSE_FLOW_MV_BY_IP_VERSION` | (none) | Comma-separated list of aggregation windows for IP version materialized views (e.g., `1h,1d,1w`) |
+| `CLICKHOUSE_FLOW_MV_ANONYMIZED` | (none) | Comma-separated list of aggregation windows for anonymized flow materialized views (e.g., `5m,1h,1d`) |
 
 ### Per-Window Materialized View Settings
 
-For each materialized view type and aggregation window (replace `{MV_TYPE}` with `EDGE_AS`, `INTERFACE`, or `IP_VERSION`, and `{WINDOW}` with the uppercase window like `5M`, `1H`, `1D`, `1W`, `1MO`, `1Y`):
+For each materialized view type and aggregation window (replace `{MV_TYPE}` with `EDGE_AS`, `INTERFACE`, `IP_VERSION`, or `ANONYMIZED`, and `{WINDOW}` with the uppercase window like `5M`, `1H`, `1D`, `1W`, `1MO`, `1Y`):
 
 | Variable Pattern | Default | Description |
 |----------|---------|-------------|

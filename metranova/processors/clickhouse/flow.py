@@ -94,6 +94,7 @@ class BaseFlowProcessor(BaseDataProcessor):
         self.load_materialized_views('CLICKHOUSE_FLOW_MV_BY_EDGE_AS', MaterializedViewByEdgeAS)
         self.load_materialized_views('CLICKHOUSE_FLOW_MV_BY_INTERFACE', MaterializedViewByInterface)
         self.load_materialized_views('CLICKHOUSE_FLOW_MV_BY_IP_VERSION', MaterializedViewByIPVersion)
+        self.load_materialized_views('CLICKHOUSE_FLOW_MV_ANONYMIZED', MaterializedViewAnonymizedFlow)
 
     def parse_env_map_list(self, map_list_str: str | None) -> Dict[str, str]:
         result = {}
@@ -371,6 +372,188 @@ class MaterializedViewByIPVersion(BaseClickHouseMaterializedViewMixin):
                 {policy_level_term},
                 {policy_scope_term},
                 ip_version,
+                1 AS flow_count,
+                bit_count,
+                packet_count
+            FROM {self.source_table_name}
+        """
+
+class MaterializedViewAnonymizedFlow(BaseClickHouseMaterializedViewMixin):
+    
+    def __init__(self, source_table_name: str = "", agg_window: str = ""):
+        super().__init__(source_table_name, agg_window)  
+        if not agg_window:
+            raise ValueError("agg_window must be provided for MaterializedViewAnonymizedFlow")
+        
+        self.column_defs = [
+            ['start_time', 'DateTime', True],
+            ['collector_id', 'LowCardinality(String)', True],
+            ['policy_originator', 'LowCardinality(Nullable(String))', True],
+            ['policy_level', 'LowCardinality(Nullable(String))', True],
+            ['policy_scope', 'Array(LowCardinality(String))', True],
+            ['ext', None, True],
+            ['flow_type', 'LowCardinality(String)', True],
+            ['device_id', 'LowCardinality(String)', True],
+            ['device_ref', 'Nullable(String)', True],
+            ['src_as_id', 'UInt32', True],
+            ['src_as_ref', 'Nullable(String)', True],
+            ['src_ip', 'IPv6', True],
+            ['src_port', 'UInt16', True],
+            ['dst_as_id', 'UInt32', True],
+            ['dst_as_ref', 'Nullable(String)', True],
+            ['dst_ip', 'IPv6', True],
+            ['dst_port', 'UInt16', True],
+            ['protocol', 'LowCardinality(String)', True],
+            ['in_interface_id', 'LowCardinality(Nullable(String))', True],
+            ['in_interface_ref', 'Nullable(String)', True],
+            ['in_interface_edge', 'Bool', True],
+            ['out_interface_id', 'LowCardinality(Nullable(String))', True],
+            ['out_interface_ref', 'Nullable(String)', True],
+            ['out_interface_edge', 'Bool', True],
+            ['peer_as_id', 'Nullable(UInt32)', True],
+            ['peer_as_ref', 'Nullable(String)', True],
+            ['peer_ip', 'Nullable(IPv6)', True],
+            ['ip_version', 'UInt8', True],
+            ['application_port', 'UInt16', True],
+            ['flow_count', 'UInt64', True],
+            ['bit_count', 'UInt64', True],
+            ['packet_count', 'UInt64', True]
+        ]
+        
+        extension_options = {
+            "bgp": [
+                ["bgp_as_path_id", "Array(UInt32)"],
+                ["bgp_as_path_padding", "Array(UInt16)"],
+                ["bgp_community", "Array(LowCardinality(String))"],
+                ["bgp_ext_community", "Array(LowCardinality(String))"],
+                ["bgp_large_community", "Array(LowCardinality(String))"],
+                ["bgp_local_pref", "Nullable(UInt32)"],
+                ["bgp_med", "Nullable(UInt32)"]
+            ],
+            "ipv4": [
+                ["ipv4_dscp", "Nullable(UInt8)"],
+                ["ipv4_tos", "Nullable(UInt8)"]
+            ],
+            "ipv6": [
+                ["ipv6_flow_label", "Nullable(UInt32)"]
+            ],
+            "mpls": [
+                ["mpls_bottom_label", "Nullable(UInt32)"],
+                ["mpls_exp", "Array(UInt8)"],
+                ["mpls_label", "Array(UInt32)"],
+                ["mpls_pw", "Nullable(UInt32)"],
+                ["mpls_top_label_ip", "Nullable(IPv6)"],
+                ["mpls_top_label_type", "Nullable(UInt32)"],
+                ["mpls_vpn_rd", "LowCardinality(Nullable(String))"]
+            ],
+            "vlan": [
+                ["vlan_id", "Nullable(UInt32)"],
+                ["vlan_in_id", "Nullable(UInt32)"],
+                ["vlan_out_id", "Nullable(UInt32)"],
+                ["vlan_in_inner_id", "Nullable(UInt32)"],
+                ["vlan_out_inner_id", "Nullable(UInt32)"],
+            ]
+        }
+        self.extension_defs['ext'] = self.get_extension_defs('CLICKHOUSE_FLOW_EXTENSIONS', extension_options)
+        
+        agg_window_upper = agg_window.upper()
+        self.table = os.getenv(f'CLICKHOUSE_FLOW_MV_ANONYMIZED_{agg_window_upper}_TABLE', f'data_flow_anonymized_{agg_window}')
+        self.table_ttl = os.getenv(f'CLICKHOUSE_FLOW_MV_ANONYMIZED_{agg_window_upper}_TTL', '5 YEAR')
+        self.table_ttl_column = os.getenv(f'CLICKHOUSE_FLOW_MV_ANONYMIZED_{agg_window_upper}_TTL_COLUMN', 'start_time')
+        self.partition_by = os.getenv(f'CLICKHOUSE_FLOW_MV_ANONYMIZED_{agg_window_upper}_PARTITION_BY', "toYYYYMMDD(start_time)")
+        self.policy_level = os.getenv(f'CLICKHOUSE_FLOW_MV_ANONYMIZED_{agg_window_upper}_POLICY_LEVEL', 'tlp:green')
+        self.policy_scope = os.getenv(f'CLICKHOUSE_FLOW_MV_ANONYMIZED_{agg_window_upper}_POLICY_SCOPE', 'comm:re').split(',')
+        self.policy_override = os.getenv(f'CLICKHOUSE_FLOW_MV_ANONYMIZED_{agg_window_upper}_POLICY_OVERRIDE', 'true').lower() in ('true', '1', 'yes')
+        self.table_engine = 'SummingMergeTree'
+        self.table_engine_opts = '(flow_count, bit_count, packet_count)'
+        
+        self.primary_keys = [
+            "src_as_id",
+            "dst_as_id",
+            "src_ip",
+            "dst_ip",
+            "start_time"
+        ]
+        self.order_by = [
+            "src_as_id",
+            "dst_as_id",
+            "src_ip",
+            "dst_ip",
+            "start_time",
+            "collector_id",
+            "policy_originator",
+            "policy_level",
+            "policy_scope",
+            "flow_type",
+            "device_id",
+            "device_ref",
+            "src_as_ref",
+            "src_port",
+            "dst_as_ref",
+            "dst_port",
+            "protocol",
+            "in_interface_id",
+            "in_interface_ref",
+            "in_interface_edge",
+            "out_interface_id",
+            "out_interface_ref",
+            "out_interface_edge",
+            "peer_as_id",
+            "peer_as_ref",
+            "peer_ip",
+            "ip_version",
+            "application_port"
+        ]
+        self.allow_nullable_key = True
+        
+        extension_select_term = self.build_extension_select_term()
+        self.mv_name = self.table + "_mv"
+        
+        policy_level_term, policy_scope_term = self.policy_override_terms()
+        
+        def build_anon_ip(ip_col, is_nullable=False):
+            ip_expr = f"assumeNotNull({ip_col})" if is_nullable else ip_col
+            expr = f"""multiIf(
+                    ip_version == 4 AND isIPAddressInRange({ip_expr}, '::ffff:224.0.0.0/100'), {ip_expr},
+                    ip_version == 4, tupleElement(IPv6CIDRToRange({ip_expr}, 117), 1),
+                    ip_version == 6 AND isIPAddressInRange({ip_expr}, 'ff00::/8'), {ip_expr},
+                    ip_version == 6 AND isIPAddressInRange({ip_expr}, '2002::/16'), {ip_expr},
+                    tupleElement(IPv6CIDRToRange({ip_expr}, 48), 1)
+                )"""
+            if is_nullable:
+                return f"multiIf({ip_col} IS NULL, CAST(NULL AS Nullable(IPv6)), CAST({expr} AS Nullable(IPv6)))"
+            return expr
+
+        self.mv_select_query = f"""
+            SELECT
+                toStartOfInterval(start_time, INTERVAL {self.agg_window_ch_interval}) AS start_time,
+                collector_id,
+                policy_originator,
+                {policy_level_term},
+                {policy_scope_term},
+                {extension_select_term}flow_type,
+                device_id,
+                device_ref,
+                src_as_id,
+                src_as_ref,
+                {build_anon_ip('src_ip')} AS src_ip,
+                src_port,
+                dst_as_id,
+                dst_as_ref,
+                {build_anon_ip('dst_ip')} AS dst_ip,
+                dst_port,
+                protocol,
+                in_interface_id,
+                in_interface_ref,
+                in_interface_edge,
+                out_interface_id,
+                out_interface_ref,
+                out_interface_edge,
+                peer_as_id,
+                peer_as_ref,
+                {build_anon_ip('peer_ip', True)} AS peer_ip,
+                ip_version,
+                application_port,
                 1 AS flow_count,
                 bit_count,
                 packet_count
