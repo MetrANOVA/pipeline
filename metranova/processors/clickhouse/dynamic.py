@@ -76,7 +76,7 @@ class ResourceDefinition:
     _FIXED_COLUMNS = ["insert_time"]
 
     def __init__(self, definition: dict):
-        self._name: str = definition["name"]
+        self._name: str = definition["slug"]
         self._data_fields: list[dict] = definition.get("data_fields", [])
         self._required_field_names: list[str] = [
             f["field_name"] for f in self._data_fields if f["nullable"] is False
@@ -136,7 +136,7 @@ class DynamicProcessor(object):
 
         rdefs = self.api.get_data_types()
         for rd in rdefs:
-            self.resource_definitions["data_" + rd["name"]] = ResourceDefinition(rd)
+            self.resource_definitions["data_" + rd["slug"]] = ResourceDefinition(rd)
         self.resource_definitions_loaded_at = datetime.datetime.now()
 
         self.transformers = {t.id: t for t in self.api.get_transformers()}
@@ -191,7 +191,7 @@ class DynamicProcessor(object):
         ):
             rdefs = self.api.get_data_types()
             for rd in rdefs:
-                self.resource_definitions["data_" + rd["name"]] = ResourceDefinition(rd)
+                self.resource_definitions["data_" + rd["slug"]] = ResourceDefinition(rd)
             self.resource_definitions_loaded_at = datetime.datetime.now()
 
             self.transformers = {t.id: t for t in self.api.get_transformers()}
