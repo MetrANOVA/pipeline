@@ -1,6 +1,7 @@
 import datetime
 import json
 import logging
+import os
 
 from metranova.processors.clickhouse.base import (
     BaseClickHouseMaterializedViewMixin,
@@ -11,22 +12,67 @@ from clickhouse_connect.driver.httpclient import HttpClient
 logger = logging.getLogger(__name__)
 
 
+class ResourceDefinition:
+    """Class representing a resource definition as defined by Metranova API"""
+
+    _FIXED_COLUMNS = ["insert_time"]
+
+    def __init__(self, definition: dict):
+        self._slug: str = definition["slug"]
+        self._data_fields: list[dict] = definition.get("data_fields", [])
+        self._required_field_names: list[str] = [
+            f["field_name"] for f in self._data_fields if f["nullable"] is False
+        ]
+        self._data_field_names: list[str] = [f["field_name"] for f in self._data_fields]
+        logger.info(
+            f"Initialized ResourceDefinition for {self._slug} with required fields {self._required_field_names}."
+        )
+
+    @property
+    def table_name(self) -> str:
+        return "data_" + self._slug
+
+    def applies_to(self, message: dict) -> bool:
+        return (
+            message.get(os.getenv("PROCESSOR_DYNAMIC_RESOURCE_TYPE_FIELD_NAME", "name"))
+            == self._slug
+        )
+
+    def columns(self) -> list[str]:
+        return self._data_field_names + self._FIXED_COLUMNS
+
+    def to_rows(self, message: dict, metadata: dict) -> list[dict]:
+        fields = message.get("fields", {})
+        tags = message.get("tags", {})
+        row = {}
+        for field_name in self._data_field_names:
+            field_val = fields.get(field_name)
+            if field_val is None:
+                field_val = tags.get(field_name)
+            row[field_name] = field_val
+        row["insert_time"] = message.get("timestamp")
+        row["_clickhouse_table"] = (
+            self.table_name
+        )  # Included to assist with batch processing
+        return [row]
+
+
 class MetranovaSyncApi:
     """Class for interacting with Metranova Sync API"""
 
     def __init__(self, client: HttpClient):
         self.client = client
 
-    def get_data_types(self) -> list[dict]:
+    def get_data_types(self) -> list[ResourceDefinition]:
         """Get the data types defined in Metranova Sync"""
         try:
             result = self.client.query(f"""
                 SELECT * FROM metranova.definition WHERE notEmpty(data_fields)
             """)
-            return list(result.named_results())
+            return [ResourceDefinition(rdef) for rdef in result.named_results()]
         except Exception as e:
             logger.exception(f"Error retrieving all resource types: {e}")
-            return None
+            return []
 
     def get_transformers(self) -> list[Transformer]:
         """Get all transformers and their columns from ClickHouse"""
@@ -70,48 +116,27 @@ class MetranovaSyncApi:
         ]
 
 
-class ResourceDefinition:
-    """Class representing a resource definition as defined by Metranova API"""
+class DynamicProcessorConfig:
+    """Configuration class for DynamicProcessor
 
-    _FIXED_COLUMNS = ["insert_time"]
+    Environment variables:
 
-    def __init__(self, definition: dict):
-        self._name: str = definition["slug"]
-        self._data_fields: list[dict] = definition.get("data_fields", [])
-        self._required_field_names: list[str] = [
-            f["field_name"] for f in self._data_fields if f["nullable"] is False
-        ]
-        self._data_field_names: list[str] = [f["field_name"] for f in self._data_fields]
-        logger.info(
-            f"Initialized ResourceDefinition for {self._name} with required fields {self._required_field_names}."
+        # Comma separated list of resource types to process. If no value is provided all
+        # resource types will be processed. Default value is "".
+        PROCESSOR_DYNAMIC_RESOURCE_TYPES=interface,cpu
+
+        # Name of the field contained in each message defining its resource type.
+        # Messages received without this type will be dropped. Default value is "name".
+        PROCESSOR_DYNAMIC_RESOURCE_TYPE_FIELD_NAME=
+    """
+
+    def __init__(self):
+        rtype_val = os.getenv("PROCESSOR_DYNAMIC_RESOURCE_TYPES", "")
+        self.resource_types = set(rtype_val.split(",")) if rtype_val else set()
+
+        self.resource_type_field_name = os.getenv(
+            "PROCESSOR_DYNAMIC_RESOURCE_TYPE_FIELD_NAME", "name"
         )
-
-    @property
-    def table_name(self) -> str:
-        return "data_" + self._name
-
-    def applies_to(self, message: dict) -> bool:
-        fields = message.get("fields", {})
-        tags = message.get("tags", {})
-        return all(f in fields or f in tags for f in self._required_field_names)
-
-    def columns(self) -> list[str]:
-        return self._data_field_names + self._FIXED_COLUMNS
-
-    def to_rows(self, message: dict, metadata: dict) -> list[dict]:
-        fields = message.get("fields", {})
-        tags = message.get("tags", {})
-        row = {}
-        for field_name in self._data_field_names:
-            field_val = fields.get(field_name)
-            if field_val is None:
-                field_val = tags.get(field_name)
-            row[field_name] = field_val
-        row["insert_time"] = message.get("timestamp")
-        row["_clickhouse_table"] = (
-            self.table_name
-        )  # Included to assist with batch processing
-        return [row]
 
 
 class DynamicProcessor(object):
@@ -122,6 +147,8 @@ class DynamicProcessor(object):
         self.resource_definitions = {}
         self.resource_definitions_loaded_at = None
         self.transformers = {}
+        self.config = DynamicProcessorConfig()
+
         logger.info(f"DynamicProcessor initialized with pipeline: {pipeline}")
 
     def set_clickhouse_client(self, client: HttpClient) -> None:
@@ -134,35 +161,64 @@ class DynamicProcessor(object):
         self.ch_client = client
         self.api = MetranovaSyncApi(client)
 
-        rdefs = self.api.get_data_types()
-        for rd in rdefs:
-            self.resource_definitions["data_" + rd["slug"]] = ResourceDefinition(rd)
+        self.resource_definitions = {r.table_name: r for r in self.api.get_data_types()}
         self.resource_definitions_loaded_at = datetime.datetime.now()
 
         self.transformers = {t.id: t for t in self.api.get_transformers()}
 
-    def build_message(self, value: dict, src_metadata: dict) -> list[dict[str, any]]:
-        rdef = self._find_resource_definition(value)
+    def build_message(self, msg: dict, src_metadata: dict) -> list[dict[str, any]]:
+        msg_type: str = msg.get(self.config.resource_type_field_name, None)
+        if msg_type is None:
+            logger.error(
+                f"Error building message: Resource type field {self.config.resource_type_field_name} is missing. This should not have happened!"
+            )
+            return None
+
+        if self.config.resource_types and msg_type not in self.config.resource_types:
+            logger.error(
+                f"Error building message: Message resource type {msg_type} not a configured resource type {self.config.resource_types}, skipping message. This should not have happened!"
+            )
+            return None
+
+        rdef = self._find_resource_definition(msg)
         if rdef is None:
-            logger.warning(
-                f"No matching resource definition found for message with fields: {value.get('fields', {})} and tags: {value.get('tags', {})}"
+            logger.error(
+                f"Error building message: No ResourceDefinition loaded for message with name: '{msg.get('name')}' fields: {msg.get('fields', {})} and tags: {msg.get('tags', {})}. This should not have happened!"
             )
             return None
 
         for transformer in self.transformers.values():
             for column in transformer.columns:
                 if column.match_value == src_metadata.get(transformer.match_field):
-                    column.apply(value)
+                    column.apply(msg)
 
-        logger.info(f"Built message: {value} with metadata: {src_metadata}")
-        return rdef.to_rows(value, src_metadata)
+        logger.info(f"Built message: {msg} with metadata: {src_metadata}")
+        return rdef.to_rows(msg, src_metadata)
 
-    def match_message(self, value: dict) -> str:
-        rdef = self._find_resource_definition(value)
+    def match_message(self, msg: dict) -> str:
+        msg_type: str = msg.get(self.config.resource_type_field_name, None)
+        if msg_type is None:
+            logger.info(
+                f"Received message without resource type field '{self.config.resource_type_field_name}', skipping message."
+            )
+            return False
+
+        if self.config.resource_types and msg_type not in self.config.resource_types:
+            # TODO: Log the message type and count of dropped messages of each type for better observability
+            logger.warning(
+                f"Message resource type {msg_type} not a configured resource type {self.config.resource_types}, skipping message."
+            )
+            return False
+
+        rdef = self._find_resource_definition(msg)
         if rdef is None:
-            return None
-        logger.info(f"All fields matched for datatype {rdef._name}.")
-        return rdef.table_name
+            # TODO: Log the message type and count of dropped messages of each type for better observability
+            logger.warning(
+                f"No ResourceDefinition loaded for message with name: '{msg.get('name')}' fields: {msg.get('fields', {})} and tags: {msg.get('tags', {})}, skipping message."
+            )
+            return False
+
+        return True
 
     def column_names(self, table_name: str = None) -> list:
         rdef = self.resource_definitions.get(table_name)
@@ -189,9 +245,9 @@ class DynamicProcessor(object):
             datetime.datetime.now() - self.resource_definitions_loaded_at
             > datetime.timedelta(minutes=1)
         ):
-            rdefs = self.api.get_data_types()
-            for rd in rdefs:
-                self.resource_definitions["data_" + rd["slug"]] = ResourceDefinition(rd)
+            self.resource_definitions = {
+                r.table_name: r for r in self.api.get_data_types()
+            }
             self.resource_definitions_loaded_at = datetime.datetime.now()
 
             self.transformers = {t.id: t for t in self.api.get_transformers()}

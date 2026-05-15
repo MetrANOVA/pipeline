@@ -221,7 +221,7 @@ class ClickHouseBatcher:
 
             # Insert batch into ClickHouse
             column_names = self.processor.column_names(table_name=table_name)
-            logger.info(
+            self.logger.debug(
                 f"Table: {table_name}, Data: {str(data_to_insert)}, Columns: {str(column_names)}"
             )
             self.client.insert(
