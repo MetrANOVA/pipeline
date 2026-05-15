@@ -1,0 +1,327 @@
+import datetime
+import json
+import logging
+import os
+
+from metranova.processors.clickhouse.base import (
+    BaseClickHouseMaterializedViewMixin,
+)
+from metranova.transformer import Transformer, TransformerColumn
+from clickhouse_connect.driver.httpclient import HttpClient
+
+logger = logging.getLogger(__name__)
+
+
+class ResourceDefinition:
+    """Class representing a resource definition as defined by Metranova API"""
+
+    _FIXED_COLUMNS = ["insert_time"]
+
+    def __init__(self, definition: dict):
+        self._slug: str = definition["slug"]
+        self._data_fields: list[dict] = definition.get("data_fields", [])
+        self._required_field_names: list[str] = [
+            f["field_name"] for f in self._data_fields if f["nullable"] is False
+        ]
+        self._data_field_names: list[str] = [f["field_name"] for f in self._data_fields]
+        logger.info(
+            f"Initialized ResourceDefinition for {self._slug} with required fields {self._required_field_names}."
+        )
+
+    @property
+    def table_name(self) -> str:
+        return "data_" + self._slug
+
+    def applies_to(self, message: dict) -> bool:
+        return (
+            message.get(os.getenv("PROCESSOR_DYNAMIC_RESOURCE_TYPE_FIELD_NAME", "name"))
+            == self._slug
+        )
+
+    def columns(self) -> list[str]:
+        return self._data_field_names + self._FIXED_COLUMNS
+
+    def to_rows(self, message: dict, metadata: dict) -> list[dict]:
+        fields = message.get("fields", {})
+        tags = message.get("tags", {})
+        row = {}
+        for field_name in self._data_field_names:
+            field_val = fields.get(field_name)
+            if field_val is None:
+                field_val = tags.get(field_name)
+            row[field_name] = field_val
+        row["insert_time"] = message.get("timestamp")
+        row["_clickhouse_table"] = (
+            self.table_name
+        )  # Included to assist with batch processing
+        return [row]
+
+
+class MetranovaSyncApi:
+    """Class for interacting with Metranova Sync API"""
+
+    def __init__(self, client: HttpClient):
+        self.client = client
+
+    def get_data_types(self) -> list[ResourceDefinition]:
+        """Get the data types defined in Metranova Sync"""
+        try:
+            result = self.client.query(f"""
+                SELECT * FROM metranova.definition WHERE notEmpty(data_fields)
+            """)
+            return [ResourceDefinition(rdef) for rdef in result.named_results()]
+        except Exception as e:
+            logger.exception(f"Error retrieving all resource types: {e}")
+            return []
+
+    def get_transformers(self) -> list[Transformer]:
+        """Get all transformers and their columns from ClickHouse"""
+        try:
+            transformers = list(
+                self.client.query("SELECT * FROM metranova.transformer").named_results()
+            )
+            columns = list(
+                self.client.query(
+                    "SELECT * FROM metranova.transformer_column"
+                ).named_results()
+            )
+        except Exception as e:
+            logger.exception(f"Error retrieving transformers: {e}")
+            return []
+
+        cols_by_ref: dict[str, list[TransformerColumn]] = {}
+        for col in columns:
+            tc = TransformerColumn(
+                id=col["id"],
+                match_value=col["match_value"],
+                vendor_match_field=col["vendor_match_field"],
+                vendor_match_value=col["vendor_match_value"],
+                target_column=col["target_column"],
+                operation=col["operation"],
+                config=json.loads(col["config"]),
+                default_value=col["default_value"] or "",
+                order=col["order"],
+            )
+            cols_by_ref.setdefault(col["transformer_ref"], []).append(tc)
+
+        return [
+            Transformer(
+                id=t["id"],
+                name=t["name"],
+                match_field=t["match_field"],
+                definition_ref=t["definition_ref"],
+                columns=sorted(cols_by_ref.get(t["ref"], []), key=lambda c: c.order),
+            )
+            for t in transformers
+        ]
+
+
+class DynamicProcessorConfig:
+    """Configuration class for DynamicProcessor
+
+    Environment variables:
+
+        # Comma separated list of resource types to process. If no value is provided all
+        # resource types will be processed. Default value is "".
+        PROCESSOR_DYNAMIC_RESOURCE_TYPES=interface,cpu
+
+        # Name of the field contained in each message defining its resource type.
+        # Messages received without this type will be dropped. Default value is "name".
+        PROCESSOR_DYNAMIC_RESOURCE_TYPE_FIELD_NAME=
+    """
+
+    def __init__(self):
+        rtype_val = os.getenv("PROCESSOR_DYNAMIC_RESOURCE_TYPES", "")
+        self.resource_types = set(rtype_val.split(",")) if rtype_val else set()
+
+        self.resource_type_field_name = os.getenv(
+            "PROCESSOR_DYNAMIC_RESOURCE_TYPE_FIELD_NAME", "name"
+        )
+
+
+class DynamicProcessor(object):
+    """Processor for handling user defined measurement types"""
+
+    def __init__(self, pipeline):
+        self.pipeline = pipeline
+        self.resource_definitions = {}
+        self.resource_definitions_loaded_at = None
+        self.transformers = {}
+        self.config = DynamicProcessorConfig()
+
+        logger.info(f"DynamicProcessor initialized with pipeline: {pipeline}")
+
+    def set_clickhouse_client(self, client: HttpClient) -> None:
+        """Set the ClickHouse client for this processor and any child classes that need it
+
+        The primary purpose of this method is to grant the processor direct access to the ClickHouse client.
+        While in most cases the processor will declare the database schema itself, the dynamic pipeline is
+        required to access the type definitions directly as they are declared via API.
+        """
+        self.ch_client = client
+        self.api = MetranovaSyncApi(client)
+
+        self.resource_definitions = {r.table_name: r for r in self.api.get_data_types()}
+        self.resource_definitions_loaded_at = datetime.datetime.now()
+
+        self.transformers = {t.id: t for t in self.api.get_transformers()}
+
+    def build_message(self, msg: dict, src_metadata: dict) -> list[dict[str, any]]:
+        msg_type: str = msg.get(self.config.resource_type_field_name, None)
+        if msg_type is None:
+            logger.error(
+                f"Error building message: Resource type field {self.config.resource_type_field_name} is missing. This should not have happened!"
+            )
+            return None
+
+        if self.config.resource_types and msg_type not in self.config.resource_types:
+            logger.error(
+                f"Error building message: Message resource type {msg_type} not a configured resource type {self.config.resource_types}, skipping message. This should not have happened!"
+            )
+            return None
+
+        rdef = self._find_resource_definition(msg)
+        if rdef is None:
+            logger.error(
+                f"Error building message: No ResourceDefinition loaded for message with name: '{msg.get('name')}' fields: {msg.get('fields', {})} and tags: {msg.get('tags', {})}. This should not have happened!"
+            )
+            return None
+
+        for transformer in self.transformers.values():
+            for column in transformer.columns:
+                if column.match_value == src_metadata.get(transformer.match_field):
+                    column.apply(msg)
+
+        logger.info(f"Built message: {msg} with metadata: {src_metadata}")
+        return rdef.to_rows(msg, src_metadata)
+
+    def match_message(self, msg: dict) -> str:
+        msg_type: str = msg.get(self.config.resource_type_field_name, None)
+        if msg_type is None:
+            logger.info(
+                f"Received message without resource type field '{self.config.resource_type_field_name}', skipping message."
+            )
+            return False
+
+        if self.config.resource_types and msg_type not in self.config.resource_types:
+            # TODO: Log the message type and count of dropped messages of each type for better observability
+            logger.warning(
+                f"Message resource type {msg_type} not a configured resource type {self.config.resource_types}, skipping message."
+            )
+            return False
+
+        rdef = self._find_resource_definition(msg)
+        if rdef is None:
+            # TODO: Log the message type and count of dropped messages of each type for better observability
+            logger.warning(
+                f"No ResourceDefinition loaded for message with name: '{msg.get('name')}' fields: {msg.get('fields', {})} and tags: {msg.get('tags', {})}, skipping message."
+            )
+            return False
+
+        return True
+
+    def column_names(self, table_name: str = None) -> list:
+        rdef = self.resource_definitions.get(table_name)
+        if rdef is None:
+            logger.warning(
+                f"No resource definition found for table {table_name}. Writer is attempting to save to a table with no loaded/existing resource definitions."
+            )
+            return []
+
+        cols = rdef.columns()
+        logger.info(f"Got column names {cols} for table {table_name}.")
+        return cols
+
+    def scale_value(self, value, scale):
+        # TODO
+        return value
+
+    # These are helper methods
+
+    def _find_resource_definition(self, value: dict) -> ResourceDefinition | None:
+        # NOTE: We reload resource definitions every minute. This is kinda hacky and
+        # should be replaced in the future.
+        if (
+            datetime.datetime.now() - self.resource_definitions_loaded_at
+            > datetime.timedelta(minutes=1)
+        ):
+            self.resource_definitions = {
+                r.table_name: r for r in self.api.get_data_types()
+            }
+            self.resource_definitions_loaded_at = datetime.datetime.now()
+
+            self.transformers = {t.id: t for t in self.api.get_transformers()}
+
+        for rd in self.resource_definitions.values():
+            if rd.applies_to(value):
+                return rd
+        return None
+
+    # TODO Review these methods for implemtation
+
+    def get_ch_dictionaries(self) -> list:
+        return []
+
+    def load_materialized_views(
+        self, env_var_name: str, mv_class: type[BaseClickHouseMaterializedViewMixin]
+    ) -> None:
+        return None
+
+    def get_ip_ref_extensions(self, env_var_name: str) -> list:
+        return []
+
+    def lookup_ip_ref_extensions(self, ip_address: str, direction: str) -> dict:
+        return {}
+
+    def message_to_columns(self, message: dict, table_name: str) -> list:
+        return list(message.values())
+
+    def get_extension_defs(
+        self, env_var_name: str, extension_options: dict, json_column_name: str = "ext"
+    ) -> list:
+        return []
+
+    def extension_is_enabled(
+        self, extension_name: str, json_column_name: str = "ext"
+    ) -> bool:
+        return False
+
+    # Everything below this not actually used. We just need it to satisfy the interface
+    # requirements of the ClickHouse writer.
+
+    @property
+    def table(self) -> str:
+        return "invalid_table"
+
+    def has_match_field(self, value: dict) -> bool:
+        # load measurement types
+        return True
+
+    def has_required_fields(self, value: dict) -> bool:
+        # load measurement types
+        return True
+
+    def create_table_command(self, table_name=None) -> str:
+        """Use to create the tables returned by get_table_names
+
+        We ignore the table_name parameter here because the dynamic processor is designed
+        to handle dynamic table names that are created by users via API. Instead, we
+        return a command that will always succeed.
+        """
+        return "SELECT 1"
+
+    def get_materialized_views(self) -> list:
+        """Used to declare table names to be created on ClickHouse side
+
+        We return an empty list here because the dynamic processor is designed to handle
+        dynamic table names that are created by users via API.
+        """
+        return []
+
+    def get_table_names(self) -> list:
+        """Used to declare table names to be created on ClickHouse side
+
+        We return an empty list here because the dynamic processor is designed to handle
+        dynamic table names that are created by users via API.
+        """
+        return []
