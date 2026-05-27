@@ -45,7 +45,7 @@ class KafkaConsumer(BaseConsumer):
 
         # Process the message
         try:
-            logger.info(
+            self.logger.debug(
                 f"Processing message from topic: {msg_metadata['topic']} with offset: {msg_metadata['offset']}"
             )
             self.pipeline.process_message(msg_data, consumer_metadata=msg_metadata)
