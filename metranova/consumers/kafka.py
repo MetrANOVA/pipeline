@@ -34,7 +34,13 @@ class KafkaConsumer(BaseConsumer):
                 return
 
         # format the response as JSON
-        msg_data = orjson.loads(msg.value()) if msg.value() else None
+        try:
+            msg_data = orjson.loads(msg.value()) if msg.value() else None
+        except orjson.JSONDecodeError as e:
+            self.logger.error(
+                f"Skipping malformed message at offset {msg.offset()}: {e}"
+            )
+            return
         msg_metadata = {
             "topic": msg.topic(),
             "partition": msg.partition(),

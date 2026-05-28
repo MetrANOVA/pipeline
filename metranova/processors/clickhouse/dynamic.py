@@ -179,7 +179,6 @@ class DynamicProcessor(object):
                 f"Error building message: Message resource type {msg_type} not a configured resource type {self.config.resource_types}, skipping message. This should not have happened!"
             )
             return None
-
         rdef = self._find_resource_definition(msg)
         if rdef is None:
             logger.error(
@@ -188,8 +187,11 @@ class DynamicProcessor(object):
             return None
 
         for transformer in self.transformers.values():
+            match_val = msg.get("tags", {}).get(transformer.match_field) or msg.get(
+                "fields", {}
+            ).get(transformer.match_field)
             for column in transformer.columns:
-                if column.match_value == src_metadata.get(transformer.match_field):
+                if column.match_value == match_val:
                     column.apply(msg)
 
         logger.info(f"Built message: {msg} with metadata: {src_metadata}")
