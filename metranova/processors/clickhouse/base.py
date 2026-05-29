@@ -5,6 +5,7 @@ import re
 import hashlib
 import orjson
 from metranova.processors.base import BaseProcessor
+from clickhouse_connect.driver.httpclient import HttpClient
 
 logger = logging.getLogger(__name__)
 
@@ -347,7 +348,7 @@ class BaseClickHouseProcessor(BaseProcessor, BaseClickHouseTableMixin):
                 ref_results[f"{direction}_ip_{ext}_ref"] = ref[0]
         return ref_results
 
-    def column_names(self) -> list:
+    def column_names(self, table_name: str = None) -> list:
         """Return list of column names for insertion into ClickHouse"""
         column_names = []
         columns_seen = {} #track columns seen so we don't add duplicates - can't use set since order matters
@@ -640,6 +641,19 @@ class BaseDataProcessor(BaseClickHouseProcessor):
             ["policy_scope", "Array(LowCardinality(String))", True],
             ["ext", None, True]
         ]
+
+    def set_clickhouse_client(self, client: HttpClient) -> None:
+        """Set the ClickHouse client for this processor and any child classes that need it
+
+        The primary purpose of this method is to grant the processor direct access to the ClickHouse client.
+        While in most cases the processor will declare the database schema itself, the dynamic pipeline is
+        required to access the type definitions directly as they are declared via API.
+
+        NOTE: This method exists primarily to support the dynamic pipeline and may not be necessary for
+        other use cases.
+        """
+        return None
+
 
 class BaseDataGenericMetricProcessor(BaseDataProcessor):
     def __init__(self, pipeline):
