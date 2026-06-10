@@ -464,6 +464,11 @@ class MaterializedViewAnonymizedFlow(BaseClickHouseMaterializedViewMixin):
         self.policy_level = os.getenv(f'CLICKHOUSE_FLOW_MV_ANONYMIZED_{agg_window_upper}_POLICY_LEVEL', 'tlp:green')
         self.policy_scope = os.getenv(f'CLICKHOUSE_FLOW_MV_ANONYMIZED_{agg_window_upper}_POLICY_SCOPE', 'comm:re').split(',')
         self.policy_override = os.getenv(f'CLICKHOUSE_FLOW_MV_ANONYMIZED_{agg_window_upper}_POLICY_OVERRIDE', 'true').lower() in ('true', '1', 'yes')
+        # IP anonymization prefix lengths (number of leading bits to preserve when masking).
+        # Expressed as IPv6 prefix lengths since addresses are stored as IPv6; IPv4 addresses are
+        # mapped to ::ffff:0:0/96, so an IPv4 /N corresponds to an IPv6 prefix of 96+N.
+        self.anon_ipv4_prefix = int(os.getenv(f'CLICKHOUSE_FLOW_MV_ANONYMIZED_{agg_window_upper}_IPV4_PREFIX', '117'))
+        self.anon_ipv6_prefix = int(os.getenv(f'CLICKHOUSE_FLOW_MV_ANONYMIZED_{agg_window_upper}_IPV6_PREFIX', '48'))
         self.table_engine = 'SummingMergeTree'
         self.table_engine_opts = '(flow_count, bit_count, packet_count)'
         
@@ -515,10 +520,10 @@ class MaterializedViewAnonymizedFlow(BaseClickHouseMaterializedViewMixin):
             ip_expr = f"assumeNotNull({ip_col})" if is_nullable else ip_col
             expr = f"""multiIf(
                     ip_version == 4 AND isIPAddressInRange({ip_expr}, '::ffff:224.0.0.0/100'), {ip_expr},
-                    ip_version == 4, tupleElement(IPv6CIDRToRange({ip_expr}, 117), 1),
+                    ip_version == 4, tupleElement(IPv6CIDRToRange({ip_expr}, {self.anon_ipv4_prefix}), 1),
                     ip_version == 6 AND isIPAddressInRange({ip_expr}, 'ff00::/8'), {ip_expr},
                     ip_version == 6 AND isIPAddressInRange({ip_expr}, '2002::/16'), {ip_expr},
-                    tupleElement(IPv6CIDRToRange({ip_expr}, 48), 1)
+                    tupleElement(IPv6CIDRToRange({ip_expr}, {self.anon_ipv6_prefix}), 1)
                 )"""
             if is_nullable:
                 return f"multiIf({ip_col} IS NULL, CAST(NULL AS Nullable(IPv6)), CAST({expr} AS Nullable(IPv6)))"
