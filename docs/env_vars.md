@@ -72,6 +72,22 @@ This document describes all environment variables used by the MetrANOVA Pipeline
 | `CLICKHOUSE_REPLICA_PATH` | `/clickhouse/tables/{shard}/{database}/{table}` | ZooKeeper path for replicated tables |
 | `CLICKHOUSE_REPLICA_NAME` | `{replica}` | Replica name identifier |
 
+### Distributed Table Settings
+
+Distributed tables are query routers (ClickHouse `Distributed` engine) that fan out reads to the local tables on every shard/replica in the cluster. They let tools like Grafana query a single table (e.g. `data_flow_distributed`) instead of wrapping reads in `clusterAllReplicas()`/`remote()`. Data is still inserted into the local tables; the Distributed companion is read-only. These are only created when `CLICKHOUSE_CLUSTER_NAME` is set **and** the relevant distributed flag is enabled.
+
+`CLICKHOUSE_DISTRIBUTED` is the global default. When it is enabled (and a cluster is configured), Distributed companions are created for the **flow table** and its **materialized view** tables. Each has a per-table flag that overrides the global default (and a `*_DISTRIBUTED_TABLE` to override the generated name); MV flags follow the per-window pattern documented under [Per-Window Materialized View Settings](#per-window-materialized-view-settings).
+
+Metadata tables are intentionally **not** distributed. They are reference tables that exist in full on every shard (so dictionary/JOIN enrichment resolves locally), and a `Distributed` union over them would return one copy of each row per shard. Query the local `meta_*` table directly - it is identical on every node. Other data tables (interface traffic, raw kafka, generic metrics) are likewise not distributed.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLICKHOUSE_DISTRIBUTED` | `false` | Global default: create Distributed companion tables for the flow and MV tables (cluster only) |
+| `CLICKHOUSE_DISTRIBUTED_SUFFIX` | `_distributed` | Suffix appended to a local table name to form the Distributed table name |
+| `CLICKHOUSE_DISTRIBUTED_SHARDING_KEY` | `rand()` | Sharding key expression used in the `Distributed` engine definition |
+| `CLICKHOUSE_FLOW_DISTRIBUTED` | (global default) | Create a Distributed companion for the flow table |
+| `CLICKHOUSE_FLOW_DISTRIBUTED_TABLE` | `data_flow_distributed` | Override the flow Distributed table name |
+
 ### Table TTL Settings
 
 | Variable | Default | Description |
@@ -124,6 +140,8 @@ For each materialized view type and aggregation window (replace `{MV_TYPE}` with
 | `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_POLICY_LEVEL` | `tlp:green` | Policy level override for aggregated data |
 | `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_POLICY_SCOPE` | `comm:re` | Policy scope override (comma-separated list) |
 | `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_POLICY_OVERRIDE` | `true` | Enable policy override for this materialized view |
+| `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_DISTRIBUTED` | (global default) | Create a Distributed companion for this materialized view table (cluster only) |
+| `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_DISTRIBUTED_TABLE` | `data_flow_by_{type}_{window}_distributed` | Custom name for the Distributed companion table |
 
 **Example:**
 ```

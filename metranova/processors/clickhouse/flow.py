@@ -13,6 +13,9 @@ class BaseFlowProcessor(BaseDataProcessor):
         self.table_ttl_column = os.getenv('CLICKHOUSE_FLOW_TTL_COLUMN', 'start_time')
         self.flow_type = os.getenv('CLICKHOUSE_FLOW_TYPE', 'unknown')
         self.partition_by = os.getenv('CLICKHOUSE_FLOW_PARTITION_BY', "toYYYYMMDD(start_time)")
+        # Distributed companion table (cluster only). Per-table flag falls back to the global CLICKHOUSE_DISTRIBUTED.
+        self.distributed = self.get_distributed_setting('CLICKHOUSE_FLOW_DISTRIBUTED')
+        self.distributed_table = os.getenv('CLICKHOUSE_FLOW_DISTRIBUTED_TABLE', '')
         self.policy_auto_scopes = os.getenv('CLICKHOUSE_FLOW_POLICY_AUTO_SCOPES', 'true').lower() in ('true', '1', 'yes')
         #A comma separated list of key-value pairs in form key:value, mapping a community id (such as a l3vpn rd) to a scope string
         policy_community_scope_map_str = os.getenv('CLICKHOUSE_FLOW_POLICY_COMMUNITY_SCOPE_MAP', None)
@@ -147,6 +150,9 @@ class MaterializedViewByEdgeAS(BaseClickHouseMaterializedViewMixin):
         self.extension_defs['ext'] = self.get_extension_defs('CLICKHOUSE_FLOW_EXTENSIONS', extension_options)
         agg_window_upper = agg_window.upper()
         self.table = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_TABLE', f'data_flow_by_edge_as_{agg_window}')
+        # Distributed companion table (cluster only). Per-table flag falls back to the global CLICKHOUSE_DISTRIBUTED.
+        self.distributed = self.get_distributed_setting(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_DISTRIBUTED')
+        self.distributed_table = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_DISTRIBUTED_TABLE', '')
         self.table_ttl = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_TTL', '5 YEAR')
         self.table_ttl_column = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_TTL_COLUMN', 'start_time')
         self.partition_by = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_EDGE_AS_{agg_window_upper}_PARTITION_BY', "toYYYYMMDD(start_time)")
@@ -260,6 +266,9 @@ class MaterializedViewByInterface(BaseClickHouseMaterializedViewMixin):
         ]
         agg_window_upper = agg_window.upper()
         self.table = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_INTERFACE_{agg_window_upper}_TABLE', f'data_flow_by_interface_{agg_window}')
+        # Distributed companion table (cluster only). Per-table flag falls back to the global CLICKHOUSE_DISTRIBUTED.
+        self.distributed = self.get_distributed_setting(f'CLICKHOUSE_FLOW_MV_BY_INTERFACE_{agg_window_upper}_DISTRIBUTED')
+        self.distributed_table = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_INTERFACE_{agg_window_upper}_DISTRIBUTED_TABLE', '')
         self.table_ttl = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_INTERFACE_{agg_window_upper}_TTL', '5 YEAR')
         self.table_ttl_column = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_INTERFACE_{agg_window_upper}_TTL_COLUMN', 'start_time')
         self.partition_by = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_INTERFACE_{agg_window_upper}_PARTITION_BY', "toYYYYMMDD(start_time)")
@@ -336,6 +345,9 @@ class MaterializedViewByIPVersion(BaseClickHouseMaterializedViewMixin):
         ]
         agg_window_upper = agg_window.upper()
         self.table = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_TABLE', f'data_flow_by_ip_version_{agg_window}')
+        # Distributed companion table (cluster only). Per-table flag falls back to the global CLICKHOUSE_DISTRIBUTED.
+        self.distributed = self.get_distributed_setting(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_DISTRIBUTED')
+        self.distributed_table = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_DISTRIBUTED_TABLE', '')
         self.table_ttl = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_TTL', '5 YEAR')
         self.table_ttl_column = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_TTL_COLUMN', 'start_time')
         self.partition_by = os.getenv(f'CLICKHOUSE_FLOW_MV_BY_IP_VERSION_{agg_window_upper}_PARTITION_BY', "toYYYYMMDD(start_time)")
