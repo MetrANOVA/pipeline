@@ -1061,7 +1061,7 @@ class TestIPGeolocationCSVConsumer(unittest.TestCase):
         
         self.consumer.ip_block_files = ['/test/blocks1.csv']
         
-        remaining_custom = self.consumer._process_ip_block_files(
+        remaining_custom, processed_networks = self.consumer._process_ip_block_files(
             mock_trie, location_map, custom_data
         )
         
@@ -1070,6 +1070,10 @@ class TestIPGeolocationCSVConsumer(unittest.TestCase):
         
         # Verify custom data was updated (entry should be removed)
         self.assertNotIn('192.168.1.0/24', remaining_custom)
+        
+        # Verify networks were tracked
+        self.assertIn('192.168.1.0/24', processed_networks)
+        self.assertIn('10.0.0.0/8', processed_networks)
 
     @patch('builtins.open', new_callable=mock_open)
     def test_process_ip_block_files_file_error(self, mock_file):
@@ -1078,10 +1082,11 @@ class TestIPGeolocationCSVConsumer(unittest.TestCase):
         self.consumer.ip_block_files = ['/test/nonexistent.csv']
         
         with patch.object(self.consumer.logger, 'error') as mock_error:
-            remaining_custom = self.consumer._process_ip_block_files(Mock(), {}, {})
+            remaining_custom, processed_networks = self.consumer._process_ip_block_files(Mock(), {}, {})
         
         mock_error.assert_called_once()
         self.assertEqual(remaining_custom, {})
+        self.assertEqual(processed_networks, set())
 
     @patch('builtins.open', new_callable=mock_open)
     def test_process_ip_block_files_empty_network_skip(self, mock_file):
@@ -1093,17 +1098,19 @@ class TestIPGeolocationCSVConsumer(unittest.TestCase):
         mock_file.return_value = StringIO(ip_block_csv)
         self.consumer.ip_block_files = ['/test/blocks1.csv']
         
-        remaining_custom = self.consumer._process_ip_block_files(Mock(), {}, {})
+        remaining_custom, processed_networks = self.consumer._process_ip_block_files(Mock(), {}, {})
         
         # Should only process one message (the row with valid network)
         self.assertEqual(self.mock_pipeline.process_message.call_count, 1)
+        self.assertEqual(len(processed_networks), 1)
 
+    @patch.object(IPGeolocationCSVConsumer, '_process_remaining_asn_ranges')
     @patch.object(IPGeolocationCSVConsumer, '_process_ip_block_files')
     @patch.object(IPGeolocationCSVConsumer, '_load_custom_ip_data')
     @patch.object(IPGeolocationCSVConsumer, '_load_location_data')
     @patch.object(IPGeolocationCSVConsumer, '_load_asn_data')
     def test_consume_messages_method_integration(self, mock_load_asn, mock_load_location, 
-                                               mock_load_custom, mock_process_blocks):
+                                               mock_load_custom, mock_process_blocks, mock_process_asn):
         """Test consume_messages calls all helper methods in correct order."""
         # Mock return values
         mock_trie = Mock()
@@ -1116,7 +1123,10 @@ class TestIPGeolocationCSVConsumer(unittest.TestCase):
         mock_load_custom.return_value = custom_data
         
         remaining_custom = {'10.0.0.0/8': {'remaining': 'data'}}
-        mock_process_blocks.return_value = remaining_custom
+        processed_networks = {'192.168.1.0/24', '172.16.0.0/12'}
+        mock_process_blocks.return_value = (remaining_custom, processed_networks)
+        
+        mock_process_asn.return_value = remaining_custom
         
         self.consumer.consume_messages()
         
@@ -1125,6 +1135,7 @@ class TestIPGeolocationCSVConsumer(unittest.TestCase):
         mock_load_location.assert_called_once()
         mock_load_custom.assert_called_once()
         mock_process_blocks.assert_called_once_with(mock_trie, location_map, custom_data)
+        mock_process_asn.assert_called_once_with(processed_networks, location_map, remaining_custom)
         
         # Verify remaining custom data was processed
         self.mock_pipeline.process_message.assert_called_once_with({
@@ -1132,18 +1143,20 @@ class TestIPGeolocationCSVConsumer(unittest.TestCase):
             'data': [{'remaining': 'data'}]
         })
 
+    @patch.object(IPGeolocationCSVConsumer, '_process_remaining_asn_ranges')
     @patch.object(IPGeolocationCSVConsumer, '_process_ip_block_files')
     @patch.object(IPGeolocationCSVConsumer, '_load_custom_ip_data')
     @patch.object(IPGeolocationCSVConsumer, '_load_location_data')
     @patch.object(IPGeolocationCSVConsumer, '_load_asn_data')
     def test_consume_messages_no_remaining_custom_data(self, mock_load_asn, mock_load_location,
-                                                      mock_load_custom, mock_process_blocks):
+                                                      mock_load_custom, mock_process_blocks, mock_process_asn):
         """Test consume_messages when no custom data remains after processing."""
         # Mock return values with empty remaining custom data
         mock_load_asn.return_value = Mock()
         mock_load_location.return_value = {}
         mock_load_custom.return_value = {}
-        mock_process_blocks.return_value = {}  # No remaining custom data
+        mock_process_blocks.return_value = ({}, set())  # No remaining custom data
+        mock_process_asn.return_value = {}
         
         self.consumer.consume_messages()
         
@@ -1649,19 +1662,21 @@ class TestIPGeolocationCSVConsumerMaxMindDownload(unittest.TestCase):
             self.assertTrue(result)
             mock_asn.assert_not_called()
 
+    @patch.object(IPGeolocationCSVConsumer, '_process_remaining_asn_ranges')
     @patch.object(IPGeolocationCSVConsumer, '_ensure_maxmind_data')
     @patch.object(IPGeolocationCSVConsumer, '_load_asn_data')
     @patch.object(IPGeolocationCSVConsumer, '_load_location_data')
     @patch.object(IPGeolocationCSVConsumer, '_load_custom_ip_data')
     @patch.object(IPGeolocationCSVConsumer, '_process_ip_block_files')
     def test_consume_messages_calls_ensure_maxmind_data(self, mock_process, mock_custom, 
-                                                         mock_location, mock_asn, mock_ensure):
+                                                         mock_location, mock_asn, mock_ensure, mock_process_asn):
         """Test consume_messages calls _ensure_maxmind_data."""
         mock_ensure.return_value = True
         mock_asn.return_value = {}
         mock_location.return_value = {}
         mock_custom.return_value = {}
-        mock_process.return_value = {}
+        mock_process.return_value = ({}, set())
+        mock_process_asn.return_value = {}
         
         self.consumer.consume_messages()
         

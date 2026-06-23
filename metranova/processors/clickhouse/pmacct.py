@@ -136,18 +136,34 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             return
         as_id_field = f"{target_as_field}_id"
         formatted_record[as_id_field] = value.get(as_field, None)
+        
+        #Lookup ip ref, we'll lookup AS later
         ip_cache_result = self.pipeline.cacher("ip").lookup("meta_ip", formatted_record[target_ip_field])
         if ip_cache_result:
             formatted_record[f"{target_ip_field}_ref"] = ip_cache_result[0]
-            #if no AS provided in value (0 or None), see if we have one in the cached result
-            try:
-                if formatted_record[as_id_field] is None or int(formatted_record[as_id_field]) == 0:
-                    formatted_record[as_id_field] = ip_cache_result[1] if len(ip_cache_result) > 1 else None
-            except ValueError:
-                pass
         else:
             formatted_record[f"{target_ip_field}_ref"] = None
 
+        #lookup as_id if not provided, using ip preference order (may be different from cacher above which always uses meta_ip)
+        provided_as_id = formatted_record[as_id_field]
+        if provided_as_id is not None:
+            try:
+                provided_as_id = int(provided_as_id)
+            except ValueError:
+                provided_as_id = None
+            # give the formatted as_id
+            formatted_record[as_id_field] = provided_as_id
+        if provided_as_id is None or provided_as_id == 0:
+            for ip_to_as_table in self.ip_to_as_lookup_order:
+                as_cache_result = None
+                #optimize for the case where ip_to_as_table is meta_ip since we already did that lookup above
+                if ip_to_as_table == "meta_ip":
+                    as_cache_result = ip_cache_result
+                else:
+                    as_cache_result = self.pipeline.cacher("ip").lookup(ip_to_as_table, formatted_record[target_ip_field])
+                if as_cache_result and len(as_cache_result) > 1:
+                    formatted_record[as_id_field] = as_cache_result[1]
+                    break
         #set the as ref field
         formatted_record[f"{target_as_field}_ref"] = self.pipeline.cacher("clickhouse").lookup_dict_key("meta_as", formatted_record[as_id_field], "ref")
 

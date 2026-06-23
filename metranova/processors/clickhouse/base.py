@@ -301,6 +301,14 @@ class BaseClickHouseProcessor(BaseProcessor, BaseClickHouseTableMixin):
         # List of materailized views to build (as BaseClickHouseMaterializedViewMixin objects)
         self.materialized_views = []
     
+    def set_clickhouse_client(self, client: HttpClient) -> None:
+        """Set the ClickHouse client for this processor.
+        
+        Most processors don't need direct client access, so this is a no-op by default.
+        Override in subclasses if direct client access is needed (e.g., for dynamic schema inspection).
+        """
+        return None
+    
     def get_ch_dictionaries(self) -> list:
         """Return list of ClickHouse dictionaries used by this processor. Override in child classes if multiple dictionaries are used."""
         return self.ch_dictionaries
@@ -641,18 +649,6 @@ class BaseDataProcessor(BaseClickHouseProcessor):
             ["policy_scope", "Array(LowCardinality(String))", True],
             ["ext", None, True]
         ]
-
-    def set_clickhouse_client(self, client: HttpClient) -> None:
-        """Set the ClickHouse client for this processor and any child classes that need it
-
-        The primary purpose of this method is to grant the processor direct access to the ClickHouse client.
-        While in most cases the processor will declare the database schema itself, the dynamic pipeline is
-        required to access the type definitions directly as they are declared via API.
-
-        NOTE: This method exists primarily to support the dynamic pipeline and may not be necessary for
-        other use cases.
-        """
-        return None
 
 
 class BaseDataGenericMetricProcessor(BaseDataProcessor):

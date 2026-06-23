@@ -12,6 +12,7 @@ class BaseFlowProcessor(BaseDataProcessor):
         self.table_ttl = os.getenv('CLICKHOUSE_FLOW_TTL', '30 DAY')
         self.table_ttl_column = os.getenv('CLICKHOUSE_FLOW_TTL_COLUMN', 'start_time')
         self.flow_type = os.getenv('CLICKHOUSE_FLOW_TYPE', 'unknown')
+        self.ip_to_as_lookup_order = os.getenv('CLICKHOUSE_FLOW_IP_TO_AS_LOOKUP_ORDER', 'meta_ip').split(',')
         self.partition_by = os.getenv('CLICKHOUSE_FLOW_PARTITION_BY', "toYYYYMMDD(start_time)")
         self.policy_auto_scopes = os.getenv('CLICKHOUSE_FLOW_POLICY_AUTO_SCOPES', 'true').lower() in ('true', '1', 'yes')
         #A comma separated list of key-value pairs in form key:value, mapping a community id (such as a l3vpn rd) to a scope string
