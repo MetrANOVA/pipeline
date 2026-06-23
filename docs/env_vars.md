@@ -96,6 +96,7 @@ This document describes all environment variables used by the MetrANOVA Pipeline
 | `CLICKHOUSE_FLOW_TYPE` | `unknown` | Flow data type identifier |
 | `CLICKHOUSE_FLOW_EXTENSIONS` | (none) | Comma-separated list of flow extensions to enable (e.g., `bgp,ipv4,ipv6,mpls`) |
 | `CLICKHOUSE_FLOW_IP_REF_EXTENSIONS` | (none) | Comma-separated list of IP reference extensions (e.g., `scireg`) |
+| `CLICKHOUSE_FLOW_IP_TO_AS_LOOKUP_ORDER` | `meta_ip` | Comma-separated preference order of IP metadata tables to use for AS lookups when AS is not provided in flow record (e.g., `meta_ip,meta_ip_scireg,meta_ip_cric`) |
 | `CLICKHOUSE_FLOW_POLICY_AUTO_SCOPES` | `true` | Automatically determine policy scopes from BGP communities |
 | `CLICKHOUSE_FLOW_POLICY_COMMUNITY_SCOPE_MAP` | (none) | Map BGP communities to policy scopes (format: `community:scope,community:scope`) |
 
