@@ -683,7 +683,7 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
         
         # Lookup ASN info in trie
         asn = ip_to_asn_trie.get(network, None)
-        if asn:
+        if asn is not None:
             ip_obj['as_id'] = asn
         
         # Lookup location info
@@ -705,8 +705,12 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
         return ip_obj, custom_ip_data
 
     def _process_ip_block_files(self, ip_to_asn_trie, location_code_map, custom_ip_data):
-        """Process IP block files and emit IP objects to pipeline"""
+        """Process IP block files and emit IP objects to pipeline.
+        Returns tuple of (custom_ip_data, processed_networks_set)
+        """
         # CSV Column names: network,geoname_id,registered_country_geoname_id,represented_country_geoname_id,is_anonymous_proxy,is_satellite_provider,postal_code,latitude,longitude,accuracy_radius,is_anycast
+        processed_networks = set()  # Track networks processed from City blocks
+        
         for ip_block_file in self.ip_block_files:
             try:
                 with open(ip_block_file, 'r') as f:
@@ -714,6 +718,7 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
                     for row in reader:
                         ip_obj, custom_ip_data = self._build_ip_object(row, ip_to_asn_trie, location_code_map, custom_ip_data)
                         if ip_obj:
+                            processed_networks.add(ip_obj['id'])  # Track this network
                             # Process the record - do this here to avoid memory issues with large files
                             # TODO: Possibly speed up imports by batching records instead of one at a time
                             self.pipeline.process_message({'table': self.table, 'data': [ip_obj]})
@@ -722,6 +727,55 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
             except Exception as e:
                 self.logger.error(f"Error processing IP Block file {ip_block_file}: {e}")
         
+        return custom_ip_data, processed_networks
+
+    def _process_remaining_asn_ranges(self, processed_networks, location_code_map, custom_ip_data):
+        """Process ASN ranges that don't have corresponding City blocks.
+        Only adds ASN ranges whose network ID is not already in processed_networks.
+        This ensures ASN-only ranges don't overwrite City blocks with better data.
+        """
+        asn_only_count = 0
+        
+        for asn_file in self.asn_files:
+            try:
+                with open(asn_file, 'r') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        network = row.get('network', None)
+                        asn = row.get('autonomous_system_number', None)
+                        
+                        if not network or asn is None:
+                            continue
+                        
+                        # Skip if this network was already processed from City blocks
+                        if network in processed_networks:
+                            continue
+                        
+                        # Build IP object with ASN data only
+                        ip_obj = {'id': network}
+                        ip_subnet_tuple = self.ip_subnet_to_tuple(network)
+                        ip_obj['ip_subnet'] = [ip_subnet_tuple]
+                        ip_obj['as_id'] = int(asn)
+                        
+                        # Try to lookup location data (most ASN-only ranges won't have this)
+                        # Note: ASN files don't have geoname_id, so this will typically be empty
+                        # but included for consistency with the data model
+                        
+                        # Merge with any custom data
+                        if custom_ip_data.get(network, None):
+                            ip_obj.update(custom_ip_data[network])
+                            del custom_ip_data[network]
+                        
+                        # Process the record
+                        self.pipeline.process_message({'table': self.table, 'data': [ip_obj]})
+                        asn_only_count += 1
+                        
+            except FileNotFoundError as e:
+                self.logger.error(f"ASN Block file not found: {asn_file}. Error: {e}")
+            except Exception as e:
+                self.logger.error(f"Error processing ASN Block file {asn_file}: {e}")
+        
+        self.logger.info(f"Added {asn_only_count} ASN-only IP ranges not present in City blocks")
         return custom_ip_data
 
     def consume_messages(self):
@@ -740,9 +794,14 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
         # Load custom IP data
         custom_ip_data = self._load_custom_ip_data()
         
-        # Process IP block files
-        remaining_custom_data = self._process_ip_block_files(ip_to_asn_trie, location_code_map, custom_ip_data)
+        # Process IP block files (City blocks with geo data, enriched with ASN)
+        remaining_custom_data, processed_networks = self._process_ip_block_files(ip_to_asn_trie, location_code_map, custom_ip_data)
         
-        # Process any remaining custom IP records that were not in the ip block files
+        # Process ASN ranges not covered by City blocks
+        # This adds ranges like 169.228.0.0/17 and AS 8517 IPv6 ranges that don't have geo data
+        # but don't overwrite or duplicate City block entries
+        remaining_custom_data = self._process_remaining_asn_ranges(processed_networks, location_code_map, remaining_custom_data)
+        
+        # Process any remaining custom IP records that were not in either file
         if remaining_custom_data:
             self.pipeline.process_message({'table': self.table, 'data': list(remaining_custom_data.values())})
