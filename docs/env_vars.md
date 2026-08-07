@@ -111,10 +111,11 @@ Materialized views provide pre-aggregated data for faster queries. Each material
 | `CLICKHOUSE_FLOW_MV_BY_EDGE_AS` | (none) | Comma-separated list of aggregation windows for edge AS materialized views (e.g., `5m,1h,1d,1w`) |
 | `CLICKHOUSE_FLOW_MV_BY_INTERFACE` | (none) | Comma-separated list of aggregation windows for interface materialized views (e.g., `5m,1h,1d`) |
 | `CLICKHOUSE_FLOW_MV_BY_IP_VERSION` | (none) | Comma-separated list of aggregation windows for IP version materialized views (e.g., `1h,1d,1w`) |
+| `CLICKHOUSE_FLOW_MV_ANONYMIZED` | (none) | Comma-separated list of aggregation windows for anonymized flow materialized views (e.g., `5m,1h,1d`) |
 
 ### Per-Window Materialized View Settings
 
-For each materialized view type and aggregation window (replace `{MV_TYPE}` with `EDGE_AS`, `INTERFACE`, or `IP_VERSION`, and `{WINDOW}` with the uppercase window like `5M`, `1H`, `1D`, `1W`, `1MO`, `1Y`):
+For each materialized view type and aggregation window (replace `{MV_TYPE}` with `EDGE_AS`, `INTERFACE`, `IP_VERSION`, or `ANONYMIZED`, and `{WINDOW}` with the uppercase window like `5M`, `1H`, `1D`, `1W`, `1MO`, `1Y`):
 
 | Variable Pattern | Default | Description |
 |----------|---------|-------------|
@@ -126,13 +127,15 @@ For each materialized view type and aggregation window (replace `{MV_TYPE}` with
 | `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_POLICY_SCOPE` | `comm:re` | Policy scope override (comma-separated list) |
 | `CLICKHOUSE_FLOW_MV_BY_{MV_TYPE}_{WINDOW}_POLICY_OVERRIDE` | `true` | Enable policy override for this materialized view |
 
-**Example:**
-```
-CLICKHOUSE_FLOW_MV_BY_EDGE_AS=5m,1h,1d
-CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_POLICY_LEVEL=tlp:amber
-CLICKHOUSE_FLOW_MV_BY_EDGE_AS_5M_POLICY_SCOPE=internal,restricted
-CLICKHOUSE_FLOW_MV_BY_EDGE_AS_1H_TABLE=custom_flow_edge_as_1h
-```
+### Anonymized Materialized View IP Masking
+
+The `ANONYMIZED` materialized view masks source, destination, and peer IP addresses by zeroing the host bits, preserving only a leading network prefix. The prefix lengths are configurable per aggregation window. Addresses are stored as IPv6, so IPv4 addresses are mapped to `::ffff:0:0/96` — an IPv4 `/N` corresponds to an IPv6 prefix of `96+N`. Multicast/reserved ranges (`224.0.0.0/4`, `ff00::/8`, `2002::/16`) are passed through unmasked.
+
+| Variable Pattern | Default | Description |
+|----------|---------|-------------|
+| `CLICKHOUSE_FLOW_MV_ANONYMIZED_{WINDOW}_IPV4_PREFIX` | `117` | IPv6 prefix length (leading bits preserved) when masking IPv4 addresses. Default `117` keeps `117 - 96 = 21` IPv4 host bits, i.e. an IPv4 `/21` |
+| `CLICKHOUSE_FLOW_MV_ANONYMIZED_{WINDOW}_IPV6_PREFIX` | `48` | IPv6 prefix length (leading bits preserved) when masking IPv6 addresses, i.e. an IPv6 `/48` |
+
 
 ## ClickHouse Dictionary Settings
 
