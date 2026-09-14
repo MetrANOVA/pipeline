@@ -1371,6 +1371,118 @@ class TestMaterializedViewByIPVersion(unittest.TestCase):
         self.assertIn("'tlp:amber' AS policy_level", mv.mv_select_query)
         self.assertIn("['research'] AS policy_scope", mv.mv_select_query)
 
+class TestResolvePolicyOrganizations(unittest.TestCase):
+    """Tests for BaseFlowProcessor.resolve_policy_organizations.
+
+    The method stamps policy_organizations on each flow record at ingest time.
+    Rules are loaded once at startup from CLICKHOUSE_FLOW_POLICY_AUTHZ_RULES.
+
+    Each rule has three fields:
+      originator — glob matched against policy_originator (the collector/device name)
+      scope      — glob matched against each element of policy_scope (AS numbers, community names)
+      org        — org slug to add to policy_organizations if both patterns match
+
+    Org-tagging is additive: all matching rules fire, not just the first.
+    Default deny: rows with no matching rules get [] — invisible to non-exempt users.
+    """
+
+    def _make_processor(self, enabled=True, rules=None):
+        mock_pipeline = MagicMock()
+        rules_json = __import__('orjson').dumps(rules or []).decode()
+        env = {
+            'CLICKHOUSE_FLOW_POLICY_AUTHZ_ENABLED': 'true' if enabled else 'false',
+            'CLICKHOUSE_FLOW_POLICY_AUTHZ_RULES': rules_json,
+        }
+        with patch.dict(os.environ, env):
+            return BaseFlowProcessor(mock_pipeline)
+
+    def test_disabled_returns_empty(self):
+        rules = [{"originator": "*", "scope": "*", "org": "esnet"}]
+        proc = self._make_processor(enabled=False, rules=rules)
+        self.assertEqual(proc.resolve_policy_organizations("esnet-cr1", ["as:293"]), [])
+
+    def test_no_rules_returns_empty(self):
+        proc = self._make_processor(enabled=True, rules=[])
+        self.assertEqual(proc.resolve_policy_organizations("esnet-cr1", ["as:293"]), [])
+
+    def test_wildcard_originator_and_scope_matches_all(self):
+        rules = [{"originator": "*", "scope": "*", "org": "esnet"}]
+        proc = self._make_processor(rules=rules)
+        result = proc.resolve_policy_organizations("any-collector", ["as:293", "as:6447"])
+        self.assertEqual(result, ["esnet"])
+
+    def test_exact_as_scope_match(self):
+        # scope "as:293" matches element "as:293" in the row's policy_scope array
+        rules = [{"originator": "*", "scope": "as:293", "org": "esnet"}]
+        proc = self._make_processor(rules=rules)
+        self.assertEqual(proc.resolve_policy_organizations("x", ["as:293", "as:6447"]), ["esnet"])
+
+    def test_scope_no_match_returns_empty(self):
+        rules = [{"originator": "*", "scope": "as:293", "org": "esnet"}]
+        proc = self._make_processor(rules=rules)
+        self.assertEqual(proc.resolve_policy_organizations("x", ["as:6447"]), [])
+
+    def test_originator_glob_match(self):
+        # "esnet-*" matches "esnet-cr1" but not "internet2-rtr1"
+        rules = [{"originator": "esnet-*", "scope": "*", "org": "esnet"}]
+        proc = self._make_processor(rules=rules)
+        self.assertEqual(proc.resolve_policy_organizations("esnet-cr1", []), ["esnet"])
+        self.assertEqual(proc.resolve_policy_organizations("internet2-rtr1", []), [])
+
+    def test_originator_no_match_returns_empty(self):
+        rules = [{"originator": "esnet-*", "scope": "*", "org": "esnet"}]
+        proc = self._make_processor(rules=rules)
+        self.assertEqual(proc.resolve_policy_organizations("geant-rtr1", ["as:293"]), [])
+
+    def test_multiple_rules_additive(self):
+        # Both rules can fire — org-tagging is additive across all matching rules
+        rules = [
+            {"originator": "*", "scope": "as:293", "org": "esnet"},
+            {"originator": "*", "scope": "comm:lhcone", "org": "lhcone"},
+        ]
+        proc = self._make_processor(rules=rules)
+        result = set(proc.resolve_policy_organizations("x", ["as:293", "comm:lhcone"]))
+        self.assertEqual(result, {"esnet", "lhcone"})
+
+    def test_only_first_rule_fires_when_second_scope_absent(self):
+        rules = [
+            {"originator": "*", "scope": "as:293", "org": "esnet"},
+            {"originator": "*", "scope": "comm:lhcone", "org": "lhcone"},
+        ]
+        proc = self._make_processor(rules=rules)
+        result = proc.resolve_policy_organizations("x", ["as:293"])
+        self.assertEqual(result, ["esnet"])
+
+    def test_scope_glob_pattern(self):
+        # "as:*" matches any AS-number scope element
+        rules = [{"originator": "*", "scope": "as:*", "org": "esnet"}]
+        proc = self._make_processor(rules=rules)
+        self.assertEqual(proc.resolve_policy_organizations("x", ["as:293"]), ["esnet"])
+        self.assertEqual(proc.resolve_policy_organizations("x", ["comm:lhcone"]), [])
+
+    def test_rule_missing_org_is_skipped(self):
+        rules = [{"originator": "*", "scope": "*", "org": ""}]
+        proc = self._make_processor(rules=rules)
+        self.assertEqual(proc.resolve_policy_organizations("x", ["as:293"]), [])
+
+    def test_empty_originator_matches_wildcard(self):
+        rules = [{"originator": "*", "scope": "*", "org": "esnet"}]
+        proc = self._make_processor(rules=rules)
+        self.assertEqual(proc.resolve_policy_organizations("", ["as:293"]), ["esnet"])
+
+    def test_column_def_includes_policy_organizations(self):
+        proc = self._make_processor(rules=[])
+        col_names = [c[0] for c in proc.column_defs]
+        self.assertIn("policy_organizations", col_names)
+        col = next(c for c in proc.column_defs if c[0] == "policy_organizations")
+        self.assertEqual(col[1], "Array(LowCardinality(String))")
+
+    def test_create_table_includes_policy_organizations(self):
+        proc = self._make_processor(rules=[])
+        ddl = proc.create_table_command()
+        self.assertIn("`policy_organizations` Array(LowCardinality(String))", ddl)
+
+
 if __name__ == '__main__':
     # Run tests with verbose output
     unittest.main(verbosity=2)

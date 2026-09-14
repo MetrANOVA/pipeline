@@ -365,6 +365,11 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
                     scopes.add(f"comm:{self.policy_community_scope_map[rd_key]}")
         formatted_record["policy_scope"].extend(list(scopes))
 
+        formatted_record["policy_organizations"] = self.resolve_policy_organizations(
+            formatted_record.get("policy_originator", ""),
+            formatted_record["policy_scope"],
+        )
+
         # expects a list returned (there are cases that aren;t this where you produce multiple records)
         # just wraps our one dict in an array
         return [formatted_record]

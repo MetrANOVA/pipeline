@@ -1,6 +1,7 @@
+import fnmatch
 import orjson
 import os
-from typing import Any, Dict, Iterator
+from typing import Any, Dict, Iterator, List
 from metranova.processors.clickhouse.base import BaseClickHouseMaterializedViewMixin, BaseDataProcessor
 
 class BaseFlowProcessor(BaseDataProcessor):
@@ -19,6 +20,14 @@ class BaseFlowProcessor(BaseDataProcessor):
         policy_community_scope_map_str = os.getenv('CLICKHOUSE_FLOW_POLICY_COMMUNITY_SCOPE_MAP', None)
         # Parse the community scope map into a dictionary
         self.policy_community_scope_map = self.parse_env_map_list(policy_community_scope_map_str)
+        # Authz: load rules once at startup from JSON env var.
+        # Format: [{"originator":"*","scope":"as:293","org":"esnet"}, ...]
+        # When enabled, policy_organizations is stamped on each row at ingest time.
+        # Default deny: rows with no matching rules get policy_organizations=[] and
+        # are invisible to all non-exempt users via the authz row policy.
+        self.policy_authz_enabled = os.getenv('CLICKHOUSE_FLOW_POLICY_AUTHZ_ENABLED', 'false').lower() in ('true', '1', 'yes')
+        authz_rules_str = os.getenv('CLICKHOUSE_FLOW_POLICY_AUTHZ_RULES', None)
+        self.policy_authz_rules: List[Dict] = orjson.loads(authz_rules_str) if authz_rules_str else []
         # add time fields to front of column names
         self.column_defs.insert(0, ["start_time", "DateTime64(3, 'UTC')", True])
         self.column_defs.insert(1, ["end_time", "DateTime64(3, 'UTC')", True])
@@ -50,6 +59,7 @@ class BaseFlowProcessor(BaseDataProcessor):
         self.column_defs.append(['application_port', 'UInt16', True])
         self.column_defs.append(['bit_count', 'UInt64', True])
         self.column_defs.append(['packet_count', 'UInt64', True])
+        self.column_defs.append(['policy_organizations', 'Array(LowCardinality(String))', True])
         # build list of potential ext type hints
         extension_options = {
                 "bgp": [
@@ -106,6 +116,46 @@ class BaseFlowProcessor(BaseDataProcessor):
                     key, value = pair.split(':', 1)
                     result[key.strip()] = value.strip()
         return result
+
+    def resolve_policy_organizations(self, originator: str, scopes: List[str]) -> List[str]:
+        """Evaluate authz rules against this flow record and return the matching org slugs.
+
+        Rules are loaded once at startup from CLICKHOUSE_FLOW_POLICY_AUTHZ_RULES (JSON list).
+        Returns [] when authz is disabled or no rules match — default deny, meaning the row
+        will be invisible to all non-exempt ClickHouse users via the authz row policy.
+
+        Each rule is a dict with three fields:
+          originator — glob pattern matched against policy_originator (the collector/router name)
+                       e.g. "esnet-*" matches "esnet-cr1", "*" matches anything
+          scope      — glob pattern matched against each element of the policy_scope array
+                       e.g. "as:293" matches the scope element "as:293" (ESnet's AS number)
+                       e.g. "as:*" matches any AS-number scope, "comm:lhcone" matches that community
+                       scope="*" matches as long as the originator pattern matches (scope list may be empty)
+          org        — org slug written into policy_organizations if both patterns match
+                       e.g. "esnet"
+
+        Org-tagging is additive: all matching rules fire, not just the first.
+        Example: a row from "esnet-cr1" carrying scopes ["as:293", "comm:lhcone"] could match
+        both an ESnet rule (scope="as:293") and an LHCONE rule (scope="comm:lhcone"),
+        producing policy_organizations=["esnet", "lhcone"].
+        """
+        if not self.policy_authz_enabled or not self.policy_authz_rules:
+            return []
+        orgs = set()
+        for rule in self.policy_authz_rules:
+            orig_pattern = rule.get('originator', '*')
+            scope_pattern = rule.get('scope', '*')
+            org = rule.get('org', '')
+            if not org:
+                continue
+            if not fnmatch.fnmatch(originator or '', orig_pattern):
+                continue
+            # scope_pattern='*' means "match regardless of scopes on this row".
+            # Otherwise check whether any scope element in the row matches the pattern.
+            # scopes is a list like ["as:293", "comm:lhcone", "as:6447"].
+            if scope_pattern == '*' or any(fnmatch.fnmatch(s, scope_pattern) for s in scopes):
+                orgs.add(org)
+        return list(orgs)
 
 class MaterializedViewByEdgeAS(BaseClickHouseMaterializedViewMixin):
     
