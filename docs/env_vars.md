@@ -298,6 +298,9 @@ When both `KAFKA_SASL_USERNAME` and `KAFKA_SASL_PASSWORD` are set, the connector
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PICKLE_FILE_DIRECTORY` | `caches` | Directory for pickle file output |
+| `PICKLE_FILE_HTTP_ENABLED` | `false` | Serve pickle files over HTTP from `PICKLE_FILE_DIRECTORY` |
+| `PICKLE_FILE_HTTP_HOST` | `0.0.0.0` | Bind address for the pickle file HTTP server |
+| `PICKLE_FILE_HTTP_PORT` | `8080` | Bind port for the pickle file HTTP server |
 | `IP_FILE_USE_SIMPLE_FILE_NAME` | `true` | Use simplified file naming for IP cache files |
 
 ## IP Cacher Settings
@@ -305,6 +308,7 @@ When both `KAFKA_SASL_USERNAME` and `KAFKA_SASL_PASSWORD` are set, the connector
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `IP_CACHER_TABLES` | (empty) | Comma-separated list of tables to load into IP trie cache |
+| `IP_CACHER_BASE_URL` | (empty) | Base URL for downloading IP trie pickle files, e.g. `http://cache-ip-trie:8080` |
 | `IP_CACHER_DIR` | `caches` | Directory containing IP trie cache files |
 | `IP_CACHER_REFRESH_INTERVAL` | `600` | Seconds between IP cache refresh operations |
 

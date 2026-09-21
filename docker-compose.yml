@@ -2,6 +2,21 @@ version: '3.8'
 
 services:
 
+  cache-ip-trie:
+    image: metranova/pipeline:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - conf/envs/base.env
+      - conf/envs/cache_ip_trie.env
+    volumes:
+      - ./conf:/app/conf:ro
+      - ./pipelines:/app/pipelines:ro
+    expose:
+      - "8080"
+    restart: always
+
   pipeline:
     image: metranova/pipeline:latest
     build:
@@ -11,9 +26,10 @@ services:
       - conf/envs/base.env
       - ${PIPELINE_ENV_FILE:-.env}
     volumes:
-      - ./caches:/app/caches:rw
       - ./conf:/app/conf:ro
       - ./pipelines:/app/pipelines:ro
+    depends_on:
+      - cache-ip-trie
     restart: always
     deploy:
       mode: replicated

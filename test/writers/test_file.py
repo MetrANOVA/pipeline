@@ -2,6 +2,7 @@ import unittest
 import os
 import tempfile
 import pickle
+import urllib.request
 from unittest.mock import Mock, patch, MagicMock
 from metranova.writers.file import PickleFileWriter
 
@@ -24,6 +25,7 @@ class TestPickleFileWriter(unittest.TestCase):
     
     def tearDown(self):
         """Clean up test fixtures."""
+        self.writer.close()
         self.env_patcher.stop()
         # Clean up temp directory
         import shutil
@@ -188,6 +190,29 @@ class TestPickleFileWriter(unittest.TestCase):
         # File should not exist since write failed
         file_path = os.path.join(self.temp_dir, 'test.pkl')
         self.assertFalse(os.path.exists(file_path))
+
+    def test_http_server_serves_pickle_directory(self):
+        """Test that optional HTTP server exposes generated pickle files."""
+        with patch.dict(os.environ, {
+            'PICKLE_FILE_DIRECTORY': self.temp_dir,
+            'PICKLE_FILE_HTTP_ENABLED': 'true',
+            'PICKLE_FILE_HTTP_HOST': '127.0.0.1',
+            'PICKLE_FILE_HTTP_PORT': '0',
+        }):
+            writer = PickleFileWriter([self.mock_processor])
+            try:
+                msg = {
+                    'name': 'test_http.pkl',
+                    'data': {'served': True}
+                }
+                writer.write_message(msg)
+
+                port = writer.http_server.server_address[1]
+                with urllib.request.urlopen(f'http://127.0.0.1:{port}/test_http.pkl') as response:
+                    loaded_data = pickle.loads(response.read())
+                self.assertEqual(loaded_data, msg['data'])
+            finally:
+                writer.close()
 
 
 if __name__ == '__main__':
