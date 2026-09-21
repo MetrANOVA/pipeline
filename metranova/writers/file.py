@@ -20,7 +20,7 @@ class ThreadingPickleHTTPServer(ThreadingMixIn, HTTPServer):
 class DirectoryHTTPRequestHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, directory=None, **kwargs):
         self.directory = os.fspath(directory)
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, directory=self.directory, **kwargs)
 
     def translate_path(self, path):
         path = urllib.parse.urlparse(path).path
