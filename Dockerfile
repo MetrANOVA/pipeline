@@ -1,5 +1,5 @@
 # Use the official Python runtime as base image
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # Set working directory in the container
 WORKDIR /app
@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better Docker layer caching
-COPY README.md pyproject.toml ./
+COPY README.md pyproject.toml uv.lock .python-version ./
 
 # Create a non-root user for security
 RUN useradd --create-home --shell /bin/bash app \
@@ -18,7 +18,7 @@ RUN useradd --create-home --shell /bin/bash app \
 USER app
 
 # Install Python dependencies
-RUN pip install --upgrade pip && pip install uv && python -m uv sync
+RUN pip install --upgrade pip && pip install uv && python -m uv sync --locked
 
 # Copy the application code
 COPY bin/ ./bin/
