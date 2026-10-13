@@ -301,7 +301,9 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
             'bytes': 1024,
             'packets': 10,
             'writer_id': 'nfacctd',
-            'label': 'collector1'
+            'label': 'collector1',
+            'as_src': 7922,
+            'as_dst': 15169
         }
         
         result = self.processor.build_message(value, {})
@@ -330,7 +332,9 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
             'timestamp_arrival': '1609459200.0',
             'bytes': 2048,
             'packets': 5,
-            'writer_id': 'sfacctd'
+            'writer_id': 'sfacctd',
+            'as_src': 7922,
+            'as_dst': 15169
         }
         
         result = self.processor.build_message(value, {})
@@ -373,7 +377,9 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
             'timestamp_start': '1609459200.0',
             'timestamp_end': '1609459260.0',
             'bytes': 1024,
-            'packets': 10
+            'packets': 10,
+            'as_src': 7922,
+            'as_dst': 15169
         }
         
         result = self.processor.build_message(value, {})
@@ -393,7 +399,9 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
             'timestamp_start': '1609459200.0',
             'timestamp_end': '1609459260.0',
             'bytes': 1024,
-            'packets': 10
+            'packets': 10,
+            'as_src': 7922,
+            'as_dst': 15169
         }
         
         result = self.processor.build_message(value, {})
@@ -413,7 +421,9 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
             'timestamp_start': '1609459200.0',
             'timestamp_end': '1609459260.0',
             'bytes': 1024,
-            'packets': 10
+            'packets': 10,
+            'as_src': 7922,
+            'as_dst': 15169
         }
         
         result = self.processor.build_message(value, {})
@@ -723,7 +733,9 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
             'timestamp_start': '1609459200.0',
             # timestamp_end is missing
             'bytes': 1024,
-            'packets': 10
+            'packets': 10,
+            'as_src': 7922,
+            'as_dst': 15169
         }
         
         result = self.processor.build_message(value, {})
@@ -749,8 +761,8 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
             'timestamp_end': '1609459260.0',
             'bytes': 1024,
             'packets': 10,
-            'as_src': 65001,
-            'as_dst': 65002,
+            'as_src': 7922,
+            'as_dst': 15169,
             'mpls_vpn_rd': '65000:100'
         }
         
@@ -759,8 +771,8 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
         self.assertIsNotNone(result)
         record = result[0]
         # Should include AS scopes and community scope
-        self.assertIn('as:65001', record['policy_scope'])
-        self.assertIn('as:65002', record['policy_scope'])
+        self.assertIn('as:7922', record['policy_scope'])
+        self.assertIn('as:15169', record['policy_scope'])
         self.assertIn('comm:community1', record['policy_scope'])
 
     def test_build_message_application_port_with_none_port_dst_in_value(self):
@@ -776,7 +788,9 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
             'timestamp_start': '1609459200.0',
             'timestamp_end': '1609459260.0',
             'bytes': 1024,
-            'packets': 10
+            'packets': 10,
+            'as_src': 7922,
+            'as_dst': 15169
         }
         
         result = self.processor.build_message(value, {})
@@ -800,7 +814,9 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
             'packets': 10,
             'peer_ip_dst': '10.0.0.1',
             'peer_as_dst': 65000,
-            'peer_ip_src': '10.0.0.2'
+            'peer_ip_src': '10.0.0.2',
+            'as_src': 7922,
+            'as_dst': 15169
         }
         
         result = self.processor.build_message(value, {})
@@ -821,7 +837,8 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
             'timestamp_end': '1609459260.0',
             'bytes': 'wrong',
             'packets': 'nope',
-            'as_src': 'bad_as'
+            'as_src': 7922,
+            'as_dst': 15169
         }
         
         result = self.processor.build_message(value, {})
@@ -833,6 +850,121 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
         self.assertEqual(record['dst_port'], 0)
         self.assertEqual(record['bit_count'], 0)
         self.assertEqual(record['packet_count'], 0)
+
+
+class TestPMAcctFlowProcessorReservedAsnFilter(unittest.TestCase):
+    """Tests for the reserved/private/unknown ASN drop filter -- the pipeline
+    equivalent of the old Logstash conditional that dropped a flow when
+    [meta][src_asn] or [meta][dst_asn] was unset or one of a handful of
+    IANA-reserved, non-routable values."""
+
+    def setUp(self):
+        self.mock_pipeline = MagicMock()
+
+        mock_clickhouse_cacher = Mock()
+        mock_clickhouse_cacher.lookup.return_value = None
+        mock_clickhouse_cacher.lookup_dict_key.return_value = None
+
+        mock_ip_cacher = Mock()
+        mock_ip_cacher.lookup.return_value = None
+
+        mock_clickhouse_ranged_cacher = Mock()
+        mock_clickhouse_ranged_cacher.lookup_dict_key.return_value = None
+
+        def cacher_side_effect(name):
+            if name == "clickhouse":
+                return mock_clickhouse_cacher
+            elif name == "ip":
+                return mock_ip_cacher
+            elif name == "clickhouse_ranged":
+                return mock_clickhouse_ranged_cacher
+            return Mock()
+
+        self.mock_pipeline.cacher.side_effect = cacher_side_effect
+        self.processor = PMAcctFlowProcessor(self.mock_pipeline)
+
+    def _base_value(self, as_src, as_dst):
+        return {
+            'ip_src': '192.168.1.1',
+            'ip_dst': '192.168.1.2',
+            'port_src': 12345,
+            'port_dst': 80,
+            'ip_proto': 6,
+            'timestamp_start': '1609459200.0',
+            'timestamp_end': '1609459260.0',
+            'bytes': 1024,
+            'packets': 10,
+            'as_src': as_src,
+            'as_dst': as_dst,
+        }
+
+    def test_is_reserved_asn_true_cases(self):
+        reserved = [
+            None, 0, 4294967295, 23456,
+            64512, 65000, 65534,  # 16-bit private use range
+            4200000000, 4294967000, 4294967294,  # 32-bit private use range
+            'not-a-number',
+        ]
+        for asn in reserved:
+            with self.subTest(asn=asn):
+                self.assertTrue(self.processor.is_reserved_asn(asn))
+
+    def test_is_reserved_asn_false_cases(self):
+        valid = [7922, 15169, 1, 64511, 65535, 4199999999]
+        for asn in valid:
+            with self.subTest(asn=asn):
+                self.assertFalse(self.processor.is_reserved_asn(asn))
+
+    def test_drop_reserved_asn_enabled_by_default(self):
+        self.assertTrue(self.processor.drop_reserved_asn)
+
+    def test_build_message_valid_both_asns_not_dropped(self):
+        result = self.processor.build_message(self._base_value(7922, 15169), {})
+        self.assertIsNotNone(result)
+
+    def test_build_message_dropped_when_dst_asn_zero(self):
+        """Equivalent of the Logstash filter's [meta][dst_asn] == 0 check."""
+        result = self.processor.build_message(self._base_value(7922, 0), {})
+        self.assertIsNone(result)
+
+    def test_build_message_dropped_when_dst_asn_reserved(self):
+        """Equivalent of the Logstash filter's [meta][dst_asn] == 4294967295 check."""
+        result = self.processor.build_message(self._base_value(7922, 4294967295), {})
+        self.assertIsNone(result)
+
+    def test_build_message_dropped_when_dst_asn_as_trans(self):
+        """Equivalent of the Logstash filter's [meta][dst_asn] == 23456 check."""
+        result = self.processor.build_message(self._base_value(7922, 23456), {})
+        self.assertIsNone(result)
+
+    def test_build_message_dropped_when_dst_asn_16bit_private_use(self):
+        """Equivalent of the Logstash filter's 64512 <= dst_asn <= 65534 check."""
+        result = self.processor.build_message(self._base_value(7922, 65001), {})
+        self.assertIsNone(result)
+
+    def test_build_message_dropped_when_dst_asn_32bit_private_use(self):
+        """Equivalent of the Logstash filter's 4200000000 <= dst_asn <= 4294967294 check."""
+        result = self.processor.build_message(self._base_value(7922, 4200000001), {})
+        self.assertIsNone(result)
+
+    def test_build_message_dropped_when_src_asn_reserved(self):
+        """Same checks apply to src_asn, not just dst_asn."""
+        result = self.processor.build_message(self._base_value(65001, 15169), {})
+        self.assertIsNone(result)
+
+    def test_build_message_dropped_when_src_asn_missing(self):
+        value = self._base_value(7922, 15169)
+        del value['as_src']
+        result = self.processor.build_message(value, {})
+        self.assertIsNone(result)
+
+    @patch.dict(os.environ, {'CLICKHOUSE_FLOW_DROP_RESERVED_ASN': 'false'})
+    def test_build_message_not_dropped_when_filter_disabled(self):
+        """CLICKHOUSE_FLOW_DROP_RESERVED_ASN=false turns the filter off entirely."""
+        processor = PMAcctFlowProcessor(self.mock_pipeline)
+        self.assertFalse(processor.drop_reserved_asn)
+        result = processor.build_message(self._base_value(7922, 65001), {})
+        self.assertIsNotNone(result)
 
 
 if __name__ == '__main__':

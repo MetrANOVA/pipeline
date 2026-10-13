@@ -1,4 +1,5 @@
 import logging
+import os
 import orjson
 from typing import Any, Dict, Iterator
 from metranova.processors.clickhouse.flow import BaseFlowProcessor
@@ -20,6 +21,34 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             ['port_dst'],
             ['ip_proto']
         ]
+        # Equivalent of the pre-pipeline Logstash filter that dropped a flow
+        # when its src/dst ASN was unset or one of a handful of IANA-reserved,
+        # non-routable values -- see is_reserved_asn() below for the exact
+        # values/ranges.
+        self.drop_reserved_asn = os.getenv('CLICKHOUSE_FLOW_DROP_RESERVED_ASN', 'true').lower() in ('true', '1', 'yes')
+
+    def is_reserved_asn(self, asn) -> bool:
+        """True if asn is unset or one of the IANA-reserved/private-use AS
+        numbers that never identifies a real organization:
+          - 0 (unknown/unassigned)
+          - 4294967295 / 0xFFFFFFFF (reserved, RFC 7300)
+          - 23456 (AS_TRANS, RFC 6793 16-bit/32-bit transition marker)
+          - 64512-65534 (16-bit private use, RFC 6996)
+          - 4200000000-4294967294 (32-bit private use, RFC 6996)
+        """
+        if asn is None:
+            return True
+        try:
+            asn = int(asn)
+        except (TypeError, ValueError):
+            return True
+        return (
+            asn == 0
+            or asn == 4294967295
+            or asn == 23456
+            or 64512 <= asn <= 65534
+            or 4200000000 <= asn <= 4294967294
+        )
 
     def add_bgp_extensions(self, value: dict, ext: dict):
         ########### BGP Extensions ############
@@ -270,6 +299,21 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         self.lookup_ip_as_fields("ip_src", "src_ip", "as_src", "src_as", value, formatted_record)
         self.lookup_ip_as_fields("ip_dst", "dst_ip", "as_dst", "dst_as", value, formatted_record)
         self.lookup_ip_as_fields("peer_ip_dst", "peer_ip", "peer_as_dst", "peer_as", value, formatted_record)
+
+        # Drop the flow if either endpoint resolved to a reserved/private/
+        # unknown ASN -- same intent as the old Logstash filter on
+        # [meta][dst_asn] (and the equivalent src_asn check), just run here
+        # instead, as early as possible, before any further lookups/extension
+        # building happen for a flow we're going to discard anyway.
+        if self.drop_reserved_asn and (
+            self.is_reserved_asn(formatted_record.get("src_as_id"))
+            or self.is_reserved_asn(formatted_record.get("dst_as_id"))
+        ):
+            self.logger.debug(
+                "Dropping flow with reserved/invalid ASN (src_as_id=%s, dst_as_id=%s)",
+                formatted_record.get("src_as_id"), formatted_record.get("dst_as_id")
+            )
+            return None
 
         # Lookup device id based on IP address
         self.lookup_device(value.get("peer_ip_src", None), formatted_record)
