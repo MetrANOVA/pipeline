@@ -898,6 +898,13 @@ class TestPMAcctFlowProcessorReservedAsnFilter(unittest.TestCase):
             'as_dst': as_dst,
         }
 
+    def _enabled_processor(self):
+        """A processor with the filter explicitly turned on -- it's off by
+        default, so tests exercising drop behavior need this instead of
+        self.processor."""
+        with patch.dict(os.environ, {'CLICKHOUSE_FLOW_DROP_RESERVED_ASN': 'true'}):
+            return PMAcctFlowProcessor(self.mock_pipeline)
+
     def test_is_reserved_asn_true_cases(self):
         reserved = [
             None, 0, 4294967295, 23456,
@@ -915,52 +922,61 @@ class TestPMAcctFlowProcessorReservedAsnFilter(unittest.TestCase):
             with self.subTest(asn=asn):
                 self.assertFalse(self.processor.is_reserved_asn(asn))
 
-    def test_drop_reserved_asn_enabled_by_default(self):
-        self.assertTrue(self.processor.drop_reserved_asn)
+    def test_drop_reserved_asn_disabled_by_default(self):
+        """Filter is opt-in -- matches the rest of this pipeline's behavior
+        unless CLICKHOUSE_FLOW_DROP_RESERVED_ASN is explicitly turned on."""
+        self.assertFalse(self.processor.drop_reserved_asn)
+
+    def test_build_message_not_dropped_when_filter_disabled_by_default(self):
+        """With the filter at its default (off), even a reserved dst ASN
+        passes through untouched."""
+        result = self.processor.build_message(self._base_value(7922, 65001), {})
+        self.assertIsNotNone(result)
 
     def test_build_message_valid_both_asns_not_dropped(self):
-        result = self.processor.build_message(self._base_value(7922, 15169), {})
+        result = self._enabled_processor().build_message(self._base_value(7922, 15169), {})
         self.assertIsNotNone(result)
 
     def test_build_message_dropped_when_dst_asn_zero(self):
         """Equivalent of the Logstash filter's [meta][dst_asn] == 0 check."""
-        result = self.processor.build_message(self._base_value(7922, 0), {})
+        result = self._enabled_processor().build_message(self._base_value(7922, 0), {})
         self.assertIsNone(result)
 
     def test_build_message_dropped_when_dst_asn_reserved(self):
         """Equivalent of the Logstash filter's [meta][dst_asn] == 4294967295 check."""
-        result = self.processor.build_message(self._base_value(7922, 4294967295), {})
+        result = self._enabled_processor().build_message(self._base_value(7922, 4294967295), {})
         self.assertIsNone(result)
 
     def test_build_message_dropped_when_dst_asn_as_trans(self):
         """Equivalent of the Logstash filter's [meta][dst_asn] == 23456 check."""
-        result = self.processor.build_message(self._base_value(7922, 23456), {})
+        result = self._enabled_processor().build_message(self._base_value(7922, 23456), {})
         self.assertIsNone(result)
 
     def test_build_message_dropped_when_dst_asn_16bit_private_use(self):
         """Equivalent of the Logstash filter's 64512 <= dst_asn <= 65534 check."""
-        result = self.processor.build_message(self._base_value(7922, 65001), {})
+        result = self._enabled_processor().build_message(self._base_value(7922, 65001), {})
         self.assertIsNone(result)
 
     def test_build_message_dropped_when_dst_asn_32bit_private_use(self):
         """Equivalent of the Logstash filter's 4200000000 <= dst_asn <= 4294967294 check."""
-        result = self.processor.build_message(self._base_value(7922, 4200000001), {})
+        result = self._enabled_processor().build_message(self._base_value(7922, 4200000001), {})
         self.assertIsNone(result)
 
     def test_build_message_dropped_when_src_asn_reserved(self):
         """Same checks apply to src_asn, not just dst_asn."""
-        result = self.processor.build_message(self._base_value(65001, 15169), {})
+        result = self._enabled_processor().build_message(self._base_value(65001, 15169), {})
         self.assertIsNone(result)
 
     def test_build_message_dropped_when_src_asn_missing(self):
         value = self._base_value(7922, 15169)
         del value['as_src']
-        result = self.processor.build_message(value, {})
+        result = self._enabled_processor().build_message(value, {})
         self.assertIsNone(result)
 
     @patch.dict(os.environ, {'CLICKHOUSE_FLOW_DROP_RESERVED_ASN': 'false'})
-    def test_build_message_not_dropped_when_filter_disabled(self):
-        """CLICKHOUSE_FLOW_DROP_RESERVED_ASN=false turns the filter off entirely."""
+    def test_build_message_not_dropped_when_filter_explicitly_disabled(self):
+        """CLICKHOUSE_FLOW_DROP_RESERVED_ASN=false turns the filter off explicitly,
+        same as leaving it unset (the default)."""
         processor = PMAcctFlowProcessor(self.mock_pipeline)
         self.assertFalse(processor.drop_reserved_asn)
         result = processor.build_message(self._base_value(7922, 65001), {})

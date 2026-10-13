@@ -25,7 +25,7 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         # when its src/dst ASN was unset or one of a handful of IANA-reserved,
         # non-routable values -- see is_reserved_asn() below for the exact
         # values/ranges.
-        self.drop_reserved_asn = os.getenv('CLICKHOUSE_FLOW_DROP_RESERVED_ASN', 'true').lower() in ('true', '1', 'yes')
+        self.drop_reserved_asn = os.getenv('CLICKHOUSE_FLOW_DROP_RESERVED_ASN', 'false').lower() in ('true', '1', 'yes')
 
     def is_reserved_asn(self, asn) -> bool:
         """True if asn is unset or one of the IANA-reserved/private-use AS
