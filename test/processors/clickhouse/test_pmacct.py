@@ -907,9 +907,13 @@ class TestPMAcctFlowProcessorReservedAsnFilter(unittest.TestCase):
 
     def test_is_reserved_asn_true_cases(self):
         reserved = [
-            None, 0, 4294967295, 23456,
+            None, 0, 23456,
+            64496, 64500, 64511,  # 16-bit documentation/sample code range
             64512, 65000, 65534,  # 16-bit private use range
+            65535,  # reserved (RFC 7300)
+            65536, 65540, 65551,  # 32-bit documentation/sample code range
             4200000000, 4294967000, 4294967294,  # 32-bit private use range
+            4294967295,
             'not-a-number',
         ]
         for asn in reserved:
@@ -917,7 +921,13 @@ class TestPMAcctFlowProcessorReservedAsnFilter(unittest.TestCase):
                 self.assertTrue(self.processor.is_reserved_asn(asn))
 
     def test_is_reserved_asn_false_cases(self):
-        valid = [7922, 15169, 1, 64511, 65535, 4199999999]
+        valid = [
+            7922, 15169, 1,
+            64495,  # just below the 16-bit documentation range
+            65552,  # just above the 32-bit documentation range
+            4199999999,  # just below the 32-bit private use range
+            112,  # AS112 project -- real/routed, deliberately not dropped
+        ]
         for asn in valid:
             with self.subTest(asn=asn):
                 self.assertFalse(self.processor.is_reserved_asn(asn))

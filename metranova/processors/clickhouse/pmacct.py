@@ -28,13 +28,21 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         self.drop_reserved_asn = os.getenv('CLICKHOUSE_FLOW_DROP_RESERVED_ASN', 'false').lower() in ('true', '1', 'yes')
 
     def is_reserved_asn(self, asn) -> bool:
-        """True if asn is unset or one of the IANA-reserved/private-use AS
-        numbers that never identifies a real organization:
-          - 0 (unknown/unassigned)
-          - 4294967295 / 0xFFFFFFFF (reserved, RFC 7300)
+        """True if asn is unset or one of the IANA Special-Purpose AS Numbers
+        (https://www.iana.org/assignments/iana-as-numbers-special-registry/)
+        that never identifies a real organization:
+          - 0 (reserved, RFC 7607)
           - 23456 (AS_TRANS, RFC 6793 16-bit/32-bit transition marker)
+          - 64496-64511 (16-bit documentation/sample code, RFC 5398)
           - 64512-65534 (16-bit private use, RFC 6996)
+          - 65535 (reserved, RFC 7300)
+          - 65536-65551 (32-bit documentation/sample code, RFC 5398)
           - 4200000000-4294967294 (32-bit private use, RFC 6996)
+          - 4294967295 / 0xFFFFFFFF (reserved, RFC 7300)
+
+        Deliberately NOT included: AS 112 -- unlike the rest of this list,
+        it's a real, actively-routed AS (the AS112 project, RFC 7534), not an
+        unroutable/private/invalid one.
         """
         if asn is None:
             return True
@@ -44,10 +52,13 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             return True
         return (
             asn == 0
-            or asn == 4294967295
             or asn == 23456
+            or 64496 <= asn <= 64511
             or 64512 <= asn <= 65534
+            or asn == 65535
+            or 65536 <= asn <= 65551
             or 4200000000 <= asn <= 4294967294
+            or asn == 4294967295
         )
 
     def add_bgp_extensions(self, value: dict, ext: dict):
