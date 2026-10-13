@@ -99,6 +99,7 @@ This document describes all environment variables used by the MetrANOVA Pipeline
 | `CLICKHOUSE_FLOW_IP_TO_AS_LOOKUP_ORDER` | `meta_ip` | Comma-separated preference order of IP metadata tables to use for AS lookups when AS is not provided in flow record (e.g., `meta_ip,meta_ip_scireg,meta_ip_cric`) |
 | `CLICKHOUSE_FLOW_POLICY_AUTO_SCOPES` | `true` | Automatically determine policy scopes from BGP communities |
 | `CLICKHOUSE_FLOW_POLICY_COMMUNITY_SCOPE_MAP` | (none) | Map BGP communities to policy scopes (format: `community:scope,community:scope`) |
+| `CLICKHOUSE_FLOW_DROP_RESERVED_ASN` | `true` | Drop a flow (PMAcctFlowProcessor only) when its resolved src or dst AS number is unset or one of a handful of IANA-reserved/private-use values that never identify a real organization: `0`, `4294967295`, `23456` (AS_TRANS), `64512`-`65534` (16-bit private use), or `4200000000`-`4294967294` (32-bit private use) |
 
 ## ClickHouse Materialized Views
 
