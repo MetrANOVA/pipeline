@@ -1,7 +1,10 @@
 import logging
 import os
 
-from metranova.processors.clickhouse.base import BaseMetadataProcessor
+from metranova.processors.clickhouse.base import (
+    BaseMetadataProcessor,
+    BaseClickHouseDictionaryMixin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,3 +28,31 @@ class OrganizationMetadataProcessor(BaseMetadataProcessor):
         ])
         self.val_id_field = ['id']
         self.required_fields = [['id'], ['name']]
+
+        # Build a ClickHouse dictionary for id -> name lookups, same idea as
+        # ASDictionary in as.py. id is a String (not numeric) here, so this
+        # needs COMPLEX_KEY_HASHED() rather than the plain HASHED() layout
+        # ASDictionary uses -- otherwise it's the same simple exact-match
+        # pattern (no array flattening needed, unlike scireg/community's
+        # IP_TRIE dictionaries).
+        self.dictionary_enabled = os.getenv('CLICKHOUSE_ORGANIZATION_DICTIONARY_ENABLED', 'true').lower() in ('true', '1', 'yes')
+        if self.dictionary_enabled:
+            self.ch_dictionaries.append(OrganizationDictionary(self.table))
+
+
+class OrganizationDictionary(BaseClickHouseDictionaryMixin):
+    def __init__(self, source_table_name: str):
+        super().__init__(source_table_name)
+        self.dictionary_name = os.getenv('CLICKHOUSE_ORGANIZATION_DICTIONARY_NAME', 'meta_organization_dict')
+        self.column_defs = [
+            ['id', 'String'],
+            ['name', 'String']
+        ]
+        self.primary_keys = ["id"]
+        #miniumum and maximum lifetime in seconds
+        self.lifetime_min = os.getenv('CLICKHOUSE_ORGANIZATION_DICTIONARY_LIFETIME_MIN', "600")
+        self.lifetime_max = os.getenv('CLICKHOUSE_ORGANIZATION_DICTIONARY_LIFETIME_MAX', "3600")
+        #set the layout, will be the full layout definition
+        #note: id is a non-numeric String primary key, so this dictionary needs
+        #a "complex key" layout rather than the plain HASHED() ASDictionary uses
+        self.layout = "COMPLEX_KEY_HASHED()"

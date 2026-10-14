@@ -11,7 +11,10 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
-from metranova.processors.clickhouse.organization import OrganizationMetadataProcessor
+from metranova.processors.clickhouse.organization import (
+    OrganizationMetadataProcessor,
+    OrganizationDictionary,
+)
 
 
 class TestOrganizationMetadataProcessor(unittest.TestCase):
@@ -421,6 +424,76 @@ class TestOrganizationMetadataProcessor(unittest.TestCase):
                 else:  # None or missing
                     self.assertIn('latitude', record)
                     self.assertIn('longitude', record)
+
+    def test_dictionary_enabled_by_default(self):
+        """Test that the organization dictionary is enabled by default."""
+        processor = OrganizationMetadataProcessor(self.mock_pipeline)
+
+        self.assertTrue(processor.dictionary_enabled)
+        self.assertEqual(len(processor.ch_dictionaries), 1)
+        self.assertIsInstance(processor.ch_dictionaries[0], OrganizationDictionary)
+
+    @patch.dict(os.environ, {'CLICKHOUSE_ORGANIZATION_DICTIONARY_ENABLED': 'false'})
+    def test_dictionary_disabled_by_env(self):
+        """Test that the dictionary can be disabled via environment variable."""
+        processor = OrganizationMetadataProcessor(self.mock_pipeline)
+
+        self.assertFalse(processor.dictionary_enabled)
+        self.assertEqual(len(processor.ch_dictionaries), 0)
+
+    def test_dictionary_receives_table_name(self):
+        """Test that OrganizationDictionary is sourced directly from the raw meta_organization table."""
+        with patch.dict(os.environ, {'CLICKHOUSE_ORGANIZATION_METADATA_TABLE': 'custom_organization_table'}):
+            processor = OrganizationMetadataProcessor(self.mock_pipeline)
+            dictionary = processor.ch_dictionaries[0]
+            self.assertEqual(dictionary.source_table_name, 'custom_organization_table')
+
+
+class TestOrganizationDictionary(unittest.TestCase):
+    """Unit tests for OrganizationDictionary class."""
+
+    def setUp(self):
+        self.source_table = 'meta_organization'
+
+    def test_init_default_values(self):
+        dictionary = OrganizationDictionary(self.source_table)
+
+        self.assertEqual(dictionary.source_table_name, self.source_table)
+        self.assertEqual(dictionary.dictionary_name, 'meta_organization_dict')
+        expected_columns = [
+            ['id', 'String'],
+            ['name', 'String']
+        ]
+        self.assertEqual(dictionary.column_defs, expected_columns)
+        self.assertEqual(dictionary.primary_keys, ['id'])
+        self.assertEqual(dictionary.lifetime_min, '600')
+        self.assertEqual(dictionary.lifetime_max, '3600')
+        self.assertEqual(dictionary.layout, "COMPLEX_KEY_HASHED()")
+
+    @patch.dict(os.environ, {'CLICKHOUSE_ORGANIZATION_DICTIONARY_NAME': 'custom_org_dict'})
+    def test_init_with_custom_dictionary_name(self):
+        dictionary = OrganizationDictionary(self.source_table)
+        self.assertEqual(dictionary.dictionary_name, 'custom_org_dict')
+
+    @patch.dict(os.environ, {
+        'CLICKHOUSE_ORGANIZATION_DICTIONARY_LIFETIME_MIN': '300',
+        'CLICKHOUSE_ORGANIZATION_DICTIONARY_LIFETIME_MAX': '1800'
+    })
+    def test_init_with_custom_lifetime(self):
+        dictionary = OrganizationDictionary(self.source_table)
+        self.assertEqual(dictionary.lifetime_min, '300')
+        self.assertEqual(dictionary.lifetime_max, '1800')
+
+    def test_create_dictionary_command(self):
+        dictionary = OrganizationDictionary(self.source_table)
+        command = dictionary.create_dictionary_command()
+
+        self.assertIn("CREATE DICTIONARY IF NOT EXISTS meta_organization_dict", command)
+        self.assertIn("`id` String", command)
+        self.assertIn("`name` String", command)
+        self.assertIn("PRIMARY KEY (`id`)", command)
+        self.assertIn("SOURCE(CLICKHOUSE(TABLE 'meta_organization'", command)
+        self.assertIn("LAYOUT(COMPLEX_KEY_HASHED())", command)
 
 
 if __name__ == '__main__':
