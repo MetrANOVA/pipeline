@@ -242,12 +242,21 @@ class FlowStitchingProcessor(BaseDataProcessor):
         self._lock = threading.Lock()
         self._flows: Dict[Tuple, Dict[str, Any]] = {}
 
+        self._sweep_count = 0
+
         self._sweep_thread = None
         if self.enabled:
+            logger.info(
+                "Flow stitching: enabled (table=%s, sweep_interval=%ss, "
+                "inactivity_timeout=%ss, max_flow_timeout=%ss)",
+                self.table, self.sweep_interval, self.inactivity_timeout, self.max_flow_timeout,
+            )
             self._sweep_thread = threading.Thread(
                 target=self._sweep_loop, name="FlowStitchingSweep", daemon=True
             )
             self._sweep_thread.start()
+        else:
+            logger.info("Flow stitching: disabled (CLICKHOUSE_FLOW_STITCH_ENABLED is not true)")
 
     def set_clickhouse_client(self, client) -> None:
         self._client = client
@@ -393,12 +402,28 @@ class FlowStitchingProcessor(BaseDataProcessor):
         return completed
 
     def _sweep_loop(self) -> None:
+        self.logger.info("Flow stitching: sweep thread started")
+        heartbeat_every = max(1, int(600 / self.sweep_interval)) if self.sweep_interval > 0 else 1
         while True:
             time.sleep(self.sweep_interval)
             try:
-                self._sweep_once()
+                completed = self._sweep_once()
+                self._sweep_count += 1
+                with self._lock:
+                    in_flight = len(self._flows)
+                if self._sweep_count % heartbeat_every == 0:
+                    self.logger.info(
+                        "Flow stitching: heartbeat -- sweep #%d, %d flow(s) in-flight, "
+                        "%d completed this tick",
+                        self._sweep_count, in_flight, len(completed),
+                    )
+                else:
+                    self.logger.debug(
+                        "Flow stitching: sweep #%d, %d flow(s) in-flight, %d completed this tick",
+                        self._sweep_count, in_flight, len(completed),
+                    )
             except Exception as e:
-                self.logger.error(f"Flow stitching sweep failed: {e}")
+                self.logger.error(f"Flow stitching sweep failed: {e}", exc_info=True)
 
     def _write_rows(self, rows: List[Dict[str, Any]]) -> None:
         if self._client is None:
@@ -412,7 +437,7 @@ class FlowStitchingProcessor(BaseDataProcessor):
             self._client.insert(table=self.table, data=data, column_names=self.column_names(self.table))
             self.logger.info(f"Flow stitching: wrote {len(rows)} completed flow(s) to {self.table}")
         except Exception as e:
-            self.logger.error(f"Flow stitching: failed to write completed flows to {self.table}: {e}")
+            self.logger.error(f"Flow stitching: failed to write completed flows to {self.table}: {e}", exc_info=True)
 
     def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
         # Belt-and-suspenders alongside match_message()'s False: never accumulate while
@@ -422,13 +447,18 @@ class FlowStitchingProcessor(BaseDataProcessor):
         try:
             slices = self._slice_processor.build_message(value, msg_metadata)
         except Exception as e:
-            self.logger.error(f"Flow stitching: failed to normalize incoming message: {e}")
+            self.logger.error(f"Flow stitching: failed to normalize incoming message: {e}", exc_info=True)
             return []
         if not slices:
             return []
         with self._lock:
             for slice_row in slices:
                 self._accumulate(self._fingerprint(slice_row), slice_row)
+            in_flight = len(self._flows)
+        self.logger.debug(
+            "Flow stitching: absorbed %d slice(s), %d flow(s) now in-flight",
+            len(slices), in_flight,
+        )
         # Completed flows are written directly to ClickHouse by the background sweep
         # thread (_sweep_loop), not returned here -- every incoming slice is absorbed.
         return []
