@@ -403,10 +403,6 @@ class FlowStitchingProcessor(BaseDataProcessor):
 
     def _sweep_loop(self) -> None:
         self.logger.info("Flow stitching: sweep thread started")
-        # ~1 minute between heartbeat lines at INFO -- doesn't change how often the
-        # sweep itself runs (that's always self.sweep_interval); only how often we log
-        # a summary of it. Per-tick detail is always available at DEBUG regardless.
-        heartbeat_every = max(1, int(60 / self.sweep_interval)) if self.sweep_interval > 0 else 1
         while True:
             time.sleep(self.sweep_interval)
             try:
@@ -414,17 +410,13 @@ class FlowStitchingProcessor(BaseDataProcessor):
                 self._sweep_count += 1
                 with self._lock:
                     in_flight = len(self._flows)
-                if self._sweep_count % heartbeat_every == 0:
-                    self.logger.info(
-                        "Flow stitching: heartbeat -- sweep #%d, %d flow(s) in-flight, "
-                        "%d completed this tick",
-                        self._sweep_count, in_flight, len(completed),
-                    )
-                else:
-                    self.logger.debug(
-                        "Flow stitching: sweep #%d, %d flow(s) in-flight, %d completed this tick",
-                        self._sweep_count, in_flight, len(completed),
-                    )
+                # DEBUG only -- fires every sweep_interval forever, so it's not
+                # something production logging should carry at INFO by default. Set
+                # DEBUG=true (see docs/env_vars.md) to watch this live.
+                self.logger.debug(
+                    "Flow stitching: sweep #%d, %d flow(s) in-flight, %d completed this tick",
+                    self._sweep_count, in_flight, len(completed),
+                )
             except Exception as e:
                 self.logger.error(f"Flow stitching sweep failed: {e}", exc_info=True)
 
