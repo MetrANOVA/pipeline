@@ -957,9 +957,24 @@ class TestPMAcctFlowProcessorReservedAsnFilter(unittest.TestCase):
         result = self._enabled_processor().build_message(self._base_value(7922, 4294967295), {})
         self.assertIsNone(result)
 
-    def test_build_message_dropped_when_dst_asn_as_trans(self):
-        """Equivalent of the Logstash filter's [meta][dst_asn] == 23456 check."""
+    def test_build_message_not_dropped_when_only_dst_asn_as_trans(self):
+        """AS_TRANS (23456) on just one side, with a real ASN on the other, is NOT
+        dropped -- unlike every other reserved value. This is the common real-world
+        case: a BGP peering session that can't represent a true 4-byte ASN reports
+        AS_TRANS for an otherwise completely legitimate origin AS, so dropping on a
+        single AS_TRANS endpoint would discard real traffic (see is_as_trans())."""
         result = self._enabled_processor().build_message(self._base_value(7922, 23456), {})
+        self.assertIsNotNone(result)
+
+    def test_build_message_not_dropped_when_only_src_asn_as_trans(self):
+        """Same as above, but AS_TRANS on the src side instead of dst."""
+        result = self._enabled_processor().build_message(self._base_value(23456, 32093), {})
+        self.assertIsNotNone(result)
+
+    def test_build_message_dropped_when_both_asns_as_trans(self):
+        """AS_TRANS on BOTH sides is still dropped -- neither endpoint's ASN
+        resolved to anything, so there's no real ASN info left to preserve."""
+        result = self._enabled_processor().build_message(self._base_value(23456, 23456), {})
         self.assertIsNone(result)
 
     def test_build_message_dropped_when_dst_asn_16bit_private_use(self):
