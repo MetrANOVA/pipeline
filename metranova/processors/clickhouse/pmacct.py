@@ -333,9 +333,12 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             or self.is_reserved_asn(formatted_record.get("dst_as_id"))
         ):
             self.logger.debug(
-                "Dropping flow: reserved/invalid ASN (src=%s as_id=%s, dst=%s as_id=%s)",
-                formatted_record.get("src_ip"), formatted_record.get("src_as_id"),
-                formatted_record.get("dst_ip"), formatted_record.get("dst_as_id"),
+                "Dropping flow: reserved/invalid ASN (src=%s:%s as_id=%s, dst=%s:%s as_id=%s, proto=%s) "
+                "-- NOTE: as_id is an AS number, not a port; e.g. 23456 here means AS_TRANS, "
+                "not port 23456",
+                formatted_record.get("src_ip"), value.get("port_src"), formatted_record.get("src_as_id"),
+                formatted_record.get("dst_ip"), value.get("port_dst"), formatted_record.get("dst_as_id"),
+                value.get("ip_proto"),
             )
             return None
 
