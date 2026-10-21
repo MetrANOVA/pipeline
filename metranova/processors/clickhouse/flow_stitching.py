@@ -403,7 +403,10 @@ class FlowStitchingProcessor(BaseDataProcessor):
 
     def _sweep_loop(self) -> None:
         self.logger.info("Flow stitching: sweep thread started")
-        heartbeat_every = max(1, int(600 / self.sweep_interval)) if self.sweep_interval > 0 else 1
+        # ~1 minute between heartbeat lines at INFO -- doesn't change how often the
+        # sweep itself runs (that's always self.sweep_interval); only how often we log
+        # a summary of it. Per-tick detail is always available at DEBUG regardless.
+        heartbeat_every = max(1, int(60 / self.sweep_interval)) if self.sweep_interval > 0 else 1
         while True:
             time.sleep(self.sweep_interval)
             try:
