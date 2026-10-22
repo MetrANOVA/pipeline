@@ -377,6 +377,13 @@ class FlowStitchingProcessor(BaseDataProcessor):
                 # bytes against CLICKHOUSE_FLOW_STITCH_MIN_BYTES. self.min_bytes == 0 (the
                 # default) always passes, so nothing is filtered unless explicitly configured.
                 if row["bit_count"] // 8 < self.min_bytes:
+                    self.logger.debug(
+                        "Flow stitching: dropping flow: below CLICKHOUSE_FLOW_STITCH_MIN_BYTES=%d "
+                        "bytes (src=%s:%s dst=%s:%s proto=%s bytes=%d duration=%.3fs flow_count=%d)",
+                        self.min_bytes, row.get("src_ip"), row.get("src_port"),
+                        row.get("dst_ip"), row.get("dst_port"), row.get("protocol"),
+                        row["bit_count"] // 8, row["duration"], row.get("flow_count", 0),
+                    )
                     dropped_bytes += 1
                     continue
                 # duration <= CLICKHOUSE_FLOW_STITCH_MIN_DURATION (default 0.1s) filters
@@ -384,6 +391,14 @@ class FlowStitchingProcessor(BaseDataProcessor):
                 # filter entirely (including for a literal duration-0 flow), same
                 # "0 means off" convention as CLICKHOUSE_FLOW_STITCH_MIN_BYTES.
                 if self.min_duration > 0 and row["duration"] <= self.min_duration:
+                    self.logger.debug(
+                        "Flow stitching: dropping flow: duration %.3fs <= "
+                        "CLICKHOUSE_FLOW_STITCH_MIN_DURATION=%.3fs (src=%s:%s dst=%s:%s proto=%s "
+                        "bytes=%d flow_count=%d)",
+                        row["duration"], self.min_duration, row.get("src_ip"), row.get("src_port"),
+                        row.get("dst_ip"), row.get("dst_port"), row.get("protocol"),
+                        row["bit_count"] // 8, row.get("flow_count", 0),
+                    )
                     dropped_duration += 1
                     continue
                 completed.append(row)
