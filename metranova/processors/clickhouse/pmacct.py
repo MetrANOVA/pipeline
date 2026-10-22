@@ -43,12 +43,6 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         Deliberately NOT included: AS 112 -- unlike the rest of this list,
         it's a real, actively-routed AS (the AS112 project, RFC 7534), not an
         unroutable/private/invalid one.
-
-        NOTE: AS_TRANS (23456) gets special handling in build_message() -- see
-        is_as_trans() below -- so it's still included here for
-        is_reserved_asn()'s own general-purpose meaning ("would never identify
-        a real organization on its own"), but the drop decision itself treats
-        it differently from the rest of this list.
         """
         if asn is None:
             return True
@@ -66,25 +60,6 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             or 4200000000 <= asn <= 4294967294
             or asn == 4294967295
         )
-
-    def is_as_trans(self, asn) -> bool:
-        """True if asn is exactly 23456 (AS_TRANS, RFC 6793).
-
-        Unlike the rest of is_reserved_asn()'s list, AS_TRANS routinely shows
-        up on otherwise completely legitimate traffic: it's the placeholder a
-        BGP speaker uses in the AS path when it can't represent a true 4-byte
-        ASN (e.g. a peering session that doesn't negotiate RFC 6793 support),
-        not a sign the traffic itself is bogus. A single AS_TRANS endpoint
-        next to an otherwise-valid ASN on the other side is a strong signal
-        of exactly that -- the real ASN just didn't resolve -- so
-        build_message() only treats AS_TRANS as a drop signal when BOTH
-        endpoints hit it; any other reserved/private/unknown value on either
-        side alone is still enough to drop (see is_reserved_asn()).
-        """
-        try:
-            return int(asn) == 23456
-        except (TypeError, ValueError):
-            return False
 
     def add_bgp_extensions(self, value: dict, ext: dict):
         ########### BGP Extensions ############
@@ -353,19 +328,20 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         # [meta][dst_asn] (and the equivalent src_asn check), just run here
         # instead, as early as possible, before any further lookups/extension
         # building happen for a flow we're going to discard anyway.
+        #
+        # NOTE: an earlier version of this code gave AS_TRANS (23456) special
+        # treatment -- only dropping when BOTH sides hit it, on the theory that
+        # a single AS_TRANS endpoint usually means a real ASN that just didn't
+        # resolve via BGP. In practice that let through more unwanted traffic
+        # than intended, so it's back to treating AS_TRANS the same as every
+        # other value in is_reserved_asn(): a reserved/private/unknown ASN on
+        # either side alone is enough to drop.
         src_as_id = formatted_record.get("src_as_id")
         dst_as_id = formatted_record.get("dst_as_id")
-        src_reserved = self.is_reserved_asn(src_as_id)
-        dst_reserved = self.is_reserved_asn(dst_as_id)
-        # A reserved/private/unknown ASN on either side alone is enough to drop,
-        # *unless* it's specifically AS_TRANS -- that one only counts when BOTH
-        # sides hit it (see is_as_trans()'s docstring for why).
-        should_drop = (
-            (src_reserved and not self.is_as_trans(src_as_id))
-            or (dst_reserved and not self.is_as_trans(dst_as_id))
-            or (self.is_as_trans(src_as_id) and self.is_as_trans(dst_as_id))
-        )
-        if self.drop_reserved_asn and should_drop:
+        if self.drop_reserved_asn and (
+            self.is_reserved_asn(src_as_id)
+            or self.is_reserved_asn(dst_as_id)
+        ):
             self.logger.debug(
                 "Dropping flow: reserved/invalid ASN (src=%s:%s as_id=%s, dst=%s:%s as_id=%s, proto=%s)",
                 formatted_record.get("src_ip"), value.get("port_src"), formatted_record.get("src_as_id"),
