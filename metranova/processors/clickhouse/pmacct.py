@@ -282,6 +282,14 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
     def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
         # check required fields
         if not self.has_required_fields(value):
+            # has_required_fields() already logged which field at ERROR -- this just
+            # tags it with the common "Dropping flow:" prefix other drop reasons use,
+            # so grepping for that phrase finds every drop reason in one place.
+            self.logger.debug(
+                "Dropping flow: missing required field(s) (see preceding error for which field; "
+                "raw keys=%s)",
+                sorted(value.keys()) if isinstance(value, dict) else type(value).__name__,
+            )
             return None
         #check time fields:
         # - nfacctd will have timestamp_start and timestamp_end
@@ -292,7 +300,11 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             value["timestamp_end"] = value["timestamp_arrival"]
         elif value.get("timestamp_start", None) is None:
             # if no start (and already checked for arrival), then we can't process this record
-            self.logger.debug("Missing timestamp fields in flow record")
+            self.logger.debug(
+                "Dropping flow: missing timestamp fields (src=%s:%s dst=%s:%s proto=%s)",
+                value.get("ip_src"), value.get("port_src"),
+                value.get("ip_dst"), value.get("port_dst"), value.get("ip_proto"),
+            )
             return None
         elif value.get("timestamp_end", None) is None:
             #just in case end is not specified, set it to start - probably should not happen
@@ -321,8 +333,9 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             or self.is_reserved_asn(formatted_record.get("dst_as_id"))
         ):
             self.logger.debug(
-                "Dropping flow with reserved/invalid ASN (src_as_id=%s, dst_as_id=%s)",
-                formatted_record.get("src_as_id"), formatted_record.get("dst_as_id")
+                "Dropping flow: reserved/invalid ASN (src=%s as_id=%s, dst=%s as_id=%s)",
+                formatted_record.get("src_ip"), formatted_record.get("src_as_id"),
+                formatted_record.get("dst_ip"), formatted_record.get("dst_as_id"),
             )
             return None
 
@@ -361,7 +374,13 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             start_time = int(float(value.get("timestamp_start", 0)) * 1000)
             end_time = int(float(value.get("timestamp_end", 0)) * 1000)
         except (ValueError, TypeError):
-            self.logger.debug("Invalid timestamp format in flow record")
+            self.logger.debug(
+                "Dropping flow: invalid timestamp format (src=%s:%s dst=%s:%s proto=%s "
+                "timestamp_start=%r timestamp_end=%r)",
+                formatted_record.get("src_ip"), src_port,
+                formatted_record.get("dst_ip"), dst_port, value.get("ip_proto"),
+                value.get("timestamp_start"), value.get("timestamp_end"),
+            )
             return None
 
         # Build extension fields
