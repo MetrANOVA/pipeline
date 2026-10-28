@@ -1,4 +1,5 @@
 import logging
+import os
 import orjson
 from typing import Any, Dict, Iterator
 from metranova.processors.clickhouse.flow import BaseFlowProcessor
@@ -20,6 +21,45 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             ['port_dst'],
             ['ip_proto']
         ]
+        # Equivalent of the pre-pipeline Logstash filter that dropped a flow
+        # when its src/dst ASN was unset or one of a handful of IANA-reserved,
+        # non-routable values -- see is_reserved_asn() below for the exact
+        # values/ranges.
+        self.drop_reserved_asn = os.getenv('CLICKHOUSE_FLOW_DROP_RESERVED_ASN', 'false').lower() in ('true', '1', 'yes')
+
+    def is_reserved_asn(self, asn) -> bool:
+        """True if asn is unset or one of the IANA Special-Purpose AS Numbers
+        (https://www.iana.org/assignments/iana-as-numbers-special-registry/)
+        that never identifies a real organization:
+          - 0 (reserved, RFC 7607)
+          - 23456 (AS_TRANS, RFC 6793 16-bit/32-bit transition marker)
+          - 64496-64511 (16-bit documentation/sample code, RFC 5398)
+          - 64512-65534 (16-bit private use, RFC 6996)
+          - 65535 (reserved, RFC 7300)
+          - 65536-65551 (32-bit documentation/sample code, RFC 5398)
+          - 4200000000-4294967294 (32-bit private use, RFC 6996)
+          - 4294967295 / 0xFFFFFFFF (reserved, RFC 7300)
+
+        Deliberately NOT included: AS 112 -- unlike the rest of this list,
+        it's a real, actively-routed AS (the AS112 project, RFC 7534), not an
+        unroutable/private/invalid one.
+        """
+        if asn is None:
+            return True
+        try:
+            asn = int(asn)
+        except (TypeError, ValueError):
+            return True
+        return (
+            asn == 0
+            or asn == 23456
+            or 64496 <= asn <= 64511
+            or 64512 <= asn <= 65534
+            or asn == 65535
+            or 65536 <= asn <= 65551
+            or 4200000000 <= asn <= 4294967294
+            or asn == 4294967295
+        )
 
     def add_bgp_extensions(self, value: dict, ext: dict):
         ########### BGP Extensions ############
@@ -242,6 +282,14 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
     def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
         # check required fields
         if not self.has_required_fields(value):
+            # has_required_fields() already logged which field at ERROR -- this just
+            # tags it with the common "Dropping flow:" prefix other drop reasons use,
+            # so grepping for that phrase finds every drop reason in one place.
+            self.logger.debug(
+                "Dropping flow: missing required field(s) (see preceding error for which field; "
+                "raw keys=%s)",
+                sorted(value.keys()) if isinstance(value, dict) else type(value).__name__,
+            )
             return None
         #check time fields:
         # - nfacctd will have timestamp_start and timestamp_end
@@ -252,7 +300,11 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             value["timestamp_end"] = value["timestamp_arrival"]
         elif value.get("timestamp_start", None) is None:
             # if no start (and already checked for arrival), then we can't process this record
-            self.logger.debug("Missing timestamp fields in flow record")
+            self.logger.debug(
+                "Dropping flow: missing timestamp fields (src=%s:%s dst=%s:%s proto=%s)",
+                value.get("ip_src"), value.get("port_src"),
+                value.get("ip_dst"), value.get("port_dst"), value.get("ip_proto"),
+            )
             return None
         elif value.get("timestamp_end", None) is None:
             #just in case end is not specified, set it to start - probably should not happen
@@ -270,6 +322,33 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         self.lookup_ip_as_fields("ip_src", "src_ip", "as_src", "src_as", value, formatted_record)
         self.lookup_ip_as_fields("ip_dst", "dst_ip", "as_dst", "dst_as", value, formatted_record)
         self.lookup_ip_as_fields("peer_ip_dst", "peer_ip", "peer_as_dst", "peer_as", value, formatted_record)
+
+        # Drop the flow if either endpoint resolved to a reserved/private/
+        # unknown ASN -- same intent as the old Logstash filter on
+        # [meta][dst_asn] (and the equivalent src_asn check), just run here
+        # instead, as early as possible, before any further lookups/extension
+        # building happen for a flow we're going to discard anyway.
+        #
+        # NOTE: an earlier version of this code gave AS_TRANS (23456) special
+        # treatment -- only dropping when BOTH sides hit it, on the theory that
+        # a single AS_TRANS endpoint usually means a real ASN that just didn't
+        # resolve via BGP. In practice that let through more unwanted traffic
+        # than intended, so it's back to treating AS_TRANS the same as every
+        # other value in is_reserved_asn(): a reserved/private/unknown ASN on
+        # either side alone is enough to drop.
+        src_as_id = formatted_record.get("src_as_id")
+        dst_as_id = formatted_record.get("dst_as_id")
+        if self.drop_reserved_asn and (
+            self.is_reserved_asn(src_as_id)
+            or self.is_reserved_asn(dst_as_id)
+        ):
+            self.logger.debug(
+                "Dropping flow: reserved/invalid ASN (src=%s:%s as_id=%s, dst=%s:%s as_id=%s, proto=%s)",
+                formatted_record.get("src_ip"), value.get("port_src"), formatted_record.get("src_as_id"),
+                formatted_record.get("dst_ip"), value.get("port_dst"), formatted_record.get("dst_as_id"),
+                value.get("ip_proto"),
+            )
+            return None
 
         # Lookup device id based on IP address
         self.lookup_device(value.get("peer_ip_src", None), formatted_record)
@@ -306,7 +385,13 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
             start_time = int(float(value.get("timestamp_start", 0)) * 1000)
             end_time = int(float(value.get("timestamp_end", 0)) * 1000)
         except (ValueError, TypeError):
-            self.logger.debug("Invalid timestamp format in flow record")
+            self.logger.debug(
+                "Dropping flow: invalid timestamp format (src=%s:%s dst=%s:%s proto=%s "
+                "timestamp_start=%r timestamp_end=%r)",
+                formatted_record.get("src_ip"), src_port,
+                formatted_record.get("dst_ip"), dst_port, value.get("ip_proto"),
+                value.get("timestamp_start"), value.get("timestamp_end"),
+            )
             return None
 
         # Build extension fields
