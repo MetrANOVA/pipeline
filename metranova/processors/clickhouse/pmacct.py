@@ -2,10 +2,38 @@ import logging
 import orjson
 from typing import Any, Dict, Iterator
 from metranova.processors.clickhouse.flow import BaseFlowProcessor
+from metranova.processors.clickhouse.bmp import BaseBMPRouteProcessor
 
 logger = logging.getLogger(__name__)
 
-class PMAcctFlowProcessor(BaseFlowProcessor):
+class PMAcctUtilMixin:
+    def __init__(self):
+        pass
+
+    def lookup_device(self, device_ip: str, formatted_record: dict):
+        #initialize values
+        device_id = "unknown"
+        device_ref = None
+        if device_ip:
+            #if we have an ip, at a minimum device_id should be that
+            device_id = device_ip
+            device_details = self.pipeline.cacher("clickhouse").lookup("meta_device:@loopback_ip", device_ip)
+            if device_details:
+                #if we got this far, set to id of fallback to ip
+                device_id = device_details.get("id", device_id)
+                device_ref = device_details.get("ref", None)
+        formatted_record["device_id"] = device_id
+        formatted_record["device_ref"] = device_ref
+
+    def lookup_ip(self, ip_field: str, target_ip_field: str, value: dict, formatted_record: dict):
+        formatted_record[target_ip_field] = value.get(ip_field, None)
+        ip_cache_result = self.pipeline.cacher("ip").lookup("meta_ip", formatted_record[target_ip_field])
+        if ip_cache_result:
+            formatted_record[f"{target_ip_field}_ref"] = ip_cache_result[0]
+        else:
+            formatted_record[f"{target_ip_field}_ref"] = None
+
+class PMAcctFlowProcessor(BaseFlowProcessor, PMAcctUtilMixin):
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.flow_type_map = {
@@ -224,21 +252,6 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         formatted_record[f"{direction}_interface_ref"] = interface_ref
         formatted_record[f"{direction}_interface_edge"] = interface_edge
 
-    def lookup_device(self, device_ip: str, formatted_record: dict):
-        #initialize values
-        device_id = "unknown"
-        device_ref = None
-        if device_ip:
-            #if we have an ip, at a minimum device_id should be that
-            device_id = device_ip
-            device_details = self.pipeline.cacher("clickhouse").lookup("meta_device:@loopback_ip", device_ip)
-            if device_details:
-                #if we got this far, set to id of fallback to ip
-                device_id = device_details.get("id", device_id)
-                device_ref = device_details.get("ref", None)
-        formatted_record["device_id"] = device_id
-        formatted_record["device_ref"] = device_ref
-
     def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
         # check required fields
         if not self.has_required_fields(value):
@@ -367,4 +380,141 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
 
         # expects a list returned (there are cases that aren;t this where you produce multiple records)
         # just wraps our one dict in an array
+        return [formatted_record]
+
+class PMAcctBMPRouteProcessor(BaseBMPRouteProcessor, PMAcctUtilMixin):
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        self.required_fields = [
+            ['bmp_router'], 
+            ['event_type'],
+            ['bmp_msg_type'],
+            ['log_type'],
+            ['timestamp'],
+            ['timestamp_arrival']
+
+        ]
+
+    def match_message(self, value):
+        if value.get("bmp_msg_type", "") != "route_monitor":
+            return False
+        return super().match_message(value)
+
+    def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
+        # check required fields
+        if not self.has_required_fields(value):
+            return None
+
+        #init
+        formatted_record = {}
+        ext = {}
+
+        #determine log type
+        formatted_record["action"] = value.get("log_type", None)
+        if formatted_record["action"] in ["update", "withdraw"]:
+            #updates and withdraws require an ip_prefix
+            if not value.get("ip_prefix", None):
+                return None
+        elif formatted_record["action"] == "delete":
+            # no prefix needed, set to ::/0
+            if not value.get("ip_prefix", None):
+                value["ip_prefix"] = "::/0"
+        else:
+            #unknown log_type
+            return None
+        
+        # lookup device
+        self.lookup_device(value.get("bmp_router", ""), formatted_record)
+
+        #lookup ip field
+        self.lookup_ip("ip_prefix", "ip_prefix", value, formatted_record)
+        self.lookup_ip("bgp_nexthop", "bgp_nexthop", value, formatted_record)
+        self.lookup_ip("peer_ip", "peer_ip", value, formatted_record)
+
+        #Parse BGP fields
+        as_path_str = value.get("as_path", "").split(" ")
+        bgp_as_path_id = []
+        bgp_as_path_ref = []
+        for as_str in as_path_str:
+            #convert to int
+            try:
+                asn = int(as_str)
+            except ValueError:
+                continue
+            bgp_as_path_id.append(asn)
+            # lookup AS ref
+            as_info = self.pipeline.cacher("clickhouse").lookup("meta_as", asn)
+            if as_info:
+                bgp_as_path_ref.append(as_info.get("ref", None))
+            else:
+                bgp_as_path_ref.append(None)
+        formatted_record["as_path_id"] = bgp_as_path_id
+
+        # Other BGP fields
+        if value.get("comms", None):
+            formatted_record["community"] = value.get("comms", "").split(" ")
+        else:
+            formatted_record["community"] = []
+        if value.get("ecomms", None):
+            formatted_record["ext_community"] = value.get("ecomms", "").split(" ")
+        else:
+            formatted_record["ext_community"] = []
+        if value.get("local_pref", None) is not None:
+            try:
+                formatted_record["local_pref"] = int(value.get("local_pref"))
+            except ValueError:
+                pass
+        if value.get("med", None) is not None:
+            try:
+                formatted_record["med"] = int(value.get("med"))
+            except ValueError:
+                pass
+
+        # Parse IP prefix a tuple
+        ip_prefix = value.get("ip_prefix") #required so should always return
+        ip_prefix_tuple = tuple(ip_prefix.split("/"))
+        if len(ip_prefix_tuple) == 2:
+            formatted_record["ip_prefix"] = (ip_prefix_tuple[0], int(ip_prefix_tuple[1]))
+        elif ":" in ip_prefix_tuple[0]:
+            #ipv6 address without a prefix length, default to /128
+            formatted_record["ip_prefix"] = (ip_prefix_tuple[0], 128)
+        else:
+            #ipv4 address without a prefix length, default to /32
+            formatted_record["ip_prefix"] = (ip_prefix_tuple[0], 32)
+
+        # set IP version
+        afi = value.get("afi", None)
+        if afi == 1:
+            formatted_record["ip_version"] = 4
+        elif afi == 2:
+            formatted_record["ip_version"] = 6
+        else:
+            formatted_record["ip_version"] = None
+
+        # Update formatted_record with additional fields
+        formatted_record.update({
+            "observation_time": int(float(value.get("timestamp", 0)) * 1000),
+            "export_time": int(float(value.get("timestamp_arrival", 0)) * 1000),
+            "collector_id": value.get("label", None),
+            "policy_originator": "unknown",
+            "policy_level": "unknown",
+            "policy_scope": ["unknown"],
+            "ext": orjson.dumps(ext).decode('utf-8'),
+            "is_in": value.get("is_in", False),
+            "is_out": value.get("is_out", False),
+            "is_post": value.get("is_post", False),
+            "afi": afi,
+            "safi": value.get("safi", None),
+            "as_path_ref": [], #TODO: lookup
+            "origin": value.get("origin", ""),
+            "local_pref": value.get("local_pref", None),
+            "med": value.get("med", None),
+            "rd": value.get("rd", None),
+            "add_path_id": value.get("as_path_id", None),
+            "mpls_label": value.get("mpls_label", None),
+            "aigp": value.get("aigp", None),
+            "psid_li": value.get("psid_li", None),
+            "path_status": value.get("path_status", []),
+            "reason_code": value.get("reason_code", [])
+        })
         return [formatted_record]
