@@ -54,15 +54,25 @@ class BaseBMPRouteProcessor(BaseDataProcessor):
         self.column_defs.append(['path_status', 'Array(LowCardinality(String))', True])
         self.column_defs.append(['reason_code', 'Array(LowCardinality(String))', True])
         self.order_by = ["device_id", "action", "peer_ip", "ip_prefix_range_start", "ip_prefix_range_end", "add_path_id", "observation_time"]
-        self.materialized_views.append(MaterializedViewBMPRouteLatest(source_table_name=self.table))
-        self.views.extend([
-            ViewBMPRouteLatestAdjRIBInPre(),
-            ViewBMPRouteLatestAdjRIBInPost(),
-        ])
+        self.load_materialized_views(
+            'CLICKHOUSE_BMP_ROUTE_MATERIALIZED_VIEWS',
+            MaterializedViewBMPRouteLatest,
+            default='latest',
+        )
+        self.load_views(
+            'CLICKHOUSE_BMP_ROUTE_VIEWS',
+            {
+                'adj_rib_in_pre': ViewBMPRouteLatestAdjRIBInPre,
+                'adj_rib_in_post': ViewBMPRouteLatestAdjRIBInPost,
+            },
+            default='adj_rib_in_pre,adj_rib_in_post',
+        )
 
 
 class MaterializedViewBMPRouteLatest(BaseClickHouseMaterializedViewMixin):
-    def __init__(self, source_table_name: str = ""):
+    def __init__(self, source_table_name: str = "", agg_window: str = ""):
+        if agg_window and agg_window.lower() != 'latest':
+            raise ValueError("MaterializedViewBMPRouteLatest only supports the 'latest' selector")
         super().__init__(source_table_name)
         self.table = 'data_bmp_route_latest'
         self.table_engine = 'AggregatingMergeTree'

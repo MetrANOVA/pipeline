@@ -339,10 +339,15 @@ class BaseClickHouseProcessor(BaseProcessor, BaseClickHouseTableMixin):
         """Return regular views used by this processor."""
         return self.views
 
-    def load_materialized_views(self, env_var_name: str, mv_class: type[BaseClickHouseMaterializedViewMixin]) -> None:
+    def load_materialized_views(
+        self,
+        env_var_name: str,
+        mv_class: type[BaseClickHouseMaterializedViewMixin],
+        default: str = "",
+    ) -> None:
         """Load materialized views from environment variable into self.materialized_views"""
         # Accept a comma separated list of agg windows - e.g. 5m, 12h, 1d, 1w, 3mo, 10y, etc
-        mv_str = os.getenv(env_var_name, None)
+        mv_str = os.getenv(env_var_name, default)
         if not mv_str:
             return
         mv_str = mv_str.strip()
@@ -351,6 +356,22 @@ class BaseClickHouseProcessor(BaseProcessor, BaseClickHouseTableMixin):
             if not agg_window:
                 continue
             self.materialized_views.append(mv_class(source_table_name=self.table, agg_window=agg_window))
+
+    def load_views(
+        self,
+        env_var_name: str,
+        view_classes: dict[str, type[BaseClickHouseViewMixin]],
+        default: str = "",
+    ) -> None:
+        """Load named regular views from a comma-separated environment variable."""
+        configured_names = os.getenv(env_var_name, default)
+        for name in configured_names.split(','):
+            name = name.strip()
+            if not name:
+                continue
+            if name not in view_classes:
+                raise ValueError(f"Unknown view '{name}' in {env_var_name}")
+            self.views.append(view_classes[name]())
 
     def get_ip_ref_extensions(self, env_var_name: str) -> list:
         """Get list of extension names that should have IP reference fields from environment variable"""

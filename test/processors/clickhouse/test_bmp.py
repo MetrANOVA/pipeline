@@ -51,7 +51,10 @@ class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
         self.assertIn('GROUP BY', result)
         self.assertIn('add_path_id,\n                is_post', result)
 
-    @patch.dict('os.environ', {'CLICKHOUSE_BMP_ROUTE_TABLE': 'custom_bmp_route'})
+    @patch.dict('os.environ', {
+        'CLICKHOUSE_BMP_ROUTE_TABLE': 'custom_bmp_route',
+        'CLICKHOUSE_BMP_ROUTE_VIEWS': 'adj_rib_in_pre,adj_rib_in_post',
+    }, clear=True)
     def test_processor_registers_latest_materialized_view(self):
         processor = BaseBMPRouteProcessor(Mock())
 
@@ -83,16 +86,24 @@ class TestBMPRouteLatestViews(unittest.TestCase):
         self.assertIn('WHERE is_post = true', result)
         self.assertIn('GROUP BY', result)
 
-    def test_processor_registers_latest_adj_rib_views(self):
+    @patch.dict('os.environ', {'CLICKHOUSE_BMP_ROUTE_VIEWS': 'adj_rib_in_pre'})
+    def test_processor_loads_configured_adj_rib_views(self):
         processor = BaseBMPRouteProcessor(Mock())
 
         self.assertEqual(
             [view.view_name for view in processor.get_views()],
-            [
-                'data_bmp_route_latest_adj_rib_in_pre_view',
-                'data_bmp_route_latest_adj_rib_in_post_view',
-            ],
+            ['data_bmp_route_latest_adj_rib_in_pre_view'],
         )
+
+    @patch.dict('os.environ', {
+        'CLICKHOUSE_BMP_ROUTE_MATERIALIZED_VIEWS': '',
+        'CLICKHOUSE_BMP_ROUTE_VIEWS': '',
+    })
+    def test_processor_can_disable_latest_views(self):
+        processor = BaseBMPRouteProcessor(Mock())
+
+        self.assertEqual(processor.get_materialized_views(), [])
+        self.assertEqual(processor.get_views(), [])
 
 
 if __name__ == '__main__':
