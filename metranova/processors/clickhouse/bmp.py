@@ -1,7 +1,11 @@
 import orjson
 import os
 from typing import Any, Dict, Iterator
-from metranova.processors.clickhouse.base import BaseClickHouseMaterializedViewMixin, BaseDataProcessor
+from metranova.processors.clickhouse.base import (
+    BaseClickHouseMaterializedViewMixin,
+    BaseClickHouseViewMixin,
+    BaseDataProcessor,
+)
 
 class BaseBMPRouteProcessor(BaseDataProcessor):
 
@@ -51,6 +55,10 @@ class BaseBMPRouteProcessor(BaseDataProcessor):
         self.column_defs.append(['reason_code', 'Array(LowCardinality(String))', True])
         self.order_by = ["device_id", "action", "peer_ip", "ip_prefix_range_start", "ip_prefix_range_end", "add_path_id", "observation_time"]
         self.materialized_views.append(MaterializedViewBMPRouteLatest(source_table_name=self.table))
+        self.views.extend([
+            ViewBMPRouteLatestAdjRIBInPre(),
+            ViewBMPRouteLatestAdjRIBInPost(),
+        ])
 
 
 class MaterializedViewBMPRouteLatest(BaseClickHouseMaterializedViewMixin):
@@ -128,5 +136,56 @@ class MaterializedViewBMPRouteLatest(BaseClickHouseMaterializedViewMixin):
                 add_path_id,
                 is_post
         """
+
+
+class _BaseBMPRouteLatestAdjRIBInView(BaseClickHouseViewMixin):
+    def __init__(self, view_name: str, is_post: bool):
+        super().__init__()
+        self.view_name = view_name
+        self.view_query = f"""
+            SELECT
+                device_id,
+                peer_ip,
+                ip_prefix_address,
+                ip_prefix_length,
+                ip_prefix_range_start,
+                ip_prefix_range_end,
+                add_path_id,
+                argMaxMerge(action_state) AS action,
+                maxMerge(observation_time_state) AS observation_time,
+                argMaxMerge(bgp_nexthop_state) AS bgp_nexthop,
+                argMaxMerge(as_path_id_state) AS as_path_id,
+                argMaxMerge(community_state) AS community,
+                argMaxMerge(ext_community_state) AS ext_community,
+                argMaxMerge(origin_state) AS origin,
+                argMaxMerge(local_pref_state) AS local_pref,
+                argMaxMerge(med_state) AS med,
+                argMaxMerge(rd_state) AS rd,
+                argMaxMerge(afi_state) AS afi,
+                argMaxMerge(safi_state) AS safi,
+                argMaxMerge(ip_version_state) AS ip_version,
+                argMaxMerge(mpls_label_state) AS mpls_label
+            FROM data_bmp_route_latest
+            WHERE is_post = {str(is_post).lower()}
+            GROUP BY
+                device_id,
+                peer_ip,
+                ip_prefix_address,
+                ip_prefix_length,
+                ip_prefix_range_start,
+                ip_prefix_range_end,
+                add_path_id
+            HAVING argMaxMerge(action_state) = 'update'
+        """
+
+
+class ViewBMPRouteLatestAdjRIBInPre(_BaseBMPRouteLatestAdjRIBInView):
+    def __init__(self):
+        super().__init__('data_bmp_route_latest_adj_rib_in_pre_view', is_post=False)
+
+
+class ViewBMPRouteLatestAdjRIBInPost(_BaseBMPRouteLatestAdjRIBInView):
+    def __init__(self):
+        super().__init__('data_bmp_route_latest_adj_rib_in_post_view', is_post=True)
 
 

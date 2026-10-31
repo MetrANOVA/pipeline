@@ -81,6 +81,10 @@ class ClickHouseBatcher:
         for materialized_view in self.processor.get_materialized_views():
             self.create_materialized_view(materialized_view)
 
+        # create regular views after their source tables and materialized views
+        for view in self.processor.get_views():
+            self.create_view(view)
+
         self.processor.set_clickhouse_client(self.client)
 
     def create_table(self, table_name):
@@ -151,6 +155,20 @@ class ClickHouseBatcher:
             logger.error(
                 f"Failed to create materialized view {materialized_view.mv_name}: {e}"
             )
+            raise
+
+    def create_view(self, view):
+        """Create a regular ClickHouse view if it doesn't exist"""
+        create_view_cmd = view.create_view_command()
+        if create_view_cmd is None:
+            logger.info("No create_view_cmd defined, skipping view creation")
+            return
+        try:
+            self.logger.debug(f"Creating view with command: {create_view_cmd}")
+            self.client.command(create_view_cmd)
+            logger.info(f"View {view.view_name} is ready")
+        except Exception as e:
+            logger.error(f"Failed to create view {view.view_name}: {e}")
             raise
 
     def start_flush_timer(self):

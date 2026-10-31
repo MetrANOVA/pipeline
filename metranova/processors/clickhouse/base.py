@@ -232,6 +232,22 @@ class BaseClickHouseMaterializedViewMixin(BaseClickHouseTableMixin):
         
         return policy_level_term, policy_scope_term 
 
+class BaseClickHouseViewMixin(BaseClickHouseTableMixin):
+    """Mixin class for regular ClickHouse view related functionality"""
+    def __init__(self):
+        super().__init__()
+        self.view_name = ""
+        self.view_query = ""
+
+    def create_view_command(self) -> str:
+        """Return the ClickHouse view creation command"""
+        create_view_cmd = f"CREATE VIEW IF NOT EXISTS {self.view_name} "
+        if self.cluster_name:
+            create_view_cmd += f"ON CLUSTER '{self.cluster_name}' "
+        create_view_cmd += f"AS {self.view_query}"
+        return create_view_cmd
+
+
 class BaseClickHouseDictionaryMixin:
     """Mixin class for ClickHouse dictionary related functionality"""
     def __init__(self, source_table_name: str = ""):
@@ -300,6 +316,8 @@ class BaseClickHouseProcessor(BaseProcessor, BaseClickHouseTableMixin):
         self.ch_dictionaries = []
         # List of materailized views to build (as BaseClickHouseMaterializedViewMixin objects)
         self.materialized_views = []
+        # List of regular views to build (as BaseClickHouseViewMixin objects)
+        self.views = []
     
     def set_clickhouse_client(self, client: HttpClient) -> None:
         """Set the ClickHouse client for this processor.
@@ -316,6 +334,10 @@ class BaseClickHouseProcessor(BaseProcessor, BaseClickHouseTableMixin):
     def get_materialized_views(self) -> list:
         """Return list of ClickHouse materialized views used by this processor. Override in child classes if multiple views are used."""
         return self.materialized_views
+
+    def get_views(self) -> list:
+        """Return regular views used by this processor."""
+        return self.views
 
     def load_materialized_views(self, env_var_name: str, mv_class: type[BaseClickHouseMaterializedViewMixin]) -> None:
         """Load materialized views from environment variable into self.materialized_views"""

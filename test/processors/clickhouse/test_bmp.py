@@ -4,6 +4,8 @@ from unittest.mock import Mock, patch
 from metranova.processors.clickhouse.bmp import (
     BaseBMPRouteProcessor,
     MaterializedViewBMPRouteLatest,
+    ViewBMPRouteLatestAdjRIBInPost,
+    ViewBMPRouteLatestAdjRIBInPre,
 )
 
 
@@ -58,6 +60,39 @@ class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
         self.assertIsInstance(materialized_view, MaterializedViewBMPRouteLatest)
         self.assertEqual(materialized_view.source_table_name, 'custom_bmp_route')
         self.assertEqual(materialized_view.table, 'data_bmp_route_latest')
+
+
+class TestBMPRouteLatestViews(unittest.TestCase):
+    def test_pre_policy_view_command(self):
+        view = ViewBMPRouteLatestAdjRIBInPre()
+
+        result = view.create_view_command()
+
+        self.assertIn('CREATE VIEW IF NOT EXISTS data_bmp_route_latest_adj_rib_in_pre_view', result)
+        self.assertIn('FROM data_bmp_route_latest', result)
+        self.assertIn('WHERE is_post = false', result)
+        self.assertIn("HAVING argMaxMerge(action_state) = 'update'", result)
+        self.assertIn('argMaxMerge(bgp_nexthop_state) AS bgp_nexthop', result)
+
+    def test_post_policy_view_command(self):
+        view = ViewBMPRouteLatestAdjRIBInPost()
+
+        result = view.create_view_command()
+
+        self.assertIn('CREATE VIEW IF NOT EXISTS data_bmp_route_latest_adj_rib_in_post_view', result)
+        self.assertIn('WHERE is_post = true', result)
+        self.assertIn('GROUP BY', result)
+
+    def test_processor_registers_latest_adj_rib_views(self):
+        processor = BaseBMPRouteProcessor(Mock())
+
+        self.assertEqual(
+            [view.view_name for view in processor.get_views()],
+            [
+                'data_bmp_route_latest_adj_rib_in_pre_view',
+                'data_bmp_route_latest_adj_rib_in_post_view',
+            ],
+        )
 
 
 if __name__ == '__main__':
