@@ -50,5 +50,83 @@ class BaseBMPRouteProcessor(BaseDataProcessor):
         self.column_defs.append(['path_status', 'Array(LowCardinality(String))', True])
         self.column_defs.append(['reason_code', 'Array(LowCardinality(String))', True])
         self.order_by = ["device_id", "action", "peer_ip", "ip_prefix_range_start", "ip_prefix_range_end", "add_path_id", "observation_time"]
+        self.materialized_views.append(MaterializedViewBMPRouteLatest(source_table_name=self.table))
+
+
+class MaterializedViewBMPRouteLatest(BaseClickHouseMaterializedViewMixin):
+    def __init__(self, source_table_name: str = ""):
+        super().__init__(source_table_name)
+        self.table = 'data_bmp_route_latest'
+        self.table_engine = 'AggregatingMergeTree'
+        self.column_defs = [
+            ['device_id', 'LowCardinality(String)', True],
+            ['peer_ip', 'IPv6', True],
+            ['ip_prefix_address', 'IPv6', True],
+            ['ip_prefix_length', 'UInt8', True],
+            ['ip_prefix_range_start', 'IPv6', True],
+            ['ip_prefix_range_end', 'IPv6', True],
+            ['add_path_id', 'UInt32', True],
+            ['is_post', 'Bool', True],
+            ['action_state', "AggregateFunction(argMax, LowCardinality(String), DateTime64(3, 'UTC'))", True],
+            ['observation_time_state', "AggregateFunction(max, DateTime64(3, 'UTC'))", True],
+            ['bgp_nexthop_state', "AggregateFunction(argMax, Nullable(IPv6), DateTime64(3, 'UTC'))", True],
+            ['as_path_id_state', "AggregateFunction(argMax, Array(UInt32), DateTime64(3, 'UTC'))", True],
+            ['community_state', "AggregateFunction(argMax, Array(LowCardinality(String)), DateTime64(3, 'UTC'))", True],
+            ['ext_community_state', "AggregateFunction(argMax, Array(LowCardinality(String)), DateTime64(3, 'UTC'))", True],
+            ['origin_state', "AggregateFunction(argMax, LowCardinality(Nullable(String)), DateTime64(3, 'UTC'))", True],
+            ['local_pref_state', "AggregateFunction(argMax, Nullable(UInt32), DateTime64(3, 'UTC'))", True],
+            ['med_state', "AggregateFunction(argMax, Nullable(UInt32), DateTime64(3, 'UTC'))", True],
+            ['rd_state', "AggregateFunction(argMax, Nullable(String), DateTime64(3, 'UTC'))", True],
+            ['afi_state', "AggregateFunction(argMax, Nullable(UInt8), DateTime64(3, 'UTC'))", True],
+            ['safi_state', "AggregateFunction(argMax, Nullable(UInt8), DateTime64(3, 'UTC'))", True],
+            ['ip_version_state', "AggregateFunction(argMax, Nullable(UInt8), DateTime64(3, 'UTC'))", True],
+            ['mpls_label_state', "AggregateFunction(argMax, Nullable(UInt32), DateTime64(3, 'UTC'))", True],
+        ]
+        self.primary_keys = [
+            'device_id',
+            'peer_ip',
+            'ip_prefix_range_start',
+            'ip_prefix_range_end',
+            'add_path_id',
+            'is_post',
+        ]
+        self.order_by = self.primary_keys.copy()
+        self.mv_name = 'data_bmp_route_latest_mv'
+        self.mv_select_query = f"""
+            SELECT
+                device_id,
+                peer_ip,
+                ip_prefix_address,
+                ip_prefix_length,
+                ip_prefix_range_start,
+                ip_prefix_range_end,
+                add_path_id,
+                is_post,
+                argMaxState(action, observation_time) AS action_state,
+                maxState(observation_time) AS observation_time_state,
+                argMaxState(bgp_nexthop, observation_time) AS bgp_nexthop_state,
+                argMaxState(as_path_id, observation_time) AS as_path_id_state,
+                argMaxState(community, observation_time) AS community_state,
+                argMaxState(ext_community, observation_time) AS ext_community_state,
+                argMaxState(origin, observation_time) AS origin_state,
+                argMaxState(local_pref, observation_time) AS local_pref_state,
+                argMaxState(med, observation_time) AS med_state,
+                argMaxState(rd, observation_time) AS rd_state,
+                argMaxState(afi, observation_time) AS afi_state,
+                argMaxState(safi, observation_time) AS safi_state,
+                argMaxState(ip_version, observation_time) AS ip_version_state,
+                argMaxState(mpls_label, observation_time) AS mpls_label_state
+            FROM {self.source_table_name}
+            WHERE is_in = true
+            GROUP BY
+                device_id,
+                peer_ip,
+                ip_prefix_address,
+                ip_prefix_length,
+                ip_prefix_range_start,
+                ip_prefix_range_end,
+                add_path_id,
+                is_post
+        """
 
 
