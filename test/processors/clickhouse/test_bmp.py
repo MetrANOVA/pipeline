@@ -10,6 +10,23 @@ from metranova.processors.clickhouse.bmp import (
 
 
 class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
+    def test_base_route_table_uses_export_time_ordering_ttl_and_partition(self):
+        processor = BaseBMPRouteProcessor(Mock())
+
+        result = processor.create_table_command()
+
+        self.assertLess(result.index('`export_time`'), result.index('`observation_time`'))
+        self.assertIn(
+            'PRIMARY KEY (`device_id`,`action`,`peer_ip`,`ip_prefix_range_start`,`ip_prefix_range_end`,`add_path_id`,`export_time`)',
+            result,
+        )
+        self.assertIn(
+            'ORDER BY (`device_id`,`action`,`peer_ip`,`ip_prefix_range_start`,`ip_prefix_range_end`,`add_path_id`,`export_time`)',
+            result,
+        )
+        self.assertIn('PARTITION BY toYYYYMMDD(export_time)', result)
+        self.assertIn('TTL export_time + INTERVAL 1 DAY', result)
+
     def test_create_table_command(self):
         materialized_view = MaterializedViewBMPRouteLatest(source_table_name='data_bmp_route')
 
@@ -24,7 +41,11 @@ class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
             result,
         )
         self.assertIn(
-            "`observation_time_state` AggregateFunction(max, DateTime64(3, 'UTC'))",
+            "`export_time_state` AggregateFunction(max, DateTime64(3, 'UTC'))",
+            result,
+        )
+        self.assertIn(
+            "`observation_time_state` AggregateFunction(argMax, DateTime64(3, 'UTC'), DateTime64(3, 'UTC'))",
             result,
         )
         self.assertIn(
@@ -43,9 +64,10 @@ class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
 
         self.assertIn('CREATE MATERIALIZED VIEW IF NOT EXISTS data_bmp_route_latest_mv', result)
         self.assertIn('TO data_bmp_route_latest', result)
-        self.assertIn('argMaxState(action, observation_time) AS action_state', result)
-        self.assertIn('maxState(observation_time) AS observation_time_state', result)
-        self.assertIn('argMaxState(mpls_label, observation_time) AS mpls_label_state', result)
+        self.assertIn('argMaxState(action, export_time) AS action_state', result)
+        self.assertIn('maxState(export_time) AS export_time_state', result)
+        self.assertIn('argMaxState(observation_time, export_time) AS observation_time_state', result)
+        self.assertIn('argMaxState(mpls_label, export_time) AS mpls_label_state', result)
         self.assertIn('FROM data_bmp_route', result)
         self.assertIn('WHERE is_in = true', result)
         self.assertIn('GROUP BY', result)
@@ -75,6 +97,9 @@ class TestBMPRouteLatestViews(unittest.TestCase):
         self.assertIn('FROM data_bmp_route_latest', result)
         self.assertIn('WHERE is_post = false', result)
         self.assertIn("HAVING argMaxMerge(action_state) = 'update'", result)
+        self.assertLess(result.index('AS export_time'), result.index('AS observation_time'))
+        self.assertIn('maxMerge(export_time_state) AS export_time', result)
+        self.assertIn('argMaxMerge(observation_time_state) AS observation_time', result)
         self.assertIn('argMaxMerge(bgp_nexthop_state) AS bgp_nexthop', result)
 
     def test_post_policy_view_command(self):
@@ -84,6 +109,7 @@ class TestBMPRouteLatestViews(unittest.TestCase):
 
         self.assertIn('CREATE VIEW IF NOT EXISTS data_bmp_route_latest_adj_rib_in_post_view', result)
         self.assertIn('WHERE is_post = true', result)
+        self.assertLess(result.index('AS export_time'), result.index('AS observation_time'))
         self.assertIn('GROUP BY', result)
 
     @patch.dict('os.environ', {'CLICKHOUSE_BMP_ROUTE_VIEWS': 'adj_rib_in_pre'})

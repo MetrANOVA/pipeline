@@ -14,13 +14,13 @@ class BaseBMPRouteProcessor(BaseDataProcessor):
         # environment settings
         self.table = os.getenv('CLICKHOUSE_BMP_ROUTE_TABLE', 'data_bmp_route')
         self.table_ttl = os.getenv('CLICKHOUSE_BMP_ROUTE_TTL', '1 DAY')
-        self.table_ttl_column = os.getenv('CLICKHOUSE_BMP_ROUTE_TTL_COLUMN', 'observation_time')
+        self.table_ttl_column = os.getenv('CLICKHOUSE_BMP_ROUTE_TTL_COLUMN', 'export_time')
         self.ip_to_as_lookup_order = os.getenv('CLICKHOUSE_BMP_ROUTE_IP_TO_AS_LOOKUP_ORDER', 'meta_ip').split(',')
-        self.partition_by = os.getenv('CLICKHOUSE_BMP_ROUTE_PARTITION_BY', "toYYYYMMDD(observation_time)")
+        self.partition_by = os.getenv('CLICKHOUSE_BMP_ROUTE_PARTITION_BY', "toYYYYMMDD(export_time)")
 
         # add time fields to front of column names
-        self.column_defs.insert(0, ["observation_time", "DateTime64(3, 'UTC')", True])
-        self.column_defs.insert(1, ["export_time", "DateTime64(3, 'UTC')", True])
+        self.column_defs.insert(0, ["export_time", "DateTime64(3, 'UTC')", True])
+        self.column_defs.insert(1, ["observation_time", "DateTime64(3, 'UTC')", True])
         self.column_defs.append(['device_id', 'LowCardinality(String)', True])
         self.column_defs.append(['device_ref', 'Nullable(String)', True])
         self.column_defs.append(['action', 'LowCardinality(String)', True])
@@ -53,7 +53,8 @@ class BaseBMPRouteProcessor(BaseDataProcessor):
         self.column_defs.append(['psid_li', 'Nullable(UInt64)', True])
         self.column_defs.append(['path_status', 'Array(LowCardinality(String))', True])
         self.column_defs.append(['reason_code', 'Array(LowCardinality(String))', True])
-        self.order_by = ["device_id", "action", "peer_ip", "ip_prefix_range_start", "ip_prefix_range_end", "add_path_id", "observation_time"]
+        self.primary_keys = ["device_id", "action", "peer_ip", "ip_prefix_range_start", "ip_prefix_range_end", "add_path_id", "export_time"]
+        self.order_by = self.primary_keys.copy()
         self.load_materialized_views(
             'CLICKHOUSE_BMP_ROUTE_MATERIALIZED_VIEWS',
             MaterializedViewBMPRouteLatest,
@@ -86,7 +87,8 @@ class MaterializedViewBMPRouteLatest(BaseClickHouseMaterializedViewMixin):
             ['add_path_id', 'UInt32', True],
             ['is_post', 'Bool', True],
             ['action_state', "AggregateFunction(argMax, LowCardinality(String), DateTime64(3, 'UTC'))", True],
-            ['observation_time_state', "AggregateFunction(max, DateTime64(3, 'UTC'))", True],
+            ['export_time_state', "AggregateFunction(max, DateTime64(3, 'UTC'))", True],
+            ['observation_time_state', "AggregateFunction(argMax, DateTime64(3, 'UTC'), DateTime64(3, 'UTC'))", True],
             ['bgp_nexthop_state', "AggregateFunction(argMax, Nullable(IPv6), DateTime64(3, 'UTC'))", True],
             ['as_path_id_state', "AggregateFunction(argMax, Array(UInt32), DateTime64(3, 'UTC'))", True],
             ['community_state', "AggregateFunction(argMax, Array(LowCardinality(String)), DateTime64(3, 'UTC'))", True],
@@ -120,20 +122,21 @@ class MaterializedViewBMPRouteLatest(BaseClickHouseMaterializedViewMixin):
                 ip_prefix_range_end,
                 add_path_id,
                 is_post,
-                argMaxState(action, observation_time) AS action_state,
-                maxState(observation_time) AS observation_time_state,
-                argMaxState(bgp_nexthop, observation_time) AS bgp_nexthop_state,
-                argMaxState(as_path_id, observation_time) AS as_path_id_state,
-                argMaxState(community, observation_time) AS community_state,
-                argMaxState(ext_community, observation_time) AS ext_community_state,
-                argMaxState(origin, observation_time) AS origin_state,
-                argMaxState(local_pref, observation_time) AS local_pref_state,
-                argMaxState(med, observation_time) AS med_state,
-                argMaxState(rd, observation_time) AS rd_state,
-                argMaxState(afi, observation_time) AS afi_state,
-                argMaxState(safi, observation_time) AS safi_state,
-                argMaxState(ip_version, observation_time) AS ip_version_state,
-                argMaxState(mpls_label, observation_time) AS mpls_label_state
+                argMaxState(action, export_time) AS action_state,
+                maxState(export_time) AS export_time_state,
+                argMaxState(observation_time, export_time) AS observation_time_state,
+                argMaxState(bgp_nexthop, export_time) AS bgp_nexthop_state,
+                argMaxState(as_path_id, export_time) AS as_path_id_state,
+                argMaxState(community, export_time) AS community_state,
+                argMaxState(ext_community, export_time) AS ext_community_state,
+                argMaxState(origin, export_time) AS origin_state,
+                argMaxState(local_pref, export_time) AS local_pref_state,
+                argMaxState(med, export_time) AS med_state,
+                argMaxState(rd, export_time) AS rd_state,
+                argMaxState(afi, export_time) AS afi_state,
+                argMaxState(safi, export_time) AS safi_state,
+                argMaxState(ip_version, export_time) AS ip_version_state,
+                argMaxState(mpls_label, export_time) AS mpls_label_state
             FROM {self.source_table_name}
             WHERE is_in = true
             GROUP BY
@@ -162,7 +165,8 @@ class _BaseBMPRouteLatestAdjRIBInView(BaseClickHouseViewMixin):
                 ip_prefix_range_end,
                 add_path_id,
                 argMaxMerge(action_state) AS action,
-                maxMerge(observation_time_state) AS observation_time,
+                maxMerge(export_time_state) AS export_time,
+                argMaxMerge(observation_time_state) AS observation_time,
                 argMaxMerge(bgp_nexthop_state) AS bgp_nexthop,
                 argMaxMerge(as_path_id_state) AS as_path_id,
                 argMaxMerge(community_state) AS community,
