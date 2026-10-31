@@ -1,5 +1,6 @@
 import logging
 import orjson
+import ipaddress
 from typing import Any, Dict, Iterator
 from metranova.processors.clickhouse.flow import BaseFlowProcessor
 from metranova.processors.clickhouse.bmp import BaseBMPRouteProcessor
@@ -388,6 +389,7 @@ class PMAcctBMPRouteProcessor(BaseBMPRouteProcessor, PMAcctUtilMixin):
         self.required_fields = [
             ['bmp_router'], 
             ['event_type'],
+            ['peer_ip'],
             ['bmp_msg_type'],
             ['log_type'],
             ['timestamp'],
@@ -471,16 +473,33 @@ class PMAcctBMPRouteProcessor(BaseBMPRouteProcessor, PMAcctUtilMixin):
                 pass
 
         # Parse IP prefix a tuple
-        ip_prefix = value.get("ip_prefix") #required so should always return
-        ip_prefix_tuple = tuple(ip_prefix.split("/"))
+        ip_prefix_str = value.get("ip_prefix") #required so should always return
+        ip_prefix_tuple = tuple(ip_prefix_str.split("/"))
         if len(ip_prefix_tuple) == 2:
-            formatted_record["ip_prefix"] = (ip_prefix_tuple[0], int(ip_prefix_tuple[1]))
+            formatted_record["ip_prefix_address"] = ip_prefix_tuple[0]
+            formatted_record["ip_prefix_length"] = int(ip_prefix_tuple[1])
         elif ":" in ip_prefix_tuple[0]:
             #ipv6 address without a prefix length, default to /128
-            formatted_record["ip_prefix"] = (ip_prefix_tuple[0], 128)
+            formatted_record["ip_prefix_address"] = ip_prefix_tuple[0]
+            formatted_record["ip_prefix_length"] = 128
         else:
             #ipv4 address without a prefix length, default to /32
-            formatted_record["ip_prefix"] = (ip_prefix_tuple[0], 32)
+            formatted_record["ip_prefix_address"] = ip_prefix_tuple[0]
+            formatted_record["ip_prefix_length"] = 32
+        #calculate range start and end based on address and length
+        try:
+            network = ipaddress.ip_network(f"{formatted_record['ip_prefix_address']}/{formatted_record['ip_prefix_length']}", strict=False)
+            formatted_record["ip_prefix_range_start"] = str(network.network_address)
+            formatted_record["ip_prefix_range_end"] = str(network.broadcast_address)
+        except ValueError:
+            # We need a valid IP address and prefix length to calculate the range. If the provided values are invalid, we cannot proceed with this record.
+            return None
+
+        #get add_path_id if present, otherwise default to 0
+        try:
+            formatted_record["add_path_id"] = int(value.get("add_path_id", 0))
+        except ValueError:
+            formatted_record["add_path_id"] = 0
 
         # set IP version
         afi = value.get("afi", None)
@@ -510,7 +529,6 @@ class PMAcctBMPRouteProcessor(BaseBMPRouteProcessor, PMAcctUtilMixin):
             "local_pref": value.get("local_pref", None),
             "med": value.get("med", None),
             "rd": value.get("rd", None),
-            "add_path_id": value.get("as_path_id", None),
             "mpls_label": value.get("mpls_label", None),
             "aigp": value.get("aigp", None),
             "psid_li": value.get("psid_li", None),
