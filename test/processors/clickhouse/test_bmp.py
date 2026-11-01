@@ -35,6 +35,9 @@ class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
         self.assertIn('CREATE TABLE IF NOT EXISTS data_bmp_route_latest', result)
         self.assertIn('ENGINE = AggregatingMergeTree()', result)
         self.assertIn('`device_id` LowCardinality(String)', result)
+        self.assertIn('`peer_ip` IPv6', result)
+        self.assertIn('`peer_ip_ref` Nullable(String)', result)
+        self.assertIn('`ip_prefix_ref` Nullable(String)', result)
         self.assertIn('`is_post` Bool', result)
         self.assertIn(
             "`action_state` AggregateFunction(argMax, LowCardinality(String), DateTime64(3, 'UTC'))",
@@ -49,13 +52,20 @@ class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
             result,
         )
         self.assertIn(
-            'PRIMARY KEY (`device_id`,`peer_ip`,`ip_prefix_range_start`,`ip_prefix_range_end`,`add_path_id`,`is_post`)',
+            'PRIMARY KEY (`device_id`,`peer_ip`,`peer_ip_ref`,`ip_prefix_range_start`,`ip_prefix_range_end`,`ip_prefix_ref`,`add_path_id`,`is_post`)',
             result,
         )
         self.assertIn(
-            'ORDER BY (`device_id`,`peer_ip`,`ip_prefix_range_start`,`ip_prefix_range_end`,`add_path_id`,`is_post`)',
+            'ORDER BY (`device_id`,`peer_ip`,`peer_ip_ref`,`ip_prefix_range_start`,`ip_prefix_range_end`,`ip_prefix_ref`,`add_path_id`,`is_post`)',
             result,
         )
+
+    def test_create_table_command_allows_nullable_key(self):
+        materialized_view = MaterializedViewBMPRouteLatest(source_table_name='data_bmp_route')
+
+        result = materialized_view.create_table_command()
+
+        self.assertIn('allow_nullable_key = 1', result)
 
     def test_create_mv_command(self):
         materialized_view = MaterializedViewBMPRouteLatest(source_table_name='data_bmp_route')
@@ -71,6 +81,8 @@ class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
         self.assertIn('FROM data_bmp_route', result)
         self.assertIn('WHERE is_in = true', result)
         self.assertIn('GROUP BY', result)
+        self.assertIn('peer_ip_ref', result)
+        self.assertIn('ip_prefix_ref', result)
         self.assertIn('add_path_id,\n                is_post', result)
 
     @patch.dict('os.environ', {
@@ -101,6 +113,8 @@ class TestBMPRouteLatestViews(unittest.TestCase):
         self.assertIn('maxMerge(export_time_state) AS export_time', result)
         self.assertIn('argMaxMerge(observation_time_state) AS observation_time', result)
         self.assertIn('argMaxMerge(bgp_nexthop_state) AS bgp_nexthop', result)
+        self.assertIn('peer_ip_ref', result)
+        self.assertIn('ip_prefix_ref', result)
 
     def test_post_policy_view_command(self):
         view = ViewBMPRouteLatestAdjRIBInPost()
@@ -111,6 +125,8 @@ class TestBMPRouteLatestViews(unittest.TestCase):
         self.assertIn('WHERE is_post = true', result)
         self.assertLess(result.index('AS export_time'), result.index('AS observation_time'))
         self.assertIn('GROUP BY', result)
+        self.assertIn('peer_ip_ref', result)
+        self.assertIn('ip_prefix_ref', result)
 
     @patch.dict('os.environ', {'CLICKHOUSE_BMP_ROUTE_VIEWS': 'adj_rib_in_pre'})
     def test_processor_loads_configured_adj_rib_views(self):

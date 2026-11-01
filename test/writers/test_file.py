@@ -1,9 +1,10 @@
-import unittest
+import json
 import os
-import tempfile
 import pickle
+import tempfile
+import unittest
 from unittest.mock import Mock, patch, MagicMock
-from metranova.writers.file import PickleFileWriter
+from metranova.writers.file import JSONFileWriter, PickleFileWriter
 
 
 class TestPickleFileWriter(unittest.TestCase):
@@ -188,6 +189,132 @@ class TestPickleFileWriter(unittest.TestCase):
         # File should not exist since write failed
         file_path = os.path.join(self.temp_dir, 'test.pkl')
         self.assertFalse(os.path.exists(file_path))
+
+
+class TestJSONFileWriter(unittest.TestCase):
+    def setUp(self):
+        self.mock_processor = Mock()
+        self.temp_dir = tempfile.mkdtemp()
+        self.env_patcher = patch.dict(os.environ, {
+            'JSON_FILE_DIRECTORY': self.temp_dir,
+            'JSON_FILE_INDENT': '2',
+        })
+        self.env_patcher.start()
+        self.writer = JSONFileWriter([self.mock_processor])
+
+    def tearDown(self):
+        self.env_patcher.stop()
+        import shutil
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def test_initialization_defaults(self):
+        with patch.dict(os.environ, {}, clear=True):
+            writer = JSONFileWriter([self.mock_processor])
+        self.assertEqual(writer.file_dir, 'output')
+
+    def test_initialization_reads_env(self):
+        self.assertEqual(self.writer.file_dir, self.temp_dir)
+
+    def test_write_valid_message(self):
+        data = {'route-report': [{'device': 'rtr1'}]}
+        msg = {'name': 'report.json', 'data': data}
+        self.writer.write_message(msg)
+
+        path = os.path.join(self.temp_dir, 'report.json')
+        self.assertTrue(os.path.exists(path))
+        with open(path) as f:
+            loaded = json.load(f)
+        self.assertEqual(loaded, data)
+
+    def test_write_creates_directory(self):
+        nested = os.path.join(self.temp_dir, 'sub', 'deep')
+        with patch.dict(os.environ, {'JSON_FILE_DIRECTORY': nested, 'JSON_FILE_INDENT': '2'}):
+            writer = JSONFileWriter([self.mock_processor])
+        writer.write_message({'name': 'f.json', 'data': {'x': 1}})
+        self.assertTrue(os.path.exists(os.path.join(nested, 'f.json')))
+
+    def test_atomic_write_via_tmp_file(self):
+        """The writer must use a .tmp file then os.replace()."""
+        written_paths = []
+        real_replace = os.replace
+
+        def tracking_replace(src, dst):
+            written_paths.append((src, dst))
+            real_replace(src, dst)
+
+        with patch('os.replace', side_effect=tracking_replace):
+            self.writer.write_message({'name': 'a.json', 'data': {'k': 1}})
+
+        self.assertEqual(len(written_paths), 1)
+        src, dst = written_paths[0]
+        self.assertTrue(src.endswith('.tmp'))
+        self.assertEqual(dst, os.path.join(self.temp_dir, 'a.json'))
+
+    def test_no_leftover_tmp_file_after_write(self):
+        self.writer.write_message({'name': 'b.json', 'data': {'k': 2}})
+        files = os.listdir(self.temp_dir)
+        self.assertFalse(any(f.endswith('.tmp') for f in files))
+
+    def test_pretty_output_when_indent_2(self):
+        self.writer.write_message({'name': 'pretty.json', 'data': {'a': 1}})
+        path = os.path.join(self.temp_dir, 'pretty.json')
+        with open(path) as f:
+            raw = f.read()
+        self.assertIn('\n', raw)
+
+    def test_compact_output_when_indent_0(self):
+        with patch.dict(os.environ, {'JSON_FILE_DIRECTORY': self.temp_dir, 'JSON_FILE_INDENT': '0'}):
+            writer = JSONFileWriter([self.mock_processor])
+        writer.write_message({'name': 'compact.json', 'data': {'a': 1}})
+        path = os.path.join(self.temp_dir, 'compact.json')
+        with open(path) as f:
+            raw = f.read()
+        self.assertNotIn('\n', raw)
+
+    def test_missing_name_skipped(self):
+        self.writer.write_message({'data': {'x': 1}})
+        self.assertEqual(os.listdir(self.temp_dir), [])
+
+    def test_missing_data_skipped(self):
+        self.writer.write_message({'name': 'f.json'})
+        self.assertEqual(os.listdir(self.temp_dir), [])
+
+    def test_none_message_skipped(self):
+        self.writer.write_message(None)
+        self.assertEqual(os.listdir(self.temp_dir), [])
+
+    def test_empty_dict_skipped(self):
+        self.writer.write_message({})
+        self.assertEqual(os.listdir(self.temp_dir), [])
+
+    def test_overwrite_existing_file(self):
+        self.writer.write_message({'name': 'r.json', 'data': {'v': 1}})
+        self.writer.write_message({'name': 'r.json', 'data': {'v': 2}})
+        path = os.path.join(self.temp_dir, 'r.json')
+        with open(path) as f:
+            loaded = json.load(f)
+        self.assertEqual(loaded['v'], 2)
+
+    def test_exception_during_write_caught(self):
+        with patch('builtins.open', side_effect=PermissionError("denied")):
+            # Must not raise
+            self.writer.write_message({'name': 'x.json', 'data': {'y': 3}})
+
+    def test_consumer_metadata_ignored(self):
+        self.writer.write_message({'name': 'z.json', 'data': {'ok': True}}, {'offset': 99})
+        path = os.path.join(self.temp_dir, 'z.json')
+        self.assertTrue(os.path.exists(path))
+
+    def test_complex_nested_data(self):
+        data = {'route-report': [{'re:output': {'neighbor-result': [
+            {'address': '1.2.3.4', 'accepted': 100, 'rejected': 5}
+        ]}}]}
+        self.writer.write_message({'name': 'complex.json', 'data': data})
+        path = os.path.join(self.temp_dir, 'complex.json')
+        with open(path) as f:
+            loaded = json.load(f)
+        self.assertEqual(loaded, data)
 
 
 if __name__ == '__main__':
