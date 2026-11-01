@@ -13,3 +13,4 @@ writers:
   - type: metranova.writers.clickhouse.ClickHouseWriter
     processors:
       - metranova.processors.clickhouse.pmacct.PMAcctBMPRouteProcessor
+      - metranova.processors.clickhouse.pmacct.PMAcctBMPStatProcessor
