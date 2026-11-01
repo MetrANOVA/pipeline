@@ -9,7 +9,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
-from metranova.processors.clickhouse.pmacct import PMAcctFlowProcessor
+from metranova.processors.clickhouse.pmacct import PMAcctBMPStatProcessor, PMAcctFlowProcessor
 
 
 class TestPMAcctFlowProcessor(unittest.TestCase):
@@ -833,6 +833,253 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
         self.assertEqual(record['dst_port'], 0)
         self.assertEqual(record['bit_count'], 0)
         self.assertEqual(record['packet_count'], 0)
+
+
+class TestPMAcctBMPStatProcessor(unittest.TestCase):
+    """Unit tests for PMAcctBMPStatProcessor."""
+
+    # Minimal valid stats message from pbmpd
+    BASE_MSG = {
+        "event_type": "log",
+        "seq": 1,
+        "timestamp": "2024-01-15T12:00:00.000000+00:00",
+        "timestamp_arrival": "2024-01-15T12:00:00.100000+00:00",
+        "bmp_msg_type": "stats",
+        "bmp_router": "192.0.2.1",
+        "bmp_router_port": 45000,
+        "peer_ip": "203.0.113.1",
+        "peer_asn": 64501,
+        "peer_type": 0,
+        "bgp_id": "192.0.2.1",
+        "rd": "0:64499:1",
+        "rd_origin": "bmp",
+        "is_loc": 0,
+        "is_filtered": 0,
+        "counter_type": 0,
+        "counter_type_str": "Number of prefixes rejected by inbound policy",
+        "counter_value": 42,
+        "label": "collector-1",
+    }
+
+    def _make_pipeline(self, device_lookup=None, ip_lookup=None, as_lookup=None):
+        pipeline = MagicMock()
+        ch_cacher = Mock()
+        ch_cacher.lookup.side_effect = lambda table, key: device_lookup if device_lookup and table.startswith("meta_device") else None
+        ch_cacher.lookup_dict_key.return_value = as_lookup
+        ip_cacher = Mock()
+        ip_cacher.lookup.return_value = [ip_lookup] if ip_lookup else None
+        def cacher_side_effect(name):
+            if name == "clickhouse":
+                return ch_cacher
+            elif name == "ip":
+                return ip_cacher
+            return Mock()
+        pipeline.cacher.side_effect = cacher_side_effect
+        return pipeline
+
+    def _make(self, **kwargs):
+        return PMAcctBMPStatProcessor(self._make_pipeline(**kwargs))
+
+    def _msg(self, **overrides):
+        return {**self.BASE_MSG, **overrides}
+
+    # ------------------------------------------------------------------
+    # match_message
+    # ------------------------------------------------------------------
+
+    def test_match_message_stats(self):
+        self.assertTrue(self._make().match_message(self._msg()))
+
+    def test_match_message_wrong_type(self):
+        self.assertFalse(self._make().match_message(self._msg(bmp_msg_type="route_monitor")))
+
+    def test_match_message_missing_type(self):
+        msg = self._msg()
+        del msg["bmp_msg_type"]
+        self.assertFalse(self._make().match_message(msg))
+
+    # ------------------------------------------------------------------
+    # Required fields / early exit
+    # ------------------------------------------------------------------
+
+    def test_build_message_missing_bmp_router_returns_none(self):
+        msg = self._msg()
+        del msg["bmp_router"]
+        self.assertIsNone(self._make().build_message(msg, {}))
+
+    def test_build_message_missing_peer_ip_returns_none(self):
+        msg = self._msg()
+        del msg["peer_ip"]
+        self.assertIsNone(self._make().build_message(msg, {}))
+
+    def test_build_message_missing_counter_type_returns_none(self):
+        msg = self._msg()
+        del msg["counter_type"]
+        self.assertIsNone(self._make().build_message(msg, {}))
+
+    def test_build_message_invalid_counter_type_returns_none(self):
+        self.assertIsNone(self._make().build_message(self._msg(counter_type="bad"), {}))
+
+    # ------------------------------------------------------------------
+    # observation_time
+    # ------------------------------------------------------------------
+
+    def test_observation_time_parsed_from_timestamp(self):
+        result = self._make().build_message(self._msg(timestamp="2024-01-15T12:00:01.500000+00:00"), {})
+        self.assertIsNotNone(result)
+        # 1705320001.5 * 1000 = 1705320001500
+        self.assertEqual(result[0]["observation_time"], 1705320001500)
+
+    def test_build_message_missing_timestamp_returns_none(self):
+        msg = self._msg()
+        del msg["timestamp"]
+        self.assertIsNone(self._make().build_message(msg, {}))
+
+    # ------------------------------------------------------------------
+    # Device lookup
+    # ------------------------------------------------------------------
+
+    def test_device_id_defaults_to_bmp_router_ip(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["device_id"], "192.0.2.1")
+        self.assertIsNone(result[0]["device_ref"])
+
+    def test_device_id_from_cache(self):
+        result = self._make(
+            device_lookup={"id": "router-a", "ref": "ref:router-a"}
+        ).build_message(self._msg(), {})
+        self.assertEqual(result[0]["device_id"], "router-a")
+        self.assertEqual(result[0]["device_ref"], "ref:router-a")
+
+    # ------------------------------------------------------------------
+    # Peer IP lookup
+    # ------------------------------------------------------------------
+
+    def test_peer_ip_set(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_ip"], "203.0.113.1")
+        self.assertIsNone(result[0]["peer_ip_ref"])
+
+    def test_peer_ip_ref_from_cache(self):
+        result = self._make(ip_lookup="ref:peer-ip").build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_ip_ref"], "ref:peer-ip")
+
+    # ------------------------------------------------------------------
+    # Peer AS
+    # ------------------------------------------------------------------
+
+    def test_peer_as_id_parsed(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_as_id"], 64501)
+
+    def test_peer_as_id_none_on_missing(self):
+        msg = self._msg()
+        del msg["peer_asn"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result[0]["peer_as_id"])
+
+    def test_peer_as_id_none_on_invalid(self):
+        result = self._make().build_message(self._msg(peer_asn="bad"), {})
+        self.assertIsNone(result[0]["peer_as_id"])
+
+    def test_peer_as_ref_from_cache(self):
+        result = self._make(as_lookup="ref:as64501").build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_as_ref"], "ref:as64501")
+
+    def test_peer_as_ref_none_when_no_cache(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertIsNone(result[0]["peer_as_ref"])
+
+    # ------------------------------------------------------------------
+    # Other peer fields
+    # ------------------------------------------------------------------
+
+    def test_peer_type_parsed(self):
+        result = self._make().build_message(self._msg(peer_type=2), {})
+        self.assertEqual(result[0]["peer_type"], 2)
+
+    def test_peer_type_none_on_invalid(self):
+        result = self._make().build_message(self._msg(peer_type="bad"), {})
+        self.assertIsNone(result[0]["peer_type"])
+
+    def test_bgp_id_set(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["bgp_id"], "192.0.2.1")
+
+    def test_rd_set(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["rd"], "0:64499:1")
+
+    def test_rd_none_when_absent(self):
+        msg = self._msg()
+        del msg["rd"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result[0]["rd"])
+
+    # ------------------------------------------------------------------
+    # Scope flags
+    # ------------------------------------------------------------------
+
+    def test_is_loc_false_by_default(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertFalse(result[0]["is_loc"])
+
+    def test_is_loc_true(self):
+        result = self._make().build_message(self._msg(is_loc=1), {})
+        self.assertTrue(result[0]["is_loc"])
+
+    def test_is_filtered_false_by_default(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertFalse(result[0]["is_filtered"])
+
+    def test_is_filtered_true(self):
+        result = self._make().build_message(self._msg(is_filtered=1), {})
+        self.assertTrue(result[0]["is_filtered"])
+
+    # ------------------------------------------------------------------
+    # Metric fields (counter_type -> metric_type mapping)
+    # ------------------------------------------------------------------
+
+    def test_metric_type_parsed(self):
+        result = self._make().build_message(self._msg(counter_type=7), {})
+        self.assertEqual(result[0]["metric_type"], 7)
+
+    def test_metric_type_str_set(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["metric_type_str"], "Number of prefixes rejected by inbound policy")
+
+    def test_metric_type_str_empty_when_absent(self):
+        msg = self._msg()
+        del msg["counter_type_str"]
+        result = self._make().build_message(msg, {})
+        self.assertEqual(result[0]["metric_type_str"], "")
+
+    def test_metric_value_parsed(self):
+        result = self._make().build_message(self._msg(counter_value=12345), {})
+        self.assertEqual(result[0]["metric_value"], 12345)
+
+    def test_metric_value_zero_on_missing(self):
+        msg = self._msg()
+        del msg["counter_value"]
+        result = self._make().build_message(msg, {})
+        self.assertEqual(result[0]["metric_value"], 0)
+
+    def test_metric_value_zero_on_invalid(self):
+        result = self._make().build_message(self._msg(counter_value="bad"), {})
+        self.assertEqual(result[0]["metric_value"], 0)
+
+    # ------------------------------------------------------------------
+    # Collector / policy fields
+    # ------------------------------------------------------------------
+
+    def test_collector_id_from_label(self):
+        result = self._make().build_message(self._msg(label="my-collector"), {})
+        self.assertEqual(result[0]["collector_id"], "my-collector")
+
+    def test_returns_list_with_one_record(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
 
 
 if __name__ == '__main__':

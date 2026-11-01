@@ -7,6 +7,86 @@ from metranova.processors.clickhouse.base import (
     BaseDataProcessor,
 )
 
+# ---------------------------------------------------------------------------
+# BMP Statistics Report (BMP message type 1)
+# ---------------------------------------------------------------------------
+
+
+class BaseBMPStatProcessor(BaseDataProcessor):
+    """Processor for BMP Statistics Report messages (BMP message type 1).
+
+    Each row records a single metric observation from a BMP statistics report
+    message emitted by pmacct/pbmpd.  The source message carries one metric
+    per JSON object, so a single statistics report from a router may produce
+    many rows — one per ``metric_type``.
+
+    Table: ``data_bmp_stat``
+
+    Environment variables:
+        CLICKHOUSE_BMP_STAT_TABLE        – target table name (default: ``data_bmp_stat``)
+        CLICKHOUSE_BMP_STAT_TTL          – row TTL interval (default: ``7 DAY``)
+        CLICKHOUSE_BMP_STAT_TTL_COLUMN   – TTL anchor column (default: ``observation_time``)
+        CLICKHOUSE_BMP_STAT_PARTITION_BY – PARTITION BY expression
+                                           (default: ``toYYYYMMDD(observation_time)``)
+    """
+
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+
+        self.table = os.getenv('CLICKHOUSE_BMP_STAT_TABLE', 'data_bmp_stat')
+        self.table_ttl = os.getenv('CLICKHOUSE_BMP_STAT_TTL', '7 DAY')
+        self.table_ttl_column = os.getenv('CLICKHOUSE_BMP_STAT_TTL_COLUMN', 'observation_time')
+        self.partition_by = os.getenv(
+            'CLICKHOUSE_BMP_STAT_PARTITION_BY', 'toYYYYMMDD(observation_time)'
+        )
+
+        # observation_time maps to pbmpd `timestamp` — the time the BMP
+        # statistics message was generated on the router.
+        self.column_defs.insert(0, ["observation_time", "DateTime64(3, 'UTC')", True])
+
+        # Device / router identity
+        self.column_defs.append(['device_id', 'LowCardinality(String)', True])
+        self.column_defs.append(['device_ref', 'Nullable(String)', True])
+
+        # BGP peer identity
+        self.column_defs.append(['peer_ip', 'IPv6', True])
+        self.column_defs.append(['peer_ip_ref', 'Nullable(String)', True])
+        self.column_defs.append(['peer_as_id', 'Nullable(UInt32)', True])
+        self.column_defs.append(['peer_as_ref', 'Nullable(String)', True])
+        self.column_defs.append(['peer_type', 'Nullable(UInt8)', True])
+
+        # Router BGP ID of the remote peer
+        self.column_defs.append(['bgp_id', 'Nullable(IPv6)', True])
+
+        # Route Distinguisher (https://tools.ietf.org/html/rfc7854#section-4.2)
+        self.column_defs.append(['rd', 'Nullable(String)', True])
+
+        # Scope flags present on stats messages
+        self.column_defs.append(['is_loc', 'Bool', True])       # Loc-RIB data
+        self.column_defs.append(['is_filtered', 'Bool', True])  # filtered Loc-RIB data
+
+        # Statistics metric fields
+        # metric_type: IANA BMP statistics type code
+        #   https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#statistics-types
+        self.column_defs.append(['metric_type', 'UInt16', True])
+        self.column_defs.append(['metric_type_str', 'LowCardinality(String)', True])
+        # metric_value holds the raw 64-bit unsigned value from the BMP message.
+        # All current IANA-assigned types use either a 4-byte or 8-byte value,
+        # both representable as UInt64.
+        self.column_defs.append(['metric_value', 'UInt64', True])
+
+        # Primary key / ordering: one row per (device, peer, stat type, time).
+        # metric_type is included so that time-range scans for a single stat
+        # type are efficient (the sort order places all types for a given peer
+        # together before splitting by time).
+        self.primary_keys = [
+            'device_id',
+            'peer_ip',
+            'metric_type',
+            'observation_time',
+        ]
+        self.order_by = self.primary_keys.copy()
+
 class BaseBMPRouteProcessor(BaseDataProcessor):
 
     def __init__(self, pipeline):

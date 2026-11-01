@@ -1,9 +1,10 @@
 import logging
 import orjson
 import ipaddress
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterator
 from metranova.processors.clickhouse.flow import BaseFlowProcessor
-from metranova.processors.clickhouse.bmp import BaseBMPRouteProcessor
+from metranova.processors.clickhouse.bmp import BaseBMPRouteProcessor, BaseBMPStatProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -535,4 +536,115 @@ class PMAcctBMPRouteProcessor(BaseBMPRouteProcessor, PMAcctUtilMixin):
             "path_status": value.get("path_status", []),
             "reason_code": value.get("reason_code", [])
         })
+        return [formatted_record]
+
+
+class PMAcctBMPStatProcessor(BaseBMPStatProcessor, PMAcctUtilMixin):
+    """Parse BMP Statistics Report messages (bmp_msg_type: "stats") from pmacct/pbmpd.
+
+    Each JSON object from the source represents a single IANA statistics counter
+    observation for one BGP peer on one router.  The processor maps those fields
+    onto the ``data_bmp_stat`` table columns defined by ``BaseBMPStatProcessor``.
+    """
+
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        self.required_fields = [
+            ['bmp_router'],
+            ['event_type'],
+            ['peer_ip'],
+            ['bmp_msg_type'],
+            ['timestamp'],
+            ['counter_type'],
+        ]
+
+    def match_message(self, value):
+        return value.get("bmp_msg_type", "") == "stats"
+
+    def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
+        if not self.has_required_fields(value):
+            return None
+
+        formatted_record = {}
+        ext = {}
+
+        # observation_time maps to pbmpd `timestamp` — when the BMP stats
+        # message was generated on the router. pbmpd sends this as an ISO 8601
+        # string; fall back to epoch 0 if missing or unparseable.
+        ts_raw = value.get("timestamp", "")
+        try:
+            ts_ms = int(datetime.fromisoformat(ts_raw).timestamp() * 1000)
+        except (ValueError, TypeError):
+            try:
+                ts_ms = int(float(ts_raw) * 1000)
+            except (ValueError, TypeError):
+                ts_ms = 0
+        formatted_record["observation_time"] = ts_ms
+
+        # Device / router identity
+        self.lookup_device(value.get("bmp_router", ""), formatted_record)
+
+        # BGP peer IP — sets peer_ip and peer_ip_ref
+        self.lookup_ip("peer_ip", "peer_ip", value, formatted_record)
+
+        # BGP peer AS — provided directly in the message; look up the ref separately
+        peer_asn = value.get("peer_asn", None)
+        if peer_asn is not None:
+            try:
+                peer_asn = int(peer_asn)
+            except (ValueError, TypeError):
+                peer_asn = None
+        formatted_record["peer_as_id"] = peer_asn
+        formatted_record["peer_as_ref"] = self.pipeline.cacher("clickhouse").lookup_dict_key(
+            "meta_as", peer_asn, "ref"
+        )
+
+        # BGP peer type (IANA peer type code)
+        peer_type = value.get("peer_type", None)
+        if peer_type is not None:
+            try:
+                peer_type = int(peer_type)
+            except (ValueError, TypeError):
+                peer_type = None
+        formatted_record["peer_type"] = peer_type
+
+        # BGP router ID of the remote peer
+        formatted_record["bgp_id"] = value.get("bgp_id", None)
+
+        # Route Distinguisher
+        formatted_record["rd"] = value.get("rd", None)
+
+        # Loc-RIB / filtered scope flags
+        formatted_record["is_loc"] = bool(value.get("is_loc", False))
+        formatted_record["is_filtered"] = bool(value.get("is_filtered", False))
+
+        # Statistics metric fields — map pbmpd counter_type / counter_type_str /
+        # counter_value onto metric_type / metric_type_str / metric_value.
+        metric_type = value.get("counter_type", None)
+        if metric_type is not None:
+            try:
+                metric_type = int(metric_type)
+            except (ValueError, TypeError):
+                metric_type = None
+        if metric_type is None:
+            return None
+        formatted_record["metric_type"] = metric_type
+        formatted_record["metric_type_str"] = value.get("counter_type_str", "")
+
+        metric_value = value.get("counter_value", 0)
+        try:
+            metric_value = int(metric_value)
+        except (ValueError, TypeError):
+            metric_value = 0
+        formatted_record["metric_value"] = metric_value
+
+        # Standard policy / collector fields
+        formatted_record.update({
+            "collector_id": value.get("label", None),
+            "policy_originator": "unknown",
+            "policy_level": "unknown",
+            "policy_scope": ["unknown"],
+            "ext": orjson.dumps(ext).decode('utf-8'),
+        })
+
         return [formatted_record]

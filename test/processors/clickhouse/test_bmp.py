@@ -3,6 +3,7 @@ from unittest.mock import Mock, patch
 
 from metranova.processors.clickhouse.bmp import (
     BaseBMPRouteProcessor,
+    BaseBMPStatProcessor,
     MaterializedViewBMPRouteLatest,
     ViewBMPRouteLatestAdjRIBInPost,
     ViewBMPRouteLatestAdjRIBInPre,
@@ -146,6 +147,140 @@ class TestBMPRouteLatestViews(unittest.TestCase):
 
         self.assertEqual(processor.get_materialized_views(), [])
         self.assertEqual(processor.get_views(), [])
+
+
+class TestBMPStatProcessor(unittest.TestCase):
+    """Tests for BaseBMPStatProcessor (BMP Statistics Report, message type 1)."""
+
+    def _make(self, env=None):
+        with patch.dict('os.environ', env or {}, clear=False):
+            return BaseBMPStatProcessor(Mock())
+
+    # ------------------------------------------------------------------
+    # Table name / env override
+    # ------------------------------------------------------------------
+
+    def test_default_table_name(self):
+        self.assertEqual(self._make().table, 'data_bmp_stat')
+
+    def test_table_name_env_override(self):
+        p = self._make({'CLICKHOUSE_BMP_STAT_TABLE': 'custom_bmp_stat'})
+        self.assertEqual(p.table, 'custom_bmp_stat')
+
+    # ------------------------------------------------------------------
+    # DDL content
+    # ------------------------------------------------------------------
+
+    def test_create_table_command_starts_with_create_table(self):
+        ddl = self._make().create_table_command()
+        self.assertIn('CREATE TABLE IF NOT EXISTS data_bmp_stat', ddl)
+
+    def test_observation_time_is_first_column(self):
+        ddl = self._make().create_table_command()
+        self.assertLess(ddl.index('`observation_time`'), ddl.index('`insert_time`'))
+
+    def test_export_time_not_present(self):
+        ddl = self._make().create_table_command()
+        self.assertNotIn('export_time', ddl)
+
+    def test_expected_columns_present(self):
+        ddl = self._make().create_table_command()
+        for col in [
+            'observation_time', 'insert_time',
+            'collector_id', 'policy_originator', 'policy_level', 'policy_scope',
+            'device_id', 'device_ref',
+            'peer_ip', 'peer_ip_ref', 'peer_as_id', 'peer_as_ref', 'peer_type',
+            'bgp_id', 'rd',
+            'is_loc', 'is_filtered',
+            'metric_type', 'metric_type_str', 'metric_value',
+        ]:
+            self.assertIn(f'`{col}`', ddl, msg=f'Missing column: {col}')
+
+    def test_metric_value_is_uint64(self):
+        ddl = self._make().create_table_command()
+        self.assertIn('`metric_value` UInt64', ddl)
+
+    def test_metric_type_is_uint16(self):
+        ddl = self._make().create_table_command()
+        self.assertIn('`metric_type` UInt16', ddl)
+
+    def test_peer_as_id_is_nullable_uint32(self):
+        ddl = self._make().create_table_command()
+        self.assertIn('`peer_as_id` Nullable(UInt32)', ddl)
+
+    def test_peer_as_ref_is_nullable_string(self):
+        ddl = self._make().create_table_command()
+        self.assertIn('`peer_as_ref` Nullable(String)', ddl)
+
+    def test_rd_origin_not_present(self):
+        ddl = self._make().create_table_command()
+        self.assertNotIn('rd_origin', ddl)
+
+    def test_peer_ip_is_ipv6(self):
+        ddl = self._make().create_table_command()
+        self.assertIn('`peer_ip` IPv6', ddl)
+
+    def test_peer_ip_ref_is_nullable_string(self):
+        ddl = self._make().create_table_command()
+        self.assertIn('`peer_ip_ref` Nullable(String)', ddl)
+
+    def test_bgp_id_is_nullable_ipv6(self):
+        ddl = self._make().create_table_command()
+        self.assertIn('`bgp_id` Nullable(IPv6)', ddl)
+
+    # ------------------------------------------------------------------
+    # Primary key / ordering
+    # ------------------------------------------------------------------
+
+    def test_primary_key(self):
+        ddl = self._make().create_table_command()
+        self.assertIn(
+            'PRIMARY KEY (`device_id`,`peer_ip`,`metric_type`,`observation_time`)',
+            ddl,
+        )
+
+    def test_order_by(self):
+        ddl = self._make().create_table_command()
+        self.assertIn(
+            'ORDER BY (`device_id`,`peer_ip`,`metric_type`,`observation_time`)',
+            ddl,
+        )
+
+    def test_primary_keys_list(self):
+        p = self._make()
+        self.assertEqual(p.primary_keys, ['device_id', 'peer_ip', 'metric_type', 'observation_time'])
+
+    # ------------------------------------------------------------------
+    # TTL / partition
+    # ------------------------------------------------------------------
+
+    def test_default_ttl(self):
+        ddl = self._make().create_table_command()
+        self.assertIn('TTL observation_time + INTERVAL 7 DAY', ddl)
+
+    def test_ttl_env_override(self):
+        ddl = self._make({'CLICKHOUSE_BMP_STAT_TTL': '30 DAY'}).create_table_command()
+        self.assertIn('TTL observation_time + INTERVAL 30 DAY', ddl)
+
+    def test_default_partition_by(self):
+        ddl = self._make().create_table_command()
+        self.assertIn('PARTITION BY toYYYYMMDD(observation_time)', ddl)
+
+    def test_partition_by_env_override(self):
+        ddl = self._make(
+            {'CLICKHOUSE_BMP_STAT_PARTITION_BY': 'toYYYYMM(observation_time)'}
+        ).create_table_command()
+        self.assertIn('PARTITION BY toYYYYMM(observation_time)', ddl)
+
+    # ------------------------------------------------------------------
+    # No materialized views by default
+    # ------------------------------------------------------------------
+
+    def test_no_materialized_views_by_default(self):
+        self.assertEqual(self._make().get_materialized_views(), [])
+
+    def test_no_views_by_default(self):
+        self.assertEqual(self._make().get_views(), [])
 
 
 if __name__ == '__main__':
