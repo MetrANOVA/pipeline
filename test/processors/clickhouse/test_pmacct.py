@@ -9,7 +9,12 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
-from metranova.processors.clickhouse.pmacct import PMAcctBMPStatProcessor, PMAcctFlowProcessor
+from metranova.processors.clickhouse.pmacct import (
+    PMAcctBMPPeerDownProcessor,
+    PMAcctBMPPeerUpProcessor,
+    PMAcctBMPStatProcessor,
+    PMAcctFlowProcessor,
+)
 
 
 class TestPMAcctFlowProcessor(unittest.TestCase):
@@ -1080,6 +1085,483 @@ class TestPMAcctBMPStatProcessor(unittest.TestCase):
         result = self._make().build_message(self._msg(), {})
         self.assertIsInstance(result, list)
         self.assertEqual(len(result), 1)
+
+
+class TestPMAcctBMPPeerUpProcessor(unittest.TestCase):
+    """Unit tests for PMAcctBMPPeerUpProcessor."""
+
+    # Minimal valid peer_up message from pbmpd
+    BASE_MSG = {
+        "event_type": "log",
+        "seq": 10,
+        "timestamp": "2024-01-15T12:00:00.000000+00:00",
+        "timestamp_arrival": "2024-01-15T12:00:00.100000+00:00",
+        "bmp_msg_type": "peer_up",
+        "bmp_router": "192.0.2.2",
+        "bmp_router_port": 45047,
+        "peer_ip": "203.0.113.2",
+        "peer_asn": 64496,
+        "peer_type": 0,
+        "rd": "0:64499:2",
+        "rd_origin": "bmp",
+        "bgp_id": "192.0.2.2",
+        "local_as": 64500,
+        "local_port": 26354,
+        "remote_port": 179,
+        "local_ip": "203.0.113.1",
+        "label": "collector-1",
+    }
+
+    def _make_pipeline(self, device_lookup=None, ip_lookup=None, as_lookup=None):
+        pipeline = MagicMock()
+        ch_cacher = Mock()
+        ch_cacher.lookup.side_effect = lambda table, key: device_lookup if device_lookup and table.startswith("meta_device") else None
+        ch_cacher.lookup_dict_key.return_value = as_lookup
+        ip_cacher = Mock()
+        ip_cacher.lookup.return_value = [ip_lookup] if ip_lookup else None
+        def cacher_side_effect(name):
+            if name == "clickhouse":
+                return ch_cacher
+            elif name == "ip":
+                return ip_cacher
+            return Mock()
+        pipeline.cacher.side_effect = cacher_side_effect
+        return pipeline
+
+    def _make(self, **kwargs):
+        return PMAcctBMPPeerUpProcessor(self._make_pipeline(**kwargs))
+
+    def _msg(self, **overrides):
+        return {**self.BASE_MSG, **overrides}
+
+    # ------------------------------------------------------------------
+    # match_message
+    # ------------------------------------------------------------------
+
+    def test_match_message_peer_up(self):
+        self.assertTrue(self._make().match_message(self._msg()))
+
+    def test_match_message_wrong_type(self):
+        self.assertFalse(self._make().match_message(self._msg(bmp_msg_type="peer_down")))
+
+    def test_match_message_missing_type(self):
+        msg = self._msg()
+        del msg["bmp_msg_type"]
+        self.assertFalse(self._make().match_message(msg))
+
+    # ------------------------------------------------------------------
+    # Required fields / early exit
+    # ------------------------------------------------------------------
+
+    def test_build_message_missing_bmp_router_returns_none(self):
+        msg = self._msg()
+        del msg["bmp_router"]
+        self.assertIsNone(self._make().build_message(msg, {}))
+
+    def test_build_message_missing_peer_ip_returns_none(self):
+        msg = self._msg()
+        del msg["peer_ip"]
+        self.assertIsNone(self._make().build_message(msg, {}))
+
+    def test_build_message_missing_timestamp_returns_none(self):
+        msg = self._msg()
+        del msg["timestamp"]
+        self.assertIsNone(self._make().build_message(msg, {}))
+
+    # ------------------------------------------------------------------
+    # observation_time
+    # ------------------------------------------------------------------
+
+    def test_observation_time_parsed_from_iso8601(self):
+        result = self._make().build_message(self._msg(timestamp="2024-01-15T12:00:01.500000+00:00"), {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0]["observation_time"], 1705320001500)
+
+    def test_observation_time_fallback_to_unix_float(self):
+        result = self._make().build_message(self._msg(timestamp="1705320000.0"), {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0]["observation_time"], 1705320000000)
+
+    def test_observation_time_zero_on_invalid(self):
+        result = self._make().build_message(self._msg(timestamp="not-a-date"), {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0]["observation_time"], 0)
+
+    # ------------------------------------------------------------------
+    # Device lookup
+    # ------------------------------------------------------------------
+
+    def test_device_id_defaults_to_bmp_router(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["device_id"], "192.0.2.2")
+        self.assertIsNone(result[0]["device_ref"])
+
+    def test_device_id_from_cache(self):
+        result = self._make(
+            device_lookup={"id": "router-x", "ref": "ref:router-x"}
+        ).build_message(self._msg(), {})
+        self.assertEqual(result[0]["device_id"], "router-x")
+        self.assertEqual(result[0]["device_ref"], "ref:router-x")
+
+    # ------------------------------------------------------------------
+    # Peer IP
+    # ------------------------------------------------------------------
+
+    def test_peer_ip_set(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_ip"], "203.0.113.2")
+        self.assertIsNone(result[0]["peer_ip_ref"])
+
+    def test_peer_ip_ref_from_cache(self):
+        result = self._make(ip_lookup="ref:peer").build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_ip_ref"], "ref:peer")
+
+    # ------------------------------------------------------------------
+    # Peer AS
+    # ------------------------------------------------------------------
+
+    def test_peer_as_id_parsed(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_as_id"], 64496)
+
+    def test_peer_as_id_none_on_missing(self):
+        msg = self._msg()
+        del msg["peer_asn"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result[0]["peer_as_id"])
+
+    def test_peer_as_id_none_on_invalid(self):
+        result = self._make().build_message(self._msg(peer_asn="bad"), {})
+        self.assertIsNone(result[0]["peer_as_id"])
+
+    def test_peer_as_ref_from_cache(self):
+        result = self._make(as_lookup="ref:as64496").build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_as_ref"], "ref:as64496")
+
+    # ------------------------------------------------------------------
+    # BGP session fields
+    # ------------------------------------------------------------------
+
+    def test_bgp_id_set(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["bgp_id"], "192.0.2.2")
+
+    def test_bgp_id_none_when_absent(self):
+        msg = self._msg()
+        del msg["bgp_id"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result[0]["bgp_id"])
+
+    def test_local_as_parsed(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["local_as"], 64500)
+
+    def test_local_as_none_on_missing(self):
+        msg = self._msg()
+        del msg["local_as"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result[0]["local_as"])
+
+    def test_local_as_none_on_invalid(self):
+        result = self._make().build_message(self._msg(local_as="bad"), {})
+        self.assertIsNone(result[0]["local_as"])
+
+    def test_local_port_parsed(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["local_port"], 26354)
+
+    def test_local_port_none_on_missing(self):
+        msg = self._msg()
+        del msg["local_port"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result[0]["local_port"])
+
+    def test_remote_port_parsed(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["remote_port"], 179)
+
+    def test_remote_port_none_on_missing(self):
+        msg = self._msg()
+        del msg["remote_port"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result[0]["remote_port"])
+
+    def test_local_ip_set(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["local_ip"], "203.0.113.1")
+
+    def test_local_ip_none_when_absent(self):
+        msg = self._msg()
+        del msg["local_ip"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result[0]["local_ip"])
+
+    # ------------------------------------------------------------------
+    # Peer type / RD / collector
+    # ------------------------------------------------------------------
+
+    def test_peer_type_parsed(self):
+        result = self._make().build_message(self._msg(peer_type=1), {})
+        self.assertEqual(result[0]["peer_type"], 1)
+
+    def test_peer_type_none_on_invalid(self):
+        result = self._make().build_message(self._msg(peer_type="bad"), {})
+        self.assertIsNone(result[0]["peer_type"])
+
+    def test_rd_set(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["rd"], "0:64499:2")
+
+    def test_rd_none_when_absent(self):
+        msg = self._msg()
+        del msg["rd"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result[0]["rd"])
+
+    def test_collector_id_from_label(self):
+        result = self._make().build_message(self._msg(label="my-collector"), {})
+        self.assertEqual(result[0]["collector_id"], "my-collector")
+
+    def test_returns_list_with_one_record(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+
+    # ------------------------------------------------------------------
+    # No peer_down columns
+    # ------------------------------------------------------------------
+
+    def test_no_reason_type_column(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertNotIn("reason_type", result[0])
+
+    def test_no_reason_str_column(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertNotIn("reason_str", result[0])
+
+
+class TestPMAcctBMPPeerDownProcessor(unittest.TestCase):
+    """Unit tests for PMAcctBMPPeerDownProcessor."""
+
+    # Minimal valid peer_down message from pbmpd
+    BASE_MSG = {
+        "event_type": "log",
+        "seq": 18696,
+        "timestamp": "2024-01-15T12:00:00.000000+00:00",
+        "timestamp_arrival": "2024-01-15T12:00:00.100000+00:00",
+        "bmp_msg_type": "peer_down",
+        "bmp_router": "192.0.2.2",
+        "bmp_router_port": 45047,
+        "peer_ip": "203.0.113.3",
+        "peer_asn": 64496,
+        "peer_type": 0,
+        "rd": "0:64499:2",
+        "rd_origin": "bmp",
+        "reason_type": 1,
+        "reason_str": "The local system closed the session",
+        "label": "collector-1",
+    }
+
+    def _make_pipeline(self, device_lookup=None, ip_lookup=None, as_lookup=None):
+        pipeline = MagicMock()
+        ch_cacher = Mock()
+        ch_cacher.lookup.side_effect = lambda table, key: device_lookup if device_lookup and table.startswith("meta_device") else None
+        ch_cacher.lookup_dict_key.return_value = as_lookup
+        ip_cacher = Mock()
+        ip_cacher.lookup.return_value = [ip_lookup] if ip_lookup else None
+        def cacher_side_effect(name):
+            if name == "clickhouse":
+                return ch_cacher
+            elif name == "ip":
+                return ip_cacher
+            return Mock()
+        pipeline.cacher.side_effect = cacher_side_effect
+        return pipeline
+
+    def _make(self, **kwargs):
+        return PMAcctBMPPeerDownProcessor(self._make_pipeline(**kwargs))
+
+    def _msg(self, **overrides):
+        return {**self.BASE_MSG, **overrides}
+
+    # ------------------------------------------------------------------
+    # match_message
+    # ------------------------------------------------------------------
+
+    def test_match_message_peer_down(self):
+        self.assertTrue(self._make().match_message(self._msg()))
+
+    def test_match_message_wrong_type(self):
+        self.assertFalse(self._make().match_message(self._msg(bmp_msg_type="peer_up")))
+
+    def test_match_message_missing_type(self):
+        msg = self._msg()
+        del msg["bmp_msg_type"]
+        self.assertFalse(self._make().match_message(msg))
+
+    # ------------------------------------------------------------------
+    # Required fields / early exit
+    # ------------------------------------------------------------------
+
+    def test_build_message_missing_bmp_router_returns_none(self):
+        msg = self._msg()
+        del msg["bmp_router"]
+        self.assertIsNone(self._make().build_message(msg, {}))
+
+    def test_build_message_missing_peer_ip_returns_none(self):
+        msg = self._msg()
+        del msg["peer_ip"]
+        self.assertIsNone(self._make().build_message(msg, {}))
+
+    def test_build_message_missing_timestamp_returns_none(self):
+        msg = self._msg()
+        del msg["timestamp"]
+        self.assertIsNone(self._make().build_message(msg, {}))
+
+    # ------------------------------------------------------------------
+    # observation_time
+    # ------------------------------------------------------------------
+
+    def test_observation_time_parsed_from_iso8601(self):
+        result = self._make().build_message(self._msg(timestamp="2024-01-15T12:00:01.500000+00:00"), {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0]["observation_time"], 1705320001500)
+
+    def test_observation_time_fallback_to_unix_float(self):
+        result = self._make().build_message(self._msg(timestamp="1705320000.0"), {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0]["observation_time"], 1705320000000)
+
+    def test_observation_time_zero_on_invalid(self):
+        result = self._make().build_message(self._msg(timestamp="not-a-date"), {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0]["observation_time"], 0)
+
+    # ------------------------------------------------------------------
+    # Device lookup
+    # ------------------------------------------------------------------
+
+    def test_device_id_defaults_to_bmp_router(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["device_id"], "192.0.2.2")
+        self.assertIsNone(result[0]["device_ref"])
+
+    def test_device_id_from_cache(self):
+        result = self._make(
+            device_lookup={"id": "router-y", "ref": "ref:router-y"}
+        ).build_message(self._msg(), {})
+        self.assertEqual(result[0]["device_id"], "router-y")
+        self.assertEqual(result[0]["device_ref"], "ref:router-y")
+
+    # ------------------------------------------------------------------
+    # Peer IP
+    # ------------------------------------------------------------------
+
+    def test_peer_ip_set(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_ip"], "203.0.113.3")
+        self.assertIsNone(result[0]["peer_ip_ref"])
+
+    def test_peer_ip_ref_from_cache(self):
+        result = self._make(ip_lookup="ref:peer").build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_ip_ref"], "ref:peer")
+
+    # ------------------------------------------------------------------
+    # Peer AS
+    # ------------------------------------------------------------------
+
+    def test_peer_as_id_parsed(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_as_id"], 64496)
+
+    def test_peer_as_id_none_on_missing(self):
+        msg = self._msg()
+        del msg["peer_asn"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result[0]["peer_as_id"])
+
+    def test_peer_as_ref_from_cache(self):
+        result = self._make(as_lookup="ref:as64496").build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_as_ref"], "ref:as64496")
+
+    # ------------------------------------------------------------------
+    # Reason fields
+    # ------------------------------------------------------------------
+
+    def test_reason_type_parsed(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["reason_type"], 1)
+
+    def test_reason_type_none_on_missing(self):
+        msg = self._msg()
+        del msg["reason_type"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result[0]["reason_type"])
+
+    def test_reason_type_none_on_invalid(self):
+        result = self._make().build_message(self._msg(reason_type="bad"), {})
+        self.assertIsNone(result[0]["reason_type"])
+
+    def test_reason_str_set(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["reason_str"], "The local system closed the session")
+
+    def test_reason_str_none_when_absent(self):
+        msg = self._msg()
+        del msg["reason_str"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result[0]["reason_str"])
+
+    # ------------------------------------------------------------------
+    # Peer type / RD / collector
+    # ------------------------------------------------------------------
+
+    def test_peer_type_parsed(self):
+        result = self._make().build_message(self._msg(peer_type=2), {})
+        self.assertEqual(result[0]["peer_type"], 2)
+
+    def test_rd_set(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["rd"], "0:64499:2")
+
+    def test_rd_none_when_absent(self):
+        msg = self._msg()
+        del msg["rd"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result[0]["rd"])
+
+    def test_collector_id_from_label(self):
+        result = self._make().build_message(self._msg(label="my-collector"), {})
+        self.assertEqual(result[0]["collector_id"], "my-collector")
+
+    def test_returns_list_with_one_record(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+
+    # ------------------------------------------------------------------
+    # No peer_up columns
+    # ------------------------------------------------------------------
+
+    def test_no_bgp_id_column(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertNotIn("bgp_id", result[0])
+
+    def test_no_local_as_column(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertNotIn("local_as", result[0])
+
+    def test_no_local_port_column(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertNotIn("local_port", result[0])
+
+    def test_no_remote_port_column(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertNotIn("remote_port", result[0])
+
+    def test_no_local_ip_column(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertNotIn("local_ip", result[0])
 
 
 if __name__ == '__main__':

@@ -4,7 +4,12 @@ import ipaddress
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator
 from metranova.processors.clickhouse.flow import BaseFlowProcessor
-from metranova.processors.clickhouse.bmp import BaseBMPRouteProcessor, BaseBMPStatProcessor
+from metranova.processors.clickhouse.bmp import (
+    BaseBMPPeerDownProcessor,
+    BaseBMPPeerUpProcessor,
+    BaseBMPRouteProcessor,
+    BaseBMPStatProcessor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +39,58 @@ class PMAcctUtilMixin:
             formatted_record[f"{target_ip_field}_ref"] = ip_cache_result[0]
         else:
             formatted_record[f"{target_ip_field}_ref"] = None
+
+    @staticmethod
+    def parse_int(value, default=None):
+        """Cast *value* to int, returning *default* on failure."""
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return default
+
+    @staticmethod
+    def parse_ts_ms(ts_raw) -> int:
+        """Parse an ISO 8601 timestamp string (pbmpd format) to milliseconds.
+
+        Falls back to treating the value as a Unix float, then to 0.
+        """
+        try:
+            return int(datetime.fromisoformat(ts_raw).timestamp() * 1000)
+        except (ValueError, TypeError):
+            try:
+                return int(float(ts_raw) * 1000)
+            except (ValueError, TypeError):
+                return 0
+
+    def build_peer_base(self, value: dict) -> dict:
+        """Populate the common peer fields shared by peer_up and peer_down messages."""
+        record = {}
+
+        record["observation_time"] = self.parse_ts_ms(value.get("timestamp", ""))
+
+        self.lookup_device(value.get("bmp_router", ""), record)
+        self.lookup_ip("peer_ip", "peer_ip", value, record)
+
+        peer_asn = self.parse_int(value.get("peer_asn"))
+        record["peer_as_id"] = peer_asn
+        record["peer_as_ref"] = self.pipeline.cacher("clickhouse").lookup_dict_key(
+            "meta_as", peer_asn, "ref"
+        )
+
+        record["peer_type"] = self.parse_int(value.get("peer_type"))
+        record["rd"] = value.get("rd") or None
+
+        record.update({
+            "collector_id": value.get("label"),
+            "policy_originator": "unknown",
+            "policy_level": "unknown",
+            "policy_scope": ["unknown"],
+            "ext": orjson.dumps({}).decode("utf-8"),
+        })
+
+        return record
 
 class PMAcctFlowProcessor(BaseFlowProcessor, PMAcctUtilMixin):
     def __init__(self, pipeline):
@@ -648,3 +705,73 @@ class PMAcctBMPStatProcessor(BaseBMPStatProcessor, PMAcctUtilMixin):
         })
 
         return [formatted_record]
+
+
+class PMAcctBMPPeerUpProcessor(BaseBMPPeerUpProcessor, PMAcctUtilMixin):
+    """Parse BMP Peer Up messages (bmp_msg_type: "peer_up") from pmacct/pbmpd.
+
+    Maps pbmpd JSON fields onto the ``data_bmp_peer_up`` table columns defined
+    by ``BaseBMPPeerUpProcessor``.
+    """
+
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        self.required_fields = [
+            ['bmp_router'],
+            ['event_type'],
+            ['peer_ip'],
+            ['bmp_msg_type'],
+            ['timestamp'],
+        ]
+
+    def match_message(self, value: dict) -> bool:
+        return value.get("bmp_msg_type", "") == "peer_up"
+
+    def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
+        if not self.has_required_fields(value):
+            return None
+
+        record = self.build_peer_base(value)
+
+        # bgp_id is only present on peer_up
+        record["bgp_id"] = value.get("bgp_id") or None
+
+        # Local side of the BGP session (from the BMP peer-up TLV)
+        record["local_as"] = self.parse_int(value.get("local_as"))
+        record["local_port"] = self.parse_int(value.get("local_port"))
+        record["remote_port"] = self.parse_int(value.get("remote_port"))
+        record["local_ip"] = value.get("local_ip") or None
+
+        return [record]
+
+
+class PMAcctBMPPeerDownProcessor(BaseBMPPeerDownProcessor, PMAcctUtilMixin):
+    """Parse BMP Peer Down messages (bmp_msg_type: "peer_down") from pmacct/pbmpd.
+
+    Maps pbmpd JSON fields onto the ``data_bmp_peer_down`` table columns defined
+    by ``BaseBMPPeerDownProcessor``.
+    """
+
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        self.required_fields = [
+            ['bmp_router'],
+            ['event_type'],
+            ['peer_ip'],
+            ['bmp_msg_type'],
+            ['timestamp'],
+        ]
+
+    def match_message(self, value: dict) -> bool:
+        return value.get("bmp_msg_type", "") == "peer_down"
+
+    def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
+        if not self.has_required_fields(value):
+            return None
+
+        record = self.build_peer_base(value)
+
+        record["reason_type"] = self.parse_int(value.get("reason_type"))
+        record["reason_str"] = value.get("reason_str") or None
+
+        return [record]

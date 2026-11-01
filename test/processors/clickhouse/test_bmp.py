@@ -2,6 +2,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 from metranova.processors.clickhouse.bmp import (
+    BaseBMPPeerDownProcessor,
+    BaseBMPPeerUpProcessor,
     BaseBMPRouteProcessor,
     BaseBMPStatProcessor,
     MaterializedViewBMPRouteLatest,
@@ -280,6 +282,160 @@ class TestBMPStatProcessor(unittest.TestCase):
         self.assertEqual(self._make().get_materialized_views(), [])
 
     def test_no_views_by_default(self):
+        self.assertEqual(self._make().get_views(), [])
+
+
+class TestBMPPeerUpProcessor(unittest.TestCase):
+    """Unit tests for BaseBMPPeerUpProcessor."""
+
+    def _make(self, **env):
+        with patch.dict('os.environ', env):
+            return BaseBMPPeerUpProcessor(Mock())
+
+    def _cols(self):
+        return {c[0]: c[1] for c in self._make().column_defs}
+
+    def _col_names(self):
+        return [c[0] for c in self._make().column_defs]
+
+    def test_table_name_default(self):
+        self.assertEqual(self._make().table, 'data_bmp_peer_up')
+
+    def test_table_name_env_override(self):
+        self.assertEqual(
+            self._make(CLICKHOUSE_BMP_PEER_UP_TABLE='custom_peer_up').table,
+            'custom_peer_up',
+        )
+
+    def test_ttl_default(self):
+        self.assertEqual(self._make().table_ttl, '90 DAY')
+
+    def test_ttl_column_default(self):
+        self.assertEqual(self._make().table_ttl_column, 'observation_time')
+
+    def test_partition_by_default(self):
+        self.assertEqual(self._make().partition_by, 'toYYYYMMDD(observation_time)')
+
+    def test_observation_time_is_first_column(self):
+        self.assertEqual(self._col_names()[0], 'observation_time')
+
+    def test_expected_columns_present(self):
+        cols = self._col_names()
+        for name in [
+            'observation_time', 'insert_time',
+            'device_id', 'device_ref',
+            'peer_ip', 'peer_ip_ref',
+            'peer_as_id', 'peer_as_ref',
+            'peer_type', 'bgp_id', 'rd',
+            'local_as', 'local_port', 'remote_port', 'local_ip',
+        ]:
+            self.assertIn(name, cols, msg=f"Column '{name}' missing")
+
+    def test_peer_down_columns_absent(self):
+        cols = self._col_names()
+        for name in ['reason_type', 'reason_str']:
+            self.assertNotIn(name, cols, msg=f"Column '{name}' should not be present")
+
+    def test_local_ip_is_nullable_ipv6(self):
+        self.assertEqual(self._cols()['local_ip'], 'Nullable(IPv6)')
+
+    def test_local_port_is_nullable_uint16(self):
+        self.assertEqual(self._cols()['local_port'], 'Nullable(UInt16)')
+
+    def test_remote_port_is_nullable_uint16(self):
+        self.assertEqual(self._cols()['remote_port'], 'Nullable(UInt16)')
+
+    def test_bgp_id_is_nullable_ipv6(self):
+        self.assertEqual(self._cols()['bgp_id'], 'Nullable(IPv6)')
+
+    def test_primary_keys(self):
+        self.assertEqual(
+            self._make().primary_keys,
+            ['device_id', 'peer_ip', 'observation_time'],
+        )
+
+    def test_order_by_matches_primary_keys(self):
+        p = self._make()
+        self.assertEqual(p.order_by, p.primary_keys)
+
+    def test_no_materialized_views(self):
+        self.assertEqual(self._make().get_materialized_views(), [])
+
+    def test_no_views(self):
+        self.assertEqual(self._make().get_views(), [])
+
+
+class TestBMPPeerDownProcessor(unittest.TestCase):
+    """Unit tests for BaseBMPPeerDownProcessor."""
+
+    def _make(self, **env):
+        with patch.dict('os.environ', env):
+            return BaseBMPPeerDownProcessor(Mock())
+
+    def _cols(self):
+        return {c[0]: c[1] for c in self._make().column_defs}
+
+    def _col_names(self):
+        return [c[0] for c in self._make().column_defs]
+
+    def test_table_name_default(self):
+        self.assertEqual(self._make().table, 'data_bmp_peer_down')
+
+    def test_table_name_env_override(self):
+        self.assertEqual(
+            self._make(CLICKHOUSE_BMP_PEER_DOWN_TABLE='custom_peer_down').table,
+            'custom_peer_down',
+        )
+
+    def test_ttl_default(self):
+        self.assertEqual(self._make().table_ttl, '90 DAY')
+
+    def test_ttl_column_default(self):
+        self.assertEqual(self._make().table_ttl_column, 'observation_time')
+
+    def test_partition_by_default(self):
+        self.assertEqual(self._make().partition_by, 'toYYYYMMDD(observation_time)')
+
+    def test_observation_time_is_first_column(self):
+        self.assertEqual(self._col_names()[0], 'observation_time')
+
+    def test_expected_columns_present(self):
+        cols = self._col_names()
+        for name in [
+            'observation_time', 'insert_time',
+            'device_id', 'device_ref',
+            'peer_ip', 'peer_ip_ref',
+            'peer_as_id', 'peer_as_ref',
+            'peer_type', 'rd',
+            'reason_type', 'reason_str',
+        ]:
+            self.assertIn(name, cols, msg=f"Column '{name}' missing")
+
+    def test_peer_up_columns_absent(self):
+        cols = self._col_names()
+        for name in ['local_as', 'local_port', 'remote_port', 'local_ip', 'bgp_id']:
+            self.assertNotIn(name, cols, msg=f"Column '{name}' should not be present")
+
+    def test_reason_type_is_nullable_uint8(self):
+        self.assertEqual(self._cols()['reason_type'], 'Nullable(UInt8)')
+
+    def test_reason_str_is_nullable_string(self):
+        self.assertEqual(self._cols()['reason_str'], 'Nullable(String)')
+
+    def test_primary_keys(self):
+        self.assertEqual(
+            self._make().primary_keys,
+            ['device_id', 'peer_ip', 'observation_time'],
+        )
+
+    def test_order_by_matches_primary_keys(self):
+        p = self._make()
+        self.assertEqual(p.order_by, p.primary_keys)
+
+    def test_no_materialized_views(self):
+        self.assertEqual(self._make().get_materialized_views(), [])
+
+    def test_no_views(self):
         self.assertEqual(self._make().get_views(), [])
 
 

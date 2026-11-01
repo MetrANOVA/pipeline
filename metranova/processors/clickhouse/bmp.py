@@ -87,6 +87,135 @@ class BaseBMPStatProcessor(BaseDataProcessor):
         ]
         self.order_by = self.primary_keys.copy()
 
+# ---------------------------------------------------------------------------
+# BMP Peer Up events (BMP message type 3)
+# ---------------------------------------------------------------------------
+
+
+class BaseBMPPeerUpProcessor(BaseDataProcessor):
+    """Processor for BMP Peer Up messages (BMP message type 3).
+
+    Each row records a single peer session establishment event received
+    from pmacct/pbmpd.
+
+    Table: ``data_bmp_peer_up``
+
+    Environment variables:
+        CLICKHOUSE_BMP_PEER_UP_TABLE        – target table name (default: ``data_bmp_peer_up``)
+        CLICKHOUSE_BMP_PEER_UP_TTL          – row TTL interval (default: ``90 DAY``)
+        CLICKHOUSE_BMP_PEER_UP_TTL_COLUMN   – TTL anchor column (default: ``observation_time``)
+        CLICKHOUSE_BMP_PEER_UP_PARTITION_BY – PARTITION BY expression
+                                              (default: ``toYYYYMMDD(observation_time)``)
+    """
+
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+
+        self.table = os.getenv('CLICKHOUSE_BMP_PEER_UP_TABLE', 'data_bmp_peer_up')
+        self.table_ttl = os.getenv('CLICKHOUSE_BMP_PEER_UP_TTL', '90 DAY')
+        self.table_ttl_column = os.getenv('CLICKHOUSE_BMP_PEER_UP_TTL_COLUMN', 'observation_time')
+        self.partition_by = os.getenv(
+            'CLICKHOUSE_BMP_PEER_UP_PARTITION_BY', 'toYYYYMMDD(observation_time)'
+        )
+
+        # observation_time maps to pbmpd `timestamp` — when the peer came up.
+        self.column_defs.insert(0, ["observation_time", "DateTime64(3, 'UTC')", True])
+
+        # Device / router identity
+        self.column_defs.append(['device_id', 'LowCardinality(String)', True])
+        self.column_defs.append(['device_ref', 'Nullable(String)', True])
+
+        # BGP peer identity
+        self.column_defs.append(['peer_ip', 'IPv6', True])
+        self.column_defs.append(['peer_ip_ref', 'Nullable(String)', True])
+        self.column_defs.append(['peer_as_id', 'Nullable(UInt32)', True])
+        self.column_defs.append(['peer_as_ref', 'Nullable(String)', True])
+        self.column_defs.append(['peer_type', 'Nullable(UInt8)', True])
+
+        # BGP router ID of the remote peer (from the BGP OPEN message)
+        self.column_defs.append(['bgp_id', 'Nullable(IPv6)', True])
+
+        # Route Distinguisher (https://tools.ietf.org/html/rfc7854#section-4.2)
+        self.column_defs.append(['rd', 'Nullable(String)', True])
+
+        # Local side of the session
+        self.column_defs.append(['local_as', 'Nullable(UInt32)', True])
+        self.column_defs.append(['local_port', 'Nullable(UInt16)', True])
+        self.column_defs.append(['remote_port', 'Nullable(UInt16)', True])
+        self.column_defs.append(['local_ip', 'Nullable(IPv6)', True])
+
+        # Primary key: one event per (device, peer, timestamp).
+        self.primary_keys = [
+            'device_id',
+            'peer_ip',
+            'observation_time',
+        ]
+        self.order_by = self.primary_keys.copy()
+
+
+# ---------------------------------------------------------------------------
+# BMP Peer Down events (BMP message type 2)
+# ---------------------------------------------------------------------------
+
+
+class BaseBMPPeerDownProcessor(BaseDataProcessor):
+    """Processor for BMP Peer Down messages (BMP message type 2).
+
+    Each row records a single peer session termination event received
+    from pmacct/pbmpd.
+
+    Table: ``data_bmp_peer_down``
+
+    Environment variables:
+        CLICKHOUSE_BMP_PEER_DOWN_TABLE        – target table name (default: ``data_bmp_peer_down``)
+        CLICKHOUSE_BMP_PEER_DOWN_TTL          – row TTL interval (default: ``90 DAY``)
+        CLICKHOUSE_BMP_PEER_DOWN_TTL_COLUMN   – TTL anchor column (default: ``observation_time``)
+        CLICKHOUSE_BMP_PEER_DOWN_PARTITION_BY – PARTITION BY expression
+                                                (default: ``toYYYYMMDD(observation_time)``)
+    """
+
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+
+        self.table = os.getenv('CLICKHOUSE_BMP_PEER_DOWN_TABLE', 'data_bmp_peer_down')
+        self.table_ttl = os.getenv('CLICKHOUSE_BMP_PEER_DOWN_TTL', '90 DAY')
+        self.table_ttl_column = os.getenv('CLICKHOUSE_BMP_PEER_DOWN_TTL_COLUMN', 'observation_time')
+        self.partition_by = os.getenv(
+            'CLICKHOUSE_BMP_PEER_DOWN_PARTITION_BY', 'toYYYYMMDD(observation_time)'
+        )
+
+        # observation_time maps to pbmpd `timestamp` — when the peer went down.
+        self.column_defs.insert(0, ["observation_time", "DateTime64(3, 'UTC')", True])
+
+        # Device / router identity
+        self.column_defs.append(['device_id', 'LowCardinality(String)', True])
+        self.column_defs.append(['device_ref', 'Nullable(String)', True])
+
+        # BGP peer identity
+        self.column_defs.append(['peer_ip', 'IPv6', True])
+        self.column_defs.append(['peer_ip_ref', 'Nullable(String)', True])
+        self.column_defs.append(['peer_as_id', 'Nullable(UInt32)', True])
+        self.column_defs.append(['peer_as_ref', 'Nullable(String)', True])
+        self.column_defs.append(['peer_type', 'Nullable(UInt8)', True])
+
+        # Route Distinguisher (https://tools.ietf.org/html/rfc7854#section-4.2)
+        self.column_defs.append(['rd', 'Nullable(String)', True])
+
+        # Reason for the session termination
+        # reason_type: IANA BMP peer-down reason code
+        #   https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#peer-down-reason-codes
+        self.column_defs.append(['reason_type', 'Nullable(UInt8)', True])
+        self.column_defs.append(['reason_str', 'Nullable(String)', True])
+
+        # Primary key: one event per (device, peer, timestamp).
+        self.primary_keys = [
+            'device_id',
+            'peer_ip',
+            'observation_time',
+        ]
+        self.order_by = self.primary_keys.copy()
+
+
 class BaseBMPRouteProcessor(BaseDataProcessor):
 
     def __init__(self, pipeline):
