@@ -80,10 +80,12 @@ class MaterializedViewBMPRouteLatest(BaseClickHouseMaterializedViewMixin):
         self.column_defs = [
             ['device_id', 'LowCardinality(String)', True],
             ['peer_ip', 'IPv6', True],
+            ['peer_ip_ref', 'Nullable(String)', True],
             ['ip_prefix_address', 'IPv6', True],
             ['ip_prefix_length', 'UInt8', True],
             ['ip_prefix_range_start', 'IPv6', True],
             ['ip_prefix_range_end', 'IPv6', True],
+            ['ip_prefix_ref', 'Nullable(String)', True],
             ['add_path_id', 'UInt32', True],
             ['is_post', 'Bool', True],
             ['action_state', "AggregateFunction(argMax, LowCardinality(String), DateTime64(3, 'UTC'))", True],
@@ -105,21 +107,26 @@ class MaterializedViewBMPRouteLatest(BaseClickHouseMaterializedViewMixin):
         self.primary_keys = [
             'device_id',
             'peer_ip',
+            'peer_ip_ref',
             'ip_prefix_range_start',
             'ip_prefix_range_end',
+            'ip_prefix_ref',
             'add_path_id',
             'is_post',
         ]
         self.order_by = self.primary_keys.copy()
+        self.allow_nullable_key = True
         self.mv_name = 'data_bmp_route_latest_mv'
         self.mv_select_query = f"""
             SELECT
                 device_id,
                 peer_ip,
+                peer_ip_ref,
                 ip_prefix_address,
                 ip_prefix_length,
                 ip_prefix_range_start,
                 ip_prefix_range_end,
+                ip_prefix_ref,
                 add_path_id,
                 is_post,
                 argMaxState(action, export_time) AS action_state,
@@ -142,10 +149,12 @@ class MaterializedViewBMPRouteLatest(BaseClickHouseMaterializedViewMixin):
             GROUP BY
                 device_id,
                 peer_ip,
+                peer_ip_ref,
                 ip_prefix_address,
                 ip_prefix_length,
                 ip_prefix_range_start,
                 ip_prefix_range_end,
+                ip_prefix_ref,
                 add_path_id,
                 is_post
         """
@@ -159,10 +168,12 @@ class _BaseBMPRouteLatestAdjRIBInView(BaseClickHouseViewMixin):
             SELECT
                 device_id,
                 peer_ip,
+                peer_ip_ref,
                 ip_prefix_address,
                 ip_prefix_length,
                 ip_prefix_range_start,
                 ip_prefix_range_end,
+                ip_prefix_ref,
                 add_path_id,
                 argMaxMerge(action_state) AS action,
                 maxMerge(export_time_state) AS export_time,
@@ -184,10 +195,12 @@ class _BaseBMPRouteLatestAdjRIBInView(BaseClickHouseViewMixin):
             GROUP BY
                 device_id,
                 peer_ip,
+                peer_ip_ref,
                 ip_prefix_address,
                 ip_prefix_length,
                 ip_prefix_range_start,
                 ip_prefix_range_end,
+                ip_prefix_ref,
                 add_path_id
             HAVING argMaxMerge(action_state) = 'update'
         """

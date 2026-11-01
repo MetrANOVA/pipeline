@@ -1,0 +1,7 @@
+consumers:
+  - type: metranova.consumers.clickhouse.RootbeerClickHouseConsumer
+
+writers:
+  - type: metranova.writers.file.JSONFileWriter
+    processors:
+      - metranova.processors.clickhouse.rootbeer.RootbeerProcessor
