@@ -20,6 +20,7 @@ dict and emits exactly one route-report document.
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List
 
@@ -53,6 +54,7 @@ class RootbeerProcessor(BaseProcessor):
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.logger = logger
+        self.output_filename = os.getenv('ROOTBEER_OUTPUT_FILENAME', 'rootbeer_route_report.json')
         # match_fields left empty – we match manually in match_message
         self._state: Dict[str, Dict[str, Any]] = {}   # device_id -> router output
 
@@ -111,7 +113,7 @@ class RootbeerProcessor(BaseProcessor):
             ),
         )
         return {
-            "name": "rootbeer_route_report.json",
+            "name": self.output_filename,
             "data": {
                 "timestamp": timestamp,
                 "route-report": route_report,

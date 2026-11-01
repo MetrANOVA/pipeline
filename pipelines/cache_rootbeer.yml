@@ -1,5 +1,5 @@
 consumers:
-  - type: metranova.consumers.clickhouse.RootbeerClickHouseConsumer
+  - type: metranova.consumers.rootbeer.RootbeerClickHouseConsumer
 
 writers:
   - type: metranova.writers.file.JSONFileWriter
