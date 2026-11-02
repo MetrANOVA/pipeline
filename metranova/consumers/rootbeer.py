@@ -35,8 +35,6 @@ class RootbeerClickHouseConsumer(TimedIntervalConsumer):
     ---------------------
     ROOTBEER_SOURCE_TABLE          – ClickHouse table/view to query
                                      (default: data_bmp_route_latest)
-    ROOTBEER_IP_METADATA_TABLE     – meta_ip table used to resolve peer ASN
-                                     (default: meta_ip)
     ROOTBEER_UPDATE_INTERVAL       – seconds between runs, -1 = run once
                                      (default: -1)
     ROOTBEER_QUERY_BLOCK_SIZE      – rows fetched per network block
@@ -44,24 +42,22 @@ class RootbeerClickHouseConsumer(TimedIntervalConsumer):
     """
 
     # Both queries return the same column shape:
-    # (device_id, peer_ip, remote_as, ip_prefix_address, ip_prefix_length, add_path_id, as_path_id)
+    # (device_id, peer_ip, peer_as_id, ip_prefix_address, ip_prefix_length, add_path_id, as_path_id)
     #
-    # peer_ip_ref is now a GROUP BY column in data_bmp_route_latest, so we can join directly
-    # on peer_ip_ref = meta_ip.ref — the stable unique key for an IP metadata entry.
+    # peer_as_id is a GROUP BY column in data_bmp_route_latest so no join is needed.
     _ROUTE_QUERY = """
         SELECT
-            bmp.device_id                                         AS device_id,
-            toString(bmp.peer_ip)                                 AS peer_ip,
-            toString(m.as_id)                                     AS remote_as,
-            toString(bmp.ip_prefix_address)                       AS ip_prefix_address,
-            bmp.ip_prefix_length                                  AS ip_prefix_length,
-            bmp.add_path_id                                       AS add_path_id,
-            argMaxMerge(bmp.as_path_id_state)                     AS as_path_id
-        FROM {table} AS bmp
-        LEFT JOIN {ip_table} AS m ON bmp.peer_ip_ref = m.ref
-        WHERE bmp.is_post = {is_post}
-        GROUP BY device_id, peer_ip, peer_ip_ref, ip_prefix_address, ip_prefix_length, ip_prefix_ref, add_path_id, m.as_id
-        HAVING argMaxMerge(bmp.action_state) = 'update'
+            device_id,
+            toString(peer_ip)                   AS peer_ip,
+            toString(peer_as_id)                AS remote_as,
+            toString(ip_prefix_address)         AS ip_prefix_address,
+            ip_prefix_length,
+            add_path_id,
+            argMaxMerge(as_path_id_state)       AS as_path_id
+        FROM {table}
+        WHERE is_post = {is_post}
+        GROUP BY device_id, peer_ip, peer_ip_ref, peer_as_id, ip_prefix_address, ip_prefix_length, ip_prefix_ref, add_path_id
+        HAVING argMaxMerge(action_state) = 'update'
         ORDER BY device_id, peer_ip, ip_prefix_address, ip_prefix_length, add_path_id
     """
 
@@ -70,7 +66,6 @@ class RootbeerClickHouseConsumer(TimedIntervalConsumer):
         self.logger = logger
         self.datasource = ClickHouseConnector()
         self.source_table = os.getenv('ROOTBEER_SOURCE_TABLE', 'data_bmp_route_latest')
-        self.ip_metadata_table = os.getenv('ROOTBEER_IP_METADATA_TABLE', 'meta_ip')
         self.update_interval = int(os.getenv('ROOTBEER_UPDATE_INTERVAL', '-1'))
         self.block_size = int(os.getenv('ROOTBEER_QUERY_BLOCK_SIZE', '100000'))
         self.auto_prime_cachers = False  # no cachers needed
@@ -78,7 +73,6 @@ class RootbeerClickHouseConsumer(TimedIntervalConsumer):
     def _build_query(self, is_post: bool) -> str:
         return self._ROUTE_QUERY.format(
             table=self.source_table,
-            ip_table=self.ip_metadata_table,
             is_post='true' if is_post else 'false',
         )
 

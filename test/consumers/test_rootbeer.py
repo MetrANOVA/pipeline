@@ -21,19 +21,16 @@ class TestRootbeerClickHouseConsumerInit(unittest.TestCase):
     def test_default_env_values(self):
         consumer, _ = _make_consumer()
         self.assertEqual(consumer.source_table, 'data_bmp_route_latest')
-        self.assertEqual(consumer.ip_metadata_table, 'meta_ip')
         self.assertEqual(consumer.update_interval, -1)
         self.assertEqual(consumer.block_size, 100000)
 
     def test_custom_env_values(self):
         consumer, _ = _make_consumer(env={
             'ROOTBEER_SOURCE_TABLE': 'custom_table',
-            'ROOTBEER_IP_METADATA_TABLE': 'custom_meta',
             'ROOTBEER_UPDATE_INTERVAL': '300',
             'ROOTBEER_QUERY_BLOCK_SIZE': '50000',
         })
         self.assertEqual(consumer.source_table, 'custom_table')
-        self.assertEqual(consumer.ip_metadata_table, 'custom_meta')
         self.assertEqual(consumer.update_interval, 300)
         self.assertEqual(consumer.block_size, 50000)
 
@@ -60,30 +57,22 @@ class TestRootbeerBuildQuery(unittest.TestCase):
         q = self.consumer._build_query(is_post=True)
         self.assertIn('data_bmp_route_latest', q)
 
-    def test_query_references_meta_ip_table(self):
+    def test_query_includes_peer_as_id(self):
         q = self.consumer._build_query(is_post=True)
-        self.assertIn('meta_ip', q)
+        self.assertIn('peer_as_id', q)
 
-    def test_query_joins_on_peer_ip_ref(self):
+    def test_query_has_no_join(self):
         q = self.consumer._build_query(is_post=True)
-        self.assertIn('peer_ip_ref = m.ref', q)
-
-    def test_query_includes_as_id_select(self):
-        q = self.consumer._build_query(is_post=True)
-        self.assertIn('m.as_id', q)
+        self.assertNotIn('JOIN', q)
 
     def test_query_orders_by_device_peer(self):
         q = self.consumer._build_query(is_post=True)
         self.assertIn('ORDER BY device_id, peer_ip', q)
 
-    def test_custom_table_names_in_query(self):
-        consumer, _ = _make_consumer(env={
-            'ROOTBEER_SOURCE_TABLE': 'my_bmp_table',
-            'ROOTBEER_IP_METADATA_TABLE': 'my_meta',
-        })
+    def test_custom_source_table_in_query(self):
+        consumer, _ = _make_consumer(env={'ROOTBEER_SOURCE_TABLE': 'my_bmp_table'})
         q = consumer._build_query(is_post=True)
         self.assertIn('my_bmp_table', q)
-        self.assertIn('my_meta', q)
 
 
 class TestRootbeerConsumeMessages(unittest.TestCase):
