@@ -1,3 +1,4 @@
+import ipaddress
 import logging
 import os
 from metranova.connectors.clickhouse import ClickHouseConnector
@@ -183,8 +184,11 @@ class RootbeerClickHouseConsumer(TimedIntervalConsumer):
     # ------------------------------------------------------------------
 
     def _make_route(self, prefix_addr: str, prefix_len: int, as_path_id: list) -> dict:
+        addr = ipaddress.ip_address(prefix_addr)
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
         return {
-            "prefix": f"{prefix_addr}/{prefix_len}",
+            "prefix": f"{addr}/{prefix_len}",
             "as-path": [str(asn) for asn in (as_path_id or [])],
         }
 
