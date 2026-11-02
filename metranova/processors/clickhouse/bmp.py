@@ -239,6 +239,8 @@ class BaseBMPRouteProcessor(BaseDataProcessor):
         self.column_defs.append(['peer_ip', 'IPv6', True])
         self.column_defs.append(['peer_ip_ref', 'Nullable(String)', True])
         self.column_defs.append(['peer_hostname', 'String', True])
+        self.column_defs.append(['peer_as_id', 'Nullable(UInt32)', True])
+        self.column_defs.append(['peer_as_ref', 'Nullable(String)', True])
         self.column_defs.append(['ip_prefix_address', 'IPv6', True])
         self.column_defs.append(['ip_prefix_length', 'UInt8', True])
         self.column_defs.append(['ip_prefix_range_start', 'IPv6', True])
@@ -295,6 +297,8 @@ class MaterializedViewBMPRouteLatest(BaseClickHouseMaterializedViewMixin):
             ['peer_ip', 'IPv6', True],
             ['peer_ip_ref', 'Nullable(String)', True],
             ['peer_hostname', 'String', True],
+            ['peer_as_id', 'Nullable(UInt32)', True],
+            ['peer_as_ref', 'Nullable(String)', True],
             ['ip_prefix_address', 'IPv6', True],
             ['ip_prefix_length', 'UInt8', True],
             ['ip_prefix_range_start', 'IPv6', True],
@@ -323,6 +327,8 @@ class MaterializedViewBMPRouteLatest(BaseClickHouseMaterializedViewMixin):
             'peer_ip',
             'peer_ip_ref',
             'peer_hostname',
+            'peer_as_id',
+            'peer_as_ref',
             'ip_prefix_range_start',
             'ip_prefix_range_end',
             'ip_prefix_ref',
@@ -338,6 +344,8 @@ class MaterializedViewBMPRouteLatest(BaseClickHouseMaterializedViewMixin):
                 peer_ip,
                 peer_ip_ref,
                 peer_hostname,
+                peer_as_id,
+                peer_as_ref,
                 ip_prefix_address,
                 ip_prefix_length,
                 ip_prefix_range_start,
@@ -367,6 +375,8 @@ class MaterializedViewBMPRouteLatest(BaseClickHouseMaterializedViewMixin):
                 peer_ip,
                 peer_ip_ref,
                 peer_hostname,
+                peer_as_id,
+                peer_as_ref,
                 ip_prefix_address,
                 ip_prefix_length,
                 ip_prefix_range_start,
@@ -387,6 +397,8 @@ class _BaseBMPRouteLatestAdjRIBInView(BaseClickHouseViewMixin):
                 peer_ip,
                 peer_ip_ref,
                 peer_hostname,
+                peer_as_id,
+                peer_as_ref,
                 ip_prefix_address,
                 ip_prefix_length,
                 ip_prefix_range_start,
@@ -415,6 +427,8 @@ class _BaseBMPRouteLatestAdjRIBInView(BaseClickHouseViewMixin):
                 peer_ip,
                 peer_ip_ref,
                 peer_hostname,
+                peer_as_id,
+                peer_as_ref,
                 ip_prefix_address,
                 ip_prefix_length,
                 ip_prefix_range_start,

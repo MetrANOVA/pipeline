@@ -41,6 +41,45 @@ class PMAcctUtilMixin:
         else:
             formatted_record[f"{target_ip_field}_ref"] = None
 
+    def lookup_peer_as(self, as_field: str, target_field: str, value: dict, formatted_record: dict):
+        """Populate peer AS id and ref when the ASN is present directly in the message.
+
+        Parses ``value[as_field]`` as an integer for ``target_field_id`` (0 on
+        parse failure) and resolves ``target_field_ref`` via the ``meta_as``
+        clickhouse cache (``None`` if not found).
+
+        Use for messages that carry ``peer_asn`` directly (stat, peer_up, peer_down).
+        """
+        peer_asn = self.parse_int(value.get(as_field), default=0)
+        formatted_record[f"{target_field}_id"] = peer_asn
+        formatted_record[f"{target_field}_ref"] = self.pipeline.cacher("clickhouse").lookup_dict_key(
+            "meta_as", peer_asn, "ref"
+        )
+
+    def lookup_peer_as_from_ip(self, ip_field: str, target_field: str, formatted_record: dict):
+        """Populate peer AS id and ref by resolving the peer IP through the IP cache.
+
+        Use for route_monitor messages which do not carry ``peer_asn`` directly.
+        Walks ``ip_to_as_lookup_order`` (same as ``lookup_ip_as_fields``) to
+        derive the ASN from the already-resolved IP address stored at
+        ``formatted_record[ip_field]``, then resolves ``target_field_ref`` via
+        the ``meta_as`` clickhouse cache (``None`` if not found).
+        The AS id falls back to 0 if the IP cache has no AS entry or the value
+        cannot be parsed as an integer.
+        """
+        peer_ip = formatted_record.get(ip_field)
+        as_id = 0
+        if peer_ip:
+            for table in self.ip_to_as_lookup_order:
+                result = self.pipeline.cacher("ip").lookup(table, peer_ip)
+                if result and len(result) > 1:
+                    as_id = self.parse_int(result[1], default=0)
+                    break
+        formatted_record[f"{target_field}_id"] = as_id
+        formatted_record[f"{target_field}_ref"] = self.pipeline.cacher("clickhouse").lookup_dict_key(
+            "meta_as", as_id, "ref"
+        )
+
     @staticmethod
     def parse_int(value, default=None):
         """Cast *value* to int, returning *default* on failure."""
@@ -73,12 +112,7 @@ class PMAcctUtilMixin:
 
         self.lookup_device(value.get("bmp_router", ""), record)
         self.lookup_ip("peer_ip", "peer_ip", value, record)
-
-        peer_asn = self.parse_int(value.get("peer_asn"))
-        record["peer_as_id"] = peer_asn
-        record["peer_as_ref"] = self.pipeline.cacher("clickhouse").lookup_dict_key(
-            "meta_as", peer_asn, "ref"
-        )
+        self.lookup_peer_as("peer_asn", "peer_as", value, record)
 
         record["peer_type"] = self.parse_int(value.get("peer_type"))
         record["rd"] = value.get("rd") or None
@@ -507,6 +541,8 @@ class PMAcctBMPRouteProcessor(BaseBMPRouteProcessor, PMAcctUtilMixin):
         else:
             formatted_record["peer_hostname"] = peer_ip_str
 
+        self.lookup_peer_as_from_ip("peer_ip", "peer_as", formatted_record)
+
         #Parse BGP fields
         as_path_str = value.get("as_path", "").split(" ")
         bgp_as_path_id = []
@@ -586,8 +622,8 @@ class PMAcctBMPRouteProcessor(BaseBMPRouteProcessor, PMAcctUtilMixin):
 
         # Update formatted_record with additional fields
         formatted_record.update({
-            "observation_time": int(float(value.get("timestamp", 0)) * 1000),
-            "export_time": int(float(value.get("timestamp_arrival", 0)) * 1000),
+            "observation_time": self.parse_ts_ms(value.get("timestamp", 0)),
+            "export_time": self.parse_ts_ms(value.get("timestamp_arrival", 0)),
             "collector_id": value.get("label", None),
             "policy_originator": "unknown",
             "policy_level": "unknown",
@@ -669,17 +705,8 @@ class PMAcctBMPStatProcessor(BaseBMPStatProcessor, PMAcctUtilMixin):
         else:
             formatted_record["peer_hostname"] = _peer_ip_str
 
-        # BGP peer AS — provided directly in the message; look up the ref separately
-        peer_asn = value.get("peer_asn", None)
-        if peer_asn is not None:
-            try:
-                peer_asn = int(peer_asn)
-            except (ValueError, TypeError):
-                peer_asn = None
-        formatted_record["peer_as_id"] = peer_asn
-        formatted_record["peer_as_ref"] = self.pipeline.cacher("clickhouse").lookup_dict_key(
-            "meta_as", peer_asn, "ref"
-        )
+        # BGP peer AS is provided directly in the stat message
+        self.lookup_peer_as("peer_asn", "peer_as", value, formatted_record)
 
         # BGP peer type (IANA peer type code)
         peer_type = value.get("peer_type", None)

@@ -30,6 +30,17 @@ class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
         self.assertIn('PARTITION BY toYYYYMMDD(export_time)', result)
         self.assertIn('TTL export_time + INTERVAL 1 DAY', result)
 
+    def test_base_route_table_peer_as_columns(self):
+        processor = BaseBMPRouteProcessor(Mock())
+
+        result = processor.create_table_command()
+
+        self.assertIn('`peer_as_id` Nullable(UInt32)', result)
+        self.assertIn('`peer_as_ref` Nullable(String)', result)
+        # peer_as columns appear after peer_hostname
+        self.assertLess(result.index('`peer_hostname`'), result.index('`peer_as_id`'))
+        self.assertLess(result.index('`peer_as_id`'), result.index('`peer_as_ref`'))
+
     def test_create_table_command(self):
         materialized_view = MaterializedViewBMPRouteLatest(source_table_name='data_bmp_route')
 
@@ -55,12 +66,14 @@ class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
             "`observation_time_state` AggregateFunction(argMax, DateTime64(3, 'UTC'), DateTime64(3, 'UTC'))",
             result,
         )
+        self.assertIn('`peer_as_id` Nullable(UInt32)', result)
+        self.assertIn('`peer_as_ref` Nullable(String)', result)
         self.assertIn(
-            'PRIMARY KEY (`device_id`,`peer_ip`,`peer_ip_ref`,`peer_hostname`,`ip_prefix_range_start`,`ip_prefix_range_end`,`ip_prefix_ref`,`add_path_id`,`is_post`)',
+            'PRIMARY KEY (`device_id`,`peer_ip`,`peer_ip_ref`,`peer_hostname`,`peer_as_id`,`peer_as_ref`,`ip_prefix_range_start`,`ip_prefix_range_end`,`ip_prefix_ref`,`add_path_id`,`is_post`)',
             result,
         )
         self.assertIn(
-            'ORDER BY (`device_id`,`peer_ip`,`peer_ip_ref`,`peer_hostname`,`ip_prefix_range_start`,`ip_prefix_range_end`,`ip_prefix_ref`,`add_path_id`,`is_post`)',
+            'ORDER BY (`device_id`,`peer_ip`,`peer_ip_ref`,`peer_hostname`,`peer_as_id`,`peer_as_ref`,`ip_prefix_range_start`,`ip_prefix_range_end`,`ip_prefix_ref`,`add_path_id`,`is_post`)',
             result,
         )
 
@@ -87,6 +100,8 @@ class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
         self.assertIn('GROUP BY', result)
         self.assertIn('peer_ip_ref', result)
         self.assertIn('peer_hostname', result)
+        self.assertIn('peer_as_id', result)
+        self.assertIn('peer_as_ref', result)
         self.assertIn('ip_prefix_ref', result)
         self.assertIn('add_path_id,\n                is_post', result)
 
@@ -120,6 +135,8 @@ class TestBMPRouteLatestViews(unittest.TestCase):
         self.assertIn('argMaxMerge(bgp_nexthop_state) AS bgp_nexthop', result)
         self.assertIn('peer_ip_ref', result)
         self.assertIn('peer_hostname', result)
+        self.assertIn('peer_as_id', result)
+        self.assertIn('peer_as_ref', result)
         self.assertIn('ip_prefix_ref', result)
 
     def test_post_policy_view_command(self):
@@ -133,6 +150,8 @@ class TestBMPRouteLatestViews(unittest.TestCase):
         self.assertIn('GROUP BY', result)
         self.assertIn('peer_ip_ref', result)
         self.assertIn('peer_hostname', result)
+        self.assertIn('peer_as_id', result)
+        self.assertIn('peer_as_ref', result)
         self.assertIn('ip_prefix_ref', result)
 
     @patch.dict('os.environ', {'CLICKHOUSE_BMP_ROUTE_VIEWS': 'adj_rib_in_pre'})

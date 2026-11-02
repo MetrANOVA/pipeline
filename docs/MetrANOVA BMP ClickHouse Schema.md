@@ -20,6 +20,8 @@
 | `peer_ip` | IPv6 | The IP address of the BMP peer. IPv4 peers are stored as IPv4-mapped IPv6 addresses. |
 | `peer_ip_ref` | Nullable(String) | Reference to `meta_ip` for the peer IP address |
 | `peer_hostname` | String | Reverse-DNS hostname of the peer IP. Falls back to the IP string if no PTR record is found. |
+| `peer_as_id` | Nullable(UInt32) | BGP peer AS number (from `peer_asn` in the BMP message) |
+| `peer_as_ref` | Nullable(String) | Reference to `meta_as` for the peer AS |
 | `ip_prefix_address` | IPv6 | The network address of the IP prefix (e.g. `'10.1.1.0'` for `10.1.1.0/24`). IPv4 prefixes are stored as IPv4-mapped IPv6 addresses. |
 | `ip_prefix_length` | UInt8 | The prefix length (0–128). Used when sorting results by specificity (longest-prefix-match ordering). |
 | `ip_prefix_range_start` | IPv6 | The first IP address in the prefix range. Pre-computed by the ingestion pipeline. Used as a primary-key index column for efficient range and exact-prefix lookups. |
@@ -66,6 +68,8 @@ Stores partial aggregation states produced by `data_bmp_route_latest_mv`. The gr
 | `peer_ip` | IPv6 | Grouping key — IP address of the BMP peer |
 | `peer_ip_ref` | Nullable(String) | Grouping key — reference to `meta_ip` for the peer IP address; used to join `meta_ip` for peer ASN lookups |
 | `peer_hostname` | String | Grouping key — reverse-DNS hostname of the peer IP; falls back to the IP string if no PTR record found |
+| `peer_as_id` | Nullable(UInt32) | Grouping key — BGP peer AS number |
+| `peer_as_ref` | Nullable(String) | Grouping key — reference to `meta_as` for the peer AS |
 | `ip_prefix_address` | IPv6 | Grouping key — network address of the prefix |
 | `ip_prefix_length` | UInt8 | Grouping key — prefix length (0–128) |
 | `ip_prefix_range_start` | IPv6 | Grouping key — first IP in the prefix range |
@@ -89,7 +93,7 @@ Stores partial aggregation states produced by `data_bmp_route_latest_mv`. The gr
 | `ip_version_state` | AggregateFunction(argMax, Nullable(UInt8), DateTime64(3, 'UTC')) | Most recent IP version (`4` or `6`) |
 | `mpls_label_state` | AggregateFunction(argMax, Nullable(UInt32), DateTime64(3, 'UTC')) | Most recent MPLS VPN label |
 
-**Primary Key/Ordering:** `(device_id, peer_ip, peer_ip_ref, peer_hostname, ip_prefix_range_start, ip_prefix_range_end, ip_prefix_ref, add_path_id, is_post)`
+**Primary Key/Ordering:** `(device_id, peer_ip, peer_ip_ref, peer_hostname, peer_as_id, peer_as_ref, ip_prefix_range_start, ip_prefix_range_end, ip_prefix_ref, add_path_id, is_post)`
 
 **Engine:** ReplicatedAggregatingMergeTree — ZooKeeper path `/clickhouse/tables/{shard}/data_bmp_route_latest`
 
@@ -125,6 +129,8 @@ Finalizes aggregation states from `data_bmp_route_latest` and exposes the curren
 | `peer_ip` | IPv6 | IP address of the BMP peer |
 | `peer_ip_ref` | Nullable(String) | Reference to `meta_ip` for the peer IP address |
 | `peer_hostname` | String | Reverse-DNS hostname of the peer IP; falls back to the IP string |
+| `peer_as_id` | Nullable(UInt32) | BGP peer AS number |
+| `peer_as_ref` | Nullable(String) | Reference to `meta_as` for the peer AS |
 | `ip_prefix_address` | IPv6 | Network address of the prefix |
 | `ip_prefix_length` | UInt8 | Prefix length (0–128) |
 | `ip_prefix_range_start` | IPv6 | First IP in the prefix range |
@@ -163,6 +169,8 @@ Identical in structure to `data_bmp_route_latest_adj_rib_in_pre_view` but expose
 | `peer_ip` | IPv6 | IP address of the BMP peer |
 | `peer_ip_ref` | Nullable(String) | Reference to `meta_ip` for the peer IP address |
 | `peer_hostname` | String | Reverse-DNS hostname of the peer IP; falls back to the IP string |
+| `peer_as_id` | Nullable(UInt32) | BGP peer AS number |
+| `peer_as_ref` | Nullable(String) | Reference to `meta_as` for the peer AS |
 | `ip_prefix_address` | IPv6 | Network address of the prefix |
 | `ip_prefix_length` | UInt8 | Prefix length (0–128) |
 | `ip_prefix_range_start` | IPv6 | First IP in the prefix range |

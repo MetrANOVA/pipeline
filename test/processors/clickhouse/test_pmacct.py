@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 from metranova.processors.clickhouse.pmacct import (
     PMAcctBMPPeerDownProcessor,
     PMAcctBMPPeerUpProcessor,
+    PMAcctBMPRouteProcessor,
     PMAcctBMPStatProcessor,
     PMAcctFlowProcessor,
 )
@@ -840,6 +841,208 @@ class TestPMAcctFlowProcessor(unittest.TestCase):
         self.assertEqual(record['packet_count'], 0)
 
 
+class TestPMAcctBMPRouteProcessor(unittest.TestCase):
+    """Unit tests for PMAcctBMPRouteProcessor."""
+
+    # Minimal valid route_monitor message from pbmpd (update).
+    # Note: route_monitor messages do NOT contain peer_asn; the peer AS is
+    # derived from peer_ip via the IP cache (see lookup_peer_as_from_ip).
+    BASE_MSG = {
+        "event_type": "log",
+        "seq": 1,
+        "timestamp": "2024-01-15T12:00:00.000000+00:00",
+        "timestamp_arrival": "2024-01-15T12:00:00.100000+00:00",
+        "bmp_msg_type": "route_monitor",
+        "bmp_router": "192.0.2.1",
+        "bmp_router_port": 45000,
+        "log_type": "update",
+        "ip_prefix": "10.0.0.0/24",
+        "peer_ip": "203.0.113.1",
+        "bgp_nexthop": "203.0.113.1",
+        "as_path": "64501 64502",
+        "is_in": 1,
+        "is_post": 1,
+        "label": "collector-1",
+    }
+
+    def _make_pipeline(self, device_lookup=None, ip_lookup=None, peer_as_id=None, as_lookup=None, hostname=None):
+        """Build a mock pipeline.
+
+        ``ip_lookup`` is the ref string returned for IP cache hits (element 0).
+        ``peer_as_id`` is the ASN integer returned as element 1 of the IP cache
+        result, simulating the IP-to-AS mapping used by ``lookup_peer_as_from_ip``.
+        ``as_lookup`` is the ref string returned by the ``meta_as`` clickhouse cache.
+        """
+        pipeline = MagicMock()
+        ch_cacher = Mock()
+        ch_cacher.lookup.side_effect = lambda table, key: (
+            device_lookup if device_lookup and table.startswith("meta_device") else None
+        )
+        ch_cacher.lookup_dict_key.return_value = as_lookup
+        ip_cacher = Mock()
+        # IP cache returns [ref, asn] when both are available, [ref] otherwise
+        if peer_as_id is not None:
+            ip_cacher.lookup.return_value = [ip_lookup, peer_as_id]
+        elif ip_lookup is not None:
+            ip_cacher.lookup.return_value = [ip_lookup]
+        else:
+            ip_cacher.lookup.return_value = None
+        dns_cacher = Mock()
+        dns_cacher.lookup_hostname.return_value = hostname
+
+        def cacher_side_effect(name):
+            if name == "clickhouse":
+                return ch_cacher
+            elif name == "ip":
+                return ip_cacher
+            elif name == "dns":
+                return dns_cacher
+            return Mock()
+
+        pipeline.cacher.side_effect = cacher_side_effect
+        return pipeline
+
+    def _make(self, **kwargs):
+        return PMAcctBMPRouteProcessor(self._make_pipeline(**kwargs))
+
+    def _msg(self, **overrides):
+        return {**self.BASE_MSG, **overrides}
+
+    # ------------------------------------------------------------------
+    # match_message
+    # ------------------------------------------------------------------
+
+    def test_match_message_route_monitor(self):
+        self.assertTrue(self._make().match_message(self._msg()))
+
+    def test_match_message_wrong_type(self):
+        self.assertFalse(self._make().match_message(self._msg(bmp_msg_type="stats")))
+
+    def test_match_message_missing_type(self):
+        msg = self._msg()
+        del msg["bmp_msg_type"]
+        self.assertFalse(self._make().match_message(msg))
+
+    # ------------------------------------------------------------------
+    # build_message — basic fields
+    # ------------------------------------------------------------------
+
+    def test_returns_list_with_one_record(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+
+    def test_action_update(self):
+        result = self._make().build_message(self._msg(log_type="update"), {})
+        self.assertEqual(result[0]["action"], "update")
+
+    def test_action_withdraw(self):
+        result = self._make().build_message(self._msg(log_type="withdraw"), {})
+        self.assertEqual(result[0]["action"], "withdraw")
+
+    def test_action_delete(self):
+        result = self._make().build_message(self._msg(log_type="delete"), {})
+        self.assertEqual(result[0]["action"], "delete")
+
+    def test_unknown_log_type_returns_none(self):
+        result = self._make().build_message(self._msg(log_type="bogus"), {})
+        self.assertIsNone(result)
+
+    def test_update_without_ip_prefix_returns_none(self):
+        msg = self._msg(log_type="update")
+        del msg["ip_prefix"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result)
+
+    def test_delete_without_ip_prefix_uses_default(self):
+        msg = self._msg(log_type="delete")
+        del msg["ip_prefix"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0]["ip_prefix"], "::/0")
+
+    def test_missing_required_field_returns_none(self):
+        msg = self._msg()
+        del msg["peer_ip"]
+        result = self._make().build_message(msg, {})
+        self.assertIsNone(result)
+
+    def test_is_in_true(self):
+        result = self._make().build_message(self._msg(is_in=1), {})
+        self.assertTrue(result[0]["is_in"])
+
+    def test_is_post_true(self):
+        result = self._make().build_message(self._msg(is_post=1), {})
+        self.assertTrue(result[0]["is_post"])
+
+    def test_is_post_false(self):
+        result = self._make().build_message(self._msg(is_post=0), {})
+        self.assertFalse(result[0]["is_post"])
+
+    def test_collector_id_from_label(self):
+        result = self._make().build_message(self._msg(label="my-collector"), {})
+        self.assertEqual(result[0]["collector_id"], "my-collector")
+
+    # ------------------------------------------------------------------
+    # Peer fields — ip, hostname, AS
+    # ------------------------------------------------------------------
+
+    def test_peer_ip_set(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_ip"], "203.0.113.1")
+
+    def test_peer_ip_ref_from_cache(self):
+        result = self._make(ip_lookup="ref:peer-203").build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_ip_ref"], "ref:peer-203")
+
+    def test_peer_ip_ref_none_when_no_cache(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertIsNone(result[0]["peer_ip_ref"])
+
+    def test_peer_hostname_from_dns(self):
+        result = self._make(hostname="router.example.com").build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_hostname"], "router.example.com")
+
+    def test_peer_hostname_falls_back_to_ip_on_none(self):
+        result = self._make(hostname=None).build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_hostname"], self.BASE_MSG["peer_ip"])
+
+    def test_peer_hostname_uses_ip_when_dns_disabled(self):
+        with patch.dict(os.environ, {"BMP_PEER_DNS_LOOKUP": "false"}):
+            proc = PMAcctBMPRouteProcessor(self._make_pipeline(hostname="router.example.com"))
+        result = proc.build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_hostname"], self.BASE_MSG["peer_ip"])
+
+    def test_peer_as_id_from_ip_cache(self):
+        # route_monitor messages have no peer_asn; AS is derived from peer_ip via IP cache
+        result = self._make(peer_as_id=64501).build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_as_id"], 64501)
+
+    def test_peer_as_id_zero_when_ip_cache_miss(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_as_id"], 0)
+
+    def test_peer_as_ref_from_cache(self):
+        result = self._make(peer_as_id=64501, as_lookup="ref:as64501").build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_as_ref"], "ref:as64501")
+
+    def test_peer_as_ref_none_when_no_meta_as(self):
+        result = self._make(peer_as_id=64501).build_message(self._msg(), {})
+        self.assertIsNone(result[0]["peer_as_ref"])
+
+    # ------------------------------------------------------------------
+    # AS path
+    # ------------------------------------------------------------------
+
+    def test_as_path_id_parsed(self):
+        result = self._make().build_message(self._msg(as_path="64501 64502"), {})
+        self.assertEqual(result[0]["as_path_id"], [64501, 64502])
+
+    def test_as_path_id_empty_on_blank(self):
+        result = self._make().build_message(self._msg(as_path=""), {})
+        self.assertEqual(result[0]["as_path_id"], [])
+
+
 class TestPMAcctBMPStatProcessor(unittest.TestCase):
     """Unit tests for PMAcctBMPStatProcessor."""
 
@@ -994,15 +1197,15 @@ class TestPMAcctBMPStatProcessor(unittest.TestCase):
         result = self._make().build_message(self._msg(), {})
         self.assertEqual(result[0]["peer_as_id"], 64501)
 
-    def test_peer_as_id_none_on_missing(self):
+    def test_peer_as_id_zero_on_missing(self):
         msg = self._msg()
         del msg["peer_asn"]
         result = self._make().build_message(msg, {})
-        self.assertIsNone(result[0]["peer_as_id"])
+        self.assertEqual(result[0]["peer_as_id"], 0)
 
-    def test_peer_as_id_none_on_invalid(self):
+    def test_peer_as_id_zero_on_invalid(self):
         result = self._make().build_message(self._msg(peer_asn="bad"), {})
-        self.assertIsNone(result[0]["peer_as_id"])
+        self.assertEqual(result[0]["peer_as_id"], 0)
 
     def test_peer_as_ref_from_cache(self):
         result = self._make(as_lookup="ref:as64501").build_message(self._msg(), {})
@@ -1258,19 +1461,23 @@ class TestPMAcctBMPPeerUpProcessor(unittest.TestCase):
         result = self._make().build_message(self._msg(), {})
         self.assertEqual(result[0]["peer_as_id"], 64496)
 
-    def test_peer_as_id_none_on_missing(self):
+    def test_peer_as_id_zero_on_missing(self):
         msg = self._msg()
         del msg["peer_asn"]
         result = self._make().build_message(msg, {})
-        self.assertIsNone(result[0]["peer_as_id"])
+        self.assertEqual(result[0]["peer_as_id"], 0)
 
-    def test_peer_as_id_none_on_invalid(self):
+    def test_peer_as_id_zero_on_invalid(self):
         result = self._make().build_message(self._msg(peer_asn="bad"), {})
-        self.assertIsNone(result[0]["peer_as_id"])
+        self.assertEqual(result[0]["peer_as_id"], 0)
 
     def test_peer_as_ref_from_cache(self):
         result = self._make(as_lookup="ref:as64496").build_message(self._msg(), {})
         self.assertEqual(result[0]["peer_as_ref"], "ref:as64496")
+
+    def test_peer_as_ref_none_when_no_cache(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertIsNone(result[0]["peer_as_ref"])
 
     # ------------------------------------------------------------------
     # BGP session fields
@@ -1525,15 +1732,19 @@ class TestPMAcctBMPPeerDownProcessor(unittest.TestCase):
         result = self._make().build_message(self._msg(), {})
         self.assertEqual(result[0]["peer_as_id"], 64496)
 
-    def test_peer_as_id_none_on_missing(self):
+    def test_peer_as_id_zero_on_missing(self):
         msg = self._msg()
         del msg["peer_asn"]
         result = self._make().build_message(msg, {})
-        self.assertIsNone(result[0]["peer_as_id"])
+        self.assertEqual(result[0]["peer_as_id"], 0)
 
     def test_peer_as_ref_from_cache(self):
         result = self._make(as_lookup="ref:as64496").build_message(self._msg(), {})
         self.assertEqual(result[0]["peer_as_ref"], "ref:as64496")
+
+    def test_peer_as_ref_none_when_no_cache(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertIsNone(result[0]["peer_as_ref"])
 
     # ------------------------------------------------------------------
     # Reason fields
