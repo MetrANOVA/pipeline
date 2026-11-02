@@ -1,4 +1,5 @@
 import logging
+import os
 import orjson
 import ipaddress
 from datetime import datetime, timezone
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 class PMAcctUtilMixin:
     def __init__(self):
-        pass
+        self.dns_lookup_enabled = os.getenv("BMP_PEER_DNS_LOOKUP", "true").strip().lower() not in ("false", "0", "no")
 
     def lookup_device(self, device_ip: str, formatted_record: dict):
         #initialize values
@@ -83,8 +84,11 @@ class PMAcctUtilMixin:
         record["rd"] = value.get("rd") or None
 
         peer_ip_str = value.get("peer_ip", "") or ""
-        hostname = self.pipeline.cacher("dns").lookup_hostname(peer_ip_str)
-        record["peer_hostname"] = hostname if hostname is not None else peer_ip_str
+        if self.dns_lookup_enabled:
+            hostname = self.pipeline.cacher("dns").lookup_hostname(peer_ip_str)
+            record["peer_hostname"] = hostname if hostname is not None else peer_ip_str
+        else:
+            record["peer_hostname"] = peer_ip_str
 
         record.update({
             "collector_id": value.get("label"),
@@ -448,6 +452,7 @@ class PMAcctFlowProcessor(BaseFlowProcessor, PMAcctUtilMixin):
 class PMAcctBMPRouteProcessor(BaseBMPRouteProcessor, PMAcctUtilMixin):
     def __init__(self, pipeline):
         super().__init__(pipeline)
+        PMAcctUtilMixin.__init__(self)
         self.required_fields = [
             ['bmp_router'], 
             ['event_type'],
@@ -496,8 +501,11 @@ class PMAcctBMPRouteProcessor(BaseBMPRouteProcessor, PMAcctUtilMixin):
         self.lookup_ip("peer_ip", "peer_ip", value, formatted_record)
 
         peer_ip_str = value.get("peer_ip", "") or ""
-        hostname = self.pipeline.cacher("dns").lookup_hostname(peer_ip_str)
-        formatted_record["peer_hostname"] = hostname if hostname is not None else peer_ip_str
+        if self.dns_lookup_enabled:
+            hostname = self.pipeline.cacher("dns").lookup_hostname(peer_ip_str)
+            formatted_record["peer_hostname"] = hostname if hostname is not None else peer_ip_str
+        else:
+            formatted_record["peer_hostname"] = peer_ip_str
 
         #Parse BGP fields
         as_path_str = value.get("as_path", "").split(" ")
@@ -614,6 +622,7 @@ class PMAcctBMPStatProcessor(BaseBMPStatProcessor, PMAcctUtilMixin):
 
     def __init__(self, pipeline):
         super().__init__(pipeline)
+        PMAcctUtilMixin.__init__(self)
         self.required_fields = [
             ['bmp_router'],
             ['event_type'],
@@ -654,8 +663,11 @@ class PMAcctBMPStatProcessor(BaseBMPStatProcessor, PMAcctUtilMixin):
 
         # Reverse-DNS hostname for the peer IP; falls back to the IP string itself
         _peer_ip_str = value.get("peer_ip", "") or ""
-        _hostname = self.pipeline.cacher("dns").lookup_hostname(_peer_ip_str)
-        formatted_record["peer_hostname"] = _hostname if _hostname is not None else _peer_ip_str
+        if self.dns_lookup_enabled:
+            _hostname = self.pipeline.cacher("dns").lookup_hostname(_peer_ip_str)
+            formatted_record["peer_hostname"] = _hostname if _hostname is not None else _peer_ip_str
+        else:
+            formatted_record["peer_hostname"] = _peer_ip_str
 
         # BGP peer AS — provided directly in the message; look up the ref separately
         peer_asn = value.get("peer_asn", None)
@@ -729,6 +741,7 @@ class PMAcctBMPPeerUpProcessor(BaseBMPPeerUpProcessor, PMAcctUtilMixin):
 
     def __init__(self, pipeline):
         super().__init__(pipeline)
+        PMAcctUtilMixin.__init__(self)
         self.required_fields = [
             ['bmp_router'],
             ['event_type'],
@@ -767,6 +780,7 @@ class PMAcctBMPPeerDownProcessor(BaseBMPPeerDownProcessor, PMAcctUtilMixin):
 
     def __init__(self, pipeline):
         super().__init__(pipeline)
+        PMAcctUtilMixin.__init__(self)
         self.required_fields = [
             ['bmp_router'],
             ['event_type'],

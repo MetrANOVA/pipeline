@@ -167,6 +167,12 @@ Dictionaries provide fast lookup capabilities for metadata enrichment. Each meta
 | `CLICKHOUSE_AS_METADATA_EXTENSIONS` | (none) | Comma-separated list of AS metadata extensions (e.g., `peeringdb`) |
 | `CLICKHOUSE_IF_METADATA_EXTENSIONS` | (none) | Comma-separated list of interface metadata extensions (e.g., `sap,vrtr,vrtr_interface`) |
 
+## BMP Processor Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BMP_PEER_DNS_LOOKUP` | `true` | Enable reverse-DNS lookups for `peer_hostname` in all BMP processors. Set to `false`, `0`, or `no` to disable and store the peer IP string instead. |
+
 ## BMP Route Views
 
 | Variable | Default | Description |

@@ -981,6 +981,11 @@ class TestPMAcctBMPStatProcessor(unittest.TestCase):
         result = self._make(hostname=None).build_message(self._msg(), {})
         self.assertEqual(result[0]["peer_hostname"], self.BASE_MSG["peer_ip"])
 
+    def test_peer_hostname_uses_ip_when_dns_disabled(self):
+        with patch.dict(os.environ, {"BMP_PEER_DNS_LOOKUP": "false"}):
+            result = self._make(hostname="router.example.com").build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_hostname"], self.BASE_MSG["peer_ip"])
+
     # ------------------------------------------------------------------
     # Peer AS
     # ------------------------------------------------------------------
@@ -1238,6 +1243,11 @@ class TestPMAcctBMPPeerUpProcessor(unittest.TestCase):
 
     def test_peer_hostname_falls_back_to_ip_on_none(self):
         result = self._make(hostname=None).build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_hostname"], "203.0.113.2")
+
+    def test_peer_hostname_uses_ip_when_dns_disabled(self):
+        with patch.dict(os.environ, {"BMP_PEER_DNS_LOOKUP": "false"}):
+            result = self._make(hostname="router.example.net").build_message(self._msg(), {})
         self.assertEqual(result[0]["peer_hostname"], "203.0.113.2")
 
     # ------------------------------------------------------------------
@@ -1500,6 +1510,11 @@ class TestPMAcctBMPPeerDownProcessor(unittest.TestCase):
 
     def test_peer_hostname_falls_back_to_ip_on_none(self):
         result = self._make(hostname=None).build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_hostname"], "203.0.113.3")
+
+    def test_peer_hostname_uses_ip_when_dns_disabled(self):
+        with patch.dict(os.environ, {"BMP_PEER_DNS_LOOKUP": "false"}):
+            result = self._make(hostname="router.example.org").build_message(self._msg(), {})
         self.assertEqual(result[0]["peer_hostname"], "203.0.113.3")
 
     # ------------------------------------------------------------------
