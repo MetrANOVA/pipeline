@@ -131,17 +131,6 @@ class FlowStitchingProcessor(BaseDataProcessor):
         self.anon_ipv4_prefix = int(os.getenv("CLICKHOUSE_FLOW_STITCH_IPV4_PREFIX", "117"))
         self.anon_ipv6_prefix = int(os.getenv("CLICKHOUSE_FLOW_STITCH_IPV6_PREFIX", "48"))
 
-        # On by default -- purely additive enrichment, not a filtering/anonymization
-        # decision, so unlike CLICKHOUSE_FLOW_STITCH_ENABLED this doesn't need an
-        # explicit opt-in. Resolves src/dst organization + community once per write
-        # batch (see _resolve_organizations()) instead of leaving every downstream
-        # Grafana panel to redo the same dictGetOrDefault/coalesce/join work itself.
-        # A lookup failure (dictionary not loaded yet, a transient connection issue)
-        # is logged and skipped for that batch -- it never blocks or drops flows.
-        self.resolve_organizations = os.getenv(
-            "CLICKHOUSE_FLOW_STITCH_RESOLVE_ORGANIZATIONS", "true"
-        ).lower() in ("true", "1", "yes")
-
         # Drop completed flows smaller than this many bytes rather than writing them --
         # 0 (default) disables filtering and keeps every flow, however small. Checked once
         # the flow is complete (its final size isn't known any earlier), so a small flow
@@ -171,11 +160,10 @@ class FlowStitchingProcessor(BaseDataProcessor):
         self.column_defs.append(["src_ip", "IPv6", True])
         self.column_defs.append(["src_port", "UInt16", True])
         # Resolved once per write batch by _resolve_organizations() (best-effort --
-        # plain '' when CLICKHOUSE_FLOW_STITCH_RESOLVE_ORGANIZATIONS is off or a
-        # lookup fails), same organization_name/community attributes Grafana's own
-        # dictGetOrDefault()/coalesce() queries already resolve from src_ip/src_as_id
-        # today -- having them as plain columns here just means the dashboard itself
-        # no longer has to.
+        # plain '' when a lookup fails), same organization_name/community attributes
+        # Grafana's own dictGetOrDefault()/coalesce() queries already resolve from
+        # src_ip/src_as_id today -- having them as plain columns here just means the
+        # dashboard itself no longer has to.
         self.column_defs.append(["src_organization", "String", True])
         self.column_defs.append(["src_community", "String", True])
         self.column_defs.append(["dst_as_id", "UInt32", True])
@@ -474,9 +462,6 @@ class FlowStitchingProcessor(BaseDataProcessor):
             row.setdefault("src_community", "")
             row.setdefault("dst_organization", "")
             row.setdefault("dst_community", "")
-
-        if not self.resolve_organizations:
-            return
 
         pairs = {(row.get("src_ip"), row.get("src_as_id")) for row in rows}
         pairs |= {(row.get("dst_ip"), row.get("dst_as_id")) for row in rows}

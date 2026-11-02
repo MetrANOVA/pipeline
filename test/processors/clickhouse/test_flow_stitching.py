@@ -503,23 +503,6 @@ class TestResolveOrganizations(unittest.TestCase):
         row.update(overrides)
         return row
 
-    def test_enabled_by_default(self):
-        self.assertTrue(self.processor.resolve_organizations)
-
-    def test_disabled_via_env_var_skips_query_but_still_sets_default_fields(self):
-        with patch.dict(os.environ, {"CLICKHOUSE_FLOW_STITCH_RESOLVE_ORGANIZATIONS": "false"}), \
-             patch("metranova.processors.clickhouse.flow_stitching.PMAcctFlowProcessor"):
-            processor = FlowStitchingProcessor(self.mock_pipeline)
-        client = MagicMock()
-        processor.set_clickhouse_client(client)
-        row = self._row()
-        processor._resolve_organizations([row])
-        client.query.assert_not_called()
-        self.assertEqual(row["src_organization"], "")
-        self.assertEqual(row["dst_organization"], "")
-        self.assertEqual(row["src_community"], "")
-        self.assertEqual(row["dst_community"], "")
-
     def test_populates_fields_from_query_result(self):
         client = MagicMock()
         result = MagicMock()
