@@ -31,10 +31,10 @@ Once the data is in ClickHouse, the **cache_rootbeer** pipeline periodically que
 
 The Adj-RIB-In tables are built using a combination of a **Materialized View** and **ClickHouse views**:
 
-- The **Materialized View** (`data_bmp_route_latest`) maintains the current state of the routing table by keeping only the most recent update for each prefix per peer. This provides a fast, low-latency snapshot of what each peer is currently advertising.
-- **Views** built on top of the raw route table expose a historical record of all updates and withdrawals, enabling trend analysis and investigation of routing changes over time.
+- The **Materialized View** (`data_bmp_route_latest`) maintains the current state of the routing table by continuously aggregating route updates as they arrive, keeping only the most recent state for each prefix per peer. Because it stores intermediate aggregation state rather than full rows, queries against it are fast and never need a deduplication pass regardless of ingestion rate.
+- **Two ClickHouse views** — `data_bmp_route_latest_adj_rib_in_pre_view` and `data_bmp_route_latest_adj_rib_in_post_view` — sit on top of the materialized view and finalise the aggregation state into plain queryable columns. They expose the current pre- and post-policy Adj-RIB-In respectively, filtering out any withdrawn or deleted routes so only active routes are returned. Comparing the two views directly gives accepted routes (present post-policy) and rejected routes (present pre-policy but absent post-policy).
 
-Together these structures support both real-time prefix lookups and historical analysis without duplicating storage.
+Together these structures give a clean, always-current view of what each peer is advertising and what inbound policy is accepting, without duplicating storage or requiring full-table scans.
 
 For full table definitions, column descriptions, and schema details see the [BMP ClickHouse Schema](./MetrANOVA%20BMP%20ClickHouse%20Schema.md).
 
