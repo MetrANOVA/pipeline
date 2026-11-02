@@ -8,6 +8,8 @@ cachers:
     name: clickhouse_ranged
   - type: metranova.cachers.ip.IPCacher
     name: ip
+  - type: metranova.cachers.dns.DNSCacher
+    name: dns
 
 writers:
   - type: metranova.writers.clickhouse.ClickHouseWriter

@@ -40,6 +40,7 @@ class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
         self.assertIn('`device_id` LowCardinality(String)', result)
         self.assertIn('`peer_ip` IPv6', result)
         self.assertIn('`peer_ip_ref` Nullable(String)', result)
+        self.assertIn('`peer_hostname` String', result)
         self.assertIn('`ip_prefix_ref` Nullable(String)', result)
         self.assertIn('`is_post` Bool', result)
         self.assertIn(
@@ -55,11 +56,11 @@ class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
             result,
         )
         self.assertIn(
-            'PRIMARY KEY (`device_id`,`peer_ip`,`peer_ip_ref`,`ip_prefix_range_start`,`ip_prefix_range_end`,`ip_prefix_ref`,`add_path_id`,`is_post`)',
+            'PRIMARY KEY (`device_id`,`peer_ip`,`peer_ip_ref`,`peer_hostname`,`ip_prefix_range_start`,`ip_prefix_range_end`,`ip_prefix_ref`,`add_path_id`,`is_post`)',
             result,
         )
         self.assertIn(
-            'ORDER BY (`device_id`,`peer_ip`,`peer_ip_ref`,`ip_prefix_range_start`,`ip_prefix_range_end`,`ip_prefix_ref`,`add_path_id`,`is_post`)',
+            'ORDER BY (`device_id`,`peer_ip`,`peer_ip_ref`,`peer_hostname`,`ip_prefix_range_start`,`ip_prefix_range_end`,`ip_prefix_ref`,`add_path_id`,`is_post`)',
             result,
         )
 
@@ -85,6 +86,7 @@ class TestMaterializedViewBMPRouteLatest(unittest.TestCase):
         self.assertIn('WHERE is_in = true', result)
         self.assertIn('GROUP BY', result)
         self.assertIn('peer_ip_ref', result)
+        self.assertIn('peer_hostname', result)
         self.assertIn('ip_prefix_ref', result)
         self.assertIn('add_path_id,\n                is_post', result)
 
@@ -117,6 +119,7 @@ class TestBMPRouteLatestViews(unittest.TestCase):
         self.assertIn('argMaxMerge(observation_time_state) AS observation_time', result)
         self.assertIn('argMaxMerge(bgp_nexthop_state) AS bgp_nexthop', result)
         self.assertIn('peer_ip_ref', result)
+        self.assertIn('peer_hostname', result)
         self.assertIn('ip_prefix_ref', result)
 
     def test_post_policy_view_command(self):
@@ -129,6 +132,7 @@ class TestBMPRouteLatestViews(unittest.TestCase):
         self.assertLess(result.index('AS export_time'), result.index('AS observation_time'))
         self.assertIn('GROUP BY', result)
         self.assertIn('peer_ip_ref', result)
+        self.assertIn('peer_hostname', result)
         self.assertIn('ip_prefix_ref', result)
 
     @patch.dict('os.environ', {'CLICKHOUSE_BMP_ROUTE_VIEWS': 'adj_rib_in_pre'})
@@ -191,7 +195,7 @@ class TestBMPStatProcessor(unittest.TestCase):
             'observation_time', 'insert_time',
             'collector_id', 'policy_originator', 'policy_level', 'policy_scope',
             'device_id', 'device_ref',
-            'peer_ip', 'peer_ip_ref', 'peer_as_id', 'peer_as_ref', 'peer_type',
+            'peer_ip', 'peer_ip_ref', 'peer_hostname', 'peer_as_id', 'peer_as_ref', 'peer_type',
             'bgp_id', 'rd',
             'is_loc', 'is_filtered',
             'metric_type', 'metric_type_str', 'metric_value',
@@ -225,6 +229,10 @@ class TestBMPStatProcessor(unittest.TestCase):
     def test_peer_ip_ref_is_nullable_string(self):
         ddl = self._make().create_table_command()
         self.assertIn('`peer_ip_ref` Nullable(String)', ddl)
+
+    def test_peer_hostname_is_string(self):
+        ddl = self._make().create_table_command()
+        self.assertIn('`peer_hostname` String', ddl)
 
     def test_bgp_id_is_nullable_ipv6(self):
         ddl = self._make().create_table_command()
@@ -324,12 +332,15 @@ class TestBMPPeerUpProcessor(unittest.TestCase):
         for name in [
             'observation_time', 'insert_time',
             'device_id', 'device_ref',
-            'peer_ip', 'peer_ip_ref',
+            'peer_ip', 'peer_ip_ref', 'peer_hostname',
             'peer_as_id', 'peer_as_ref',
             'peer_type', 'bgp_id', 'rd',
             'local_as', 'local_port', 'remote_port', 'local_ip',
         ]:
             self.assertIn(name, cols, msg=f"Column '{name}' missing")
+
+    def test_peer_hostname_is_string(self):
+        self.assertEqual(self._cols()['peer_hostname'], 'String')
 
     def test_peer_down_columns_absent(self):
         cols = self._col_names()
@@ -404,12 +415,15 @@ class TestBMPPeerDownProcessor(unittest.TestCase):
         for name in [
             'observation_time', 'insert_time',
             'device_id', 'device_ref',
-            'peer_ip', 'peer_ip_ref',
+            'peer_ip', 'peer_ip_ref', 'peer_hostname',
             'peer_as_id', 'peer_as_ref',
             'peer_type', 'rd',
             'reason_type', 'reason_str',
         ]:
             self.assertIn(name, cols, msg=f"Column '{name}' missing")
+
+    def test_peer_hostname_is_string(self):
+        self.assertEqual(self._cols()['peer_hostname'], 'String')
 
     def test_peer_up_columns_absent(self):
         cols = self._col_names()

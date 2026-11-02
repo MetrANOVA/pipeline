@@ -866,18 +866,22 @@ class TestPMAcctBMPStatProcessor(unittest.TestCase):
         "label": "collector-1",
     }
 
-    def _make_pipeline(self, device_lookup=None, ip_lookup=None, as_lookup=None):
+    def _make_pipeline(self, device_lookup=None, ip_lookup=None, as_lookup=None, hostname=None):
         pipeline = MagicMock()
         ch_cacher = Mock()
         ch_cacher.lookup.side_effect = lambda table, key: device_lookup if device_lookup and table.startswith("meta_device") else None
         ch_cacher.lookup_dict_key.return_value = as_lookup
         ip_cacher = Mock()
         ip_cacher.lookup.return_value = [ip_lookup] if ip_lookup else None
+        dns_cacher = Mock()
+        dns_cacher.lookup_hostname.return_value = hostname
         def cacher_side_effect(name):
             if name == "clickhouse":
                 return ch_cacher
             elif name == "ip":
                 return ip_cacher
+            elif name == "dns":
+                return dns_cacher
             return Mock()
         pipeline.cacher.side_effect = cacher_side_effect
         return pipeline
@@ -968,6 +972,14 @@ class TestPMAcctBMPStatProcessor(unittest.TestCase):
     def test_peer_ip_ref_from_cache(self):
         result = self._make(ip_lookup="ref:peer-ip").build_message(self._msg(), {})
         self.assertEqual(result[0]["peer_ip_ref"], "ref:peer-ip")
+
+    def test_peer_hostname_from_dns(self):
+        result = self._make(hostname="router.example.com").build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_hostname"], "router.example.com")
+
+    def test_peer_hostname_falls_back_to_ip_on_none(self):
+        result = self._make(hostname=None).build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_hostname"], self.BASE_MSG["peer_ip"])
 
     # ------------------------------------------------------------------
     # Peer AS
@@ -1112,18 +1124,22 @@ class TestPMAcctBMPPeerUpProcessor(unittest.TestCase):
         "label": "collector-1",
     }
 
-    def _make_pipeline(self, device_lookup=None, ip_lookup=None, as_lookup=None):
+    def _make_pipeline(self, device_lookup=None, ip_lookup=None, as_lookup=None, hostname=None):
         pipeline = MagicMock()
         ch_cacher = Mock()
         ch_cacher.lookup.side_effect = lambda table, key: device_lookup if device_lookup and table.startswith("meta_device") else None
         ch_cacher.lookup_dict_key.return_value = as_lookup
         ip_cacher = Mock()
         ip_cacher.lookup.return_value = [ip_lookup] if ip_lookup else None
+        dns_cacher = Mock()
+        dns_cacher.lookup_hostname.return_value = hostname
         def cacher_side_effect(name):
             if name == "clickhouse":
                 return ch_cacher
             elif name == "ip":
                 return ip_cacher
+            elif name == "dns":
+                return dns_cacher
             return Mock()
         pipeline.cacher.side_effect = cacher_side_effect
         return pipeline
@@ -1215,6 +1231,14 @@ class TestPMAcctBMPPeerUpProcessor(unittest.TestCase):
     def test_peer_ip_ref_from_cache(self):
         result = self._make(ip_lookup="ref:peer").build_message(self._msg(), {})
         self.assertEqual(result[0]["peer_ip_ref"], "ref:peer")
+
+    def test_peer_hostname_from_dns(self):
+        result = self._make(hostname="router.example.net").build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_hostname"], "router.example.net")
+
+    def test_peer_hostname_falls_back_to_ip_on_none(self):
+        result = self._make(hostname=None).build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_hostname"], "203.0.113.2")
 
     # ------------------------------------------------------------------
     # Peer AS
@@ -1362,18 +1386,22 @@ class TestPMAcctBMPPeerDownProcessor(unittest.TestCase):
         "label": "collector-1",
     }
 
-    def _make_pipeline(self, device_lookup=None, ip_lookup=None, as_lookup=None):
+    def _make_pipeline(self, device_lookup=None, ip_lookup=None, as_lookup=None, hostname=None):
         pipeline = MagicMock()
         ch_cacher = Mock()
         ch_cacher.lookup.side_effect = lambda table, key: device_lookup if device_lookup and table.startswith("meta_device") else None
         ch_cacher.lookup_dict_key.return_value = as_lookup
         ip_cacher = Mock()
         ip_cacher.lookup.return_value = [ip_lookup] if ip_lookup else None
+        dns_cacher = Mock()
+        dns_cacher.lookup_hostname.return_value = hostname
         def cacher_side_effect(name):
             if name == "clickhouse":
                 return ch_cacher
             elif name == "ip":
                 return ip_cacher
+            elif name == "dns":
+                return dns_cacher
             return Mock()
         pipeline.cacher.side_effect = cacher_side_effect
         return pipeline
@@ -1465,6 +1493,14 @@ class TestPMAcctBMPPeerDownProcessor(unittest.TestCase):
     def test_peer_ip_ref_from_cache(self):
         result = self._make(ip_lookup="ref:peer").build_message(self._msg(), {})
         self.assertEqual(result[0]["peer_ip_ref"], "ref:peer")
+
+    def test_peer_hostname_from_dns(self):
+        result = self._make(hostname="router.example.org").build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_hostname"], "router.example.org")
+
+    def test_peer_hostname_falls_back_to_ip_on_none(self):
+        result = self._make(hostname=None).build_message(self._msg(), {})
+        self.assertEqual(result[0]["peer_hostname"], "203.0.113.3")
 
     # ------------------------------------------------------------------
     # Peer AS

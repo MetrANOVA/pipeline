@@ -82,6 +82,10 @@ class PMAcctUtilMixin:
         record["peer_type"] = self.parse_int(value.get("peer_type"))
         record["rd"] = value.get("rd") or None
 
+        peer_ip_str = value.get("peer_ip", "") or ""
+        hostname = self.pipeline.cacher("dns").lookup_hostname(peer_ip_str)
+        record["peer_hostname"] = hostname if hostname is not None else peer_ip_str
+
         record.update({
             "collector_id": value.get("label"),
             "policy_originator": "unknown",
@@ -491,6 +495,10 @@ class PMAcctBMPRouteProcessor(BaseBMPRouteProcessor, PMAcctUtilMixin):
         self.lookup_ip("bgp_nexthop", "bgp_nexthop", value, formatted_record)
         self.lookup_ip("peer_ip", "peer_ip", value, formatted_record)
 
+        peer_ip_str = value.get("peer_ip", "") or ""
+        hostname = self.pipeline.cacher("dns").lookup_hostname(peer_ip_str)
+        formatted_record["peer_hostname"] = hostname if hostname is not None else peer_ip_str
+
         #Parse BGP fields
         as_path_str = value.get("as_path", "").split(" ")
         bgp_as_path_id = []
@@ -643,6 +651,11 @@ class PMAcctBMPStatProcessor(BaseBMPStatProcessor, PMAcctUtilMixin):
 
         # BGP peer IP — sets peer_ip and peer_ip_ref
         self.lookup_ip("peer_ip", "peer_ip", value, formatted_record)
+
+        # Reverse-DNS hostname for the peer IP; falls back to the IP string itself
+        _peer_ip_str = value.get("peer_ip", "") or ""
+        _hostname = self.pipeline.cacher("dns").lookup_hostname(_peer_ip_str)
+        formatted_record["peer_hostname"] = _hostname if _hostname is not None else _peer_ip_str
 
         # BGP peer AS — provided directly in the message; look up the ref separately
         peer_asn = value.get("peer_asn", None)
