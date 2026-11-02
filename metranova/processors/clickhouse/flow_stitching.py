@@ -131,6 +131,17 @@ class FlowStitchingProcessor(BaseDataProcessor):
         self.anon_ipv4_prefix = int(os.getenv("CLICKHOUSE_FLOW_STITCH_IPV4_PREFIX", "117"))
         self.anon_ipv6_prefix = int(os.getenv("CLICKHOUSE_FLOW_STITCH_IPV6_PREFIX", "48"))
 
+        # On by default -- purely additive enrichment, not a filtering/anonymization
+        # decision, so unlike CLICKHOUSE_FLOW_STITCH_ENABLED this doesn't need an
+        # explicit opt-in. Resolves src/dst organization + community once per write
+        # batch (see _resolve_organizations()) instead of leaving every downstream
+        # Grafana panel to redo the same dictGetOrDefault/coalesce/join work itself.
+        # A lookup failure (dictionary not loaded yet, a transient connection issue)
+        # is logged and skipped for that batch -- it never blocks or drops flows.
+        self.resolve_organizations = os.getenv(
+            "CLICKHOUSE_FLOW_STITCH_RESOLVE_ORGANIZATIONS", "true"
+        ).lower() in ("true", "1", "yes")
+
         # Drop completed flows smaller than this many bytes rather than writing them --
         # 0 (default) disables filtering and keeps every flow, however small. Checked once
         # the flow is complete (its final size isn't known any earlier), so a small flow
@@ -159,10 +170,20 @@ class FlowStitchingProcessor(BaseDataProcessor):
         self.column_defs.append(["src_as_ref", "Nullable(String)", True])
         self.column_defs.append(["src_ip", "IPv6", True])
         self.column_defs.append(["src_port", "UInt16", True])
+        # Resolved once per write batch by _resolve_organizations() (best-effort --
+        # plain '' when CLICKHOUSE_FLOW_STITCH_RESOLVE_ORGANIZATIONS is off or a
+        # lookup fails), same organization_name/community attributes Grafana's own
+        # dictGetOrDefault()/coalesce() queries already resolve from src_ip/src_as_id
+        # today -- having them as plain columns here just means the dashboard itself
+        # no longer has to.
+        self.column_defs.append(["src_organization", "String", True])
+        self.column_defs.append(["src_community", "String", True])
         self.column_defs.append(["dst_as_id", "UInt32", True])
         self.column_defs.append(["dst_as_ref", "Nullable(String)", True])
         self.column_defs.append(["dst_ip", "IPv6", True])
         self.column_defs.append(["dst_port", "UInt16", True])
+        self.column_defs.append(["dst_organization", "String", True])
+        self.column_defs.append(["dst_community", "String", True])
         self.column_defs.append(["protocol", "LowCardinality(String)", True])
         self.column_defs.append(["in_interface_id", "LowCardinality(Nullable(String))", True])
         self.column_defs.append(["in_interface_ref", "Nullable(String)", True])
@@ -435,6 +456,72 @@ class FlowStitchingProcessor(BaseDataProcessor):
             except Exception as e:
                 self.logger.error(f"Flow stitching sweep failed: {e}", exc_info=True)
 
+    def _resolve_organizations(self, rows: List[Dict[str, Any]]) -> None:
+        """Best-effort: resolve src/dst organization + community once per write batch,
+        using the same dictionaries Grafana queries directly today (meta_ip_scireg_dict,
+        meta_ip_community_dict, meta_organization_dict via meta_as), scoped to just the
+        unique (ip, as_id) pairs present in this batch rather than the whole table.
+        Mutates rows in place. Any failure here -- a dictionary not loaded yet, a
+        transient connection issue -- is logged and skipped: rows are still written
+        with empty organization/community fields rather than being dropped, since this
+        is enrichment, not a required field.
+        """
+        # Always present, regardless of which path below is taken -- message_to_columns()
+        # raises if a column_defs key is missing from the row dict, so these can't be left
+        # unset on the "disabled" / "nothing to look up" / "lookup failed" early-return paths.
+        for row in rows:
+            row.setdefault("src_organization", "")
+            row.setdefault("src_community", "")
+            row.setdefault("dst_organization", "")
+            row.setdefault("dst_community", "")
+
+        if not self.resolve_organizations:
+            return
+
+        pairs = {(row.get("src_ip"), row.get("src_as_id")) for row in rows}
+        pairs |= {(row.get("dst_ip"), row.get("dst_as_id")) for row in rows}
+        pairs.discard((None, None))
+        pairs = {(ip, as_id) for ip, as_id in pairs if ip}
+        if not pairs:
+            return
+
+        try:
+            result = self._client.query(
+                """
+                WITH as_org AS (
+                    SELECT id, argMax(organization_id, insert_time) AS organization_id
+                    FROM meta_as
+                    GROUP BY id
+                )
+                SELECT
+                    pair.1 AS ip,
+                    pair.2 AS as_id,
+                    coalesce(
+                        nullIf(dictGetOrDefault('meta_ip_scireg_dict', 'organization_name', toIPv6(pair.1), ''), ''),
+                        nullIf(dictGetOrDefault('meta_ip_community_dict', 'organization_name', toIPv6(pair.1), ''), ''),
+                        nullIf(dictGetOrDefault('meta_organization_dict', 'name', as_org.organization_id, ''), ''),
+                        ''
+                    ) AS organization,
+                    dictGetOrDefault('meta_ip_community_dict', 'community', toIPv6(pair.1), '') AS community
+                FROM (SELECT arrayJoin({pairs:Array(Tuple(String, Nullable(UInt32)))}) AS pair)
+                LEFT JOIN as_org ON as_org.id = pair.2
+                """,
+                parameters={"pairs": list(pairs)},
+            )
+            lookup = {(r[0], r[1]): (r[2], r[3]) for r in result.result_rows}
+        except Exception as e:
+            self.logger.warning(
+                f"Flow stitching: organization/community resolution failed for this "
+                f"batch, writing {len(rows)} row(s) without it: {e}"
+            )
+            return
+
+        for row in rows:
+            src_org, src_comm = lookup.get((row.get("src_ip"), row.get("src_as_id")), ("", ""))
+            dst_org, dst_comm = lookup.get((row.get("dst_ip"), row.get("dst_as_id")), ("", ""))
+            row["src_organization"], row["src_community"] = src_org, src_comm
+            row["dst_organization"], row["dst_community"] = dst_org, dst_comm
+
     def _write_rows(self, rows: List[Dict[str, Any]]) -> None:
         if self._client is None:
             self.logger.warning(
@@ -442,6 +529,7 @@ class FlowStitchingProcessor(BaseDataProcessor):
                 "client yet (set_clickhouse_client() not called) -- dropping them"
             )
             return
+        self._resolve_organizations(rows)
         try:
             data = [self.message_to_columns(row, self.table) for row in rows]
             self._client.insert(table=self.table, data=data, column_names=self.column_names(self.table))

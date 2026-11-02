@@ -487,6 +487,104 @@ class TestFlowStitchingProcessor(unittest.TestCase):
         self.processor._write_rows([row])
 
 
+class TestResolveOrganizations(unittest.TestCase):
+    """_resolve_organizations() is called from _write_rows() before every insert -- these
+    exercise it directly against a mocked ClickHouse client so they don't depend on a real
+    server or the IP_TRIE dictionaries it queries."""
+
+    def setUp(self):
+        self.mock_pipeline = MagicMock()
+        with patch.dict(os.environ, {"CLICKHOUSE_FLOW_STITCH_ENABLED": "true"}), \
+             patch("metranova.processors.clickhouse.flow_stitching.PMAcctFlowProcessor"):
+            self.processor = FlowStitchingProcessor(self.mock_pipeline)
+
+    def _row(self, **overrides):
+        row = {"src_ip": "192.0.2.10", "src_as_id": 100, "dst_ip": "198.51.100.20", "dst_as_id": 200}
+        row.update(overrides)
+        return row
+
+    def test_enabled_by_default(self):
+        self.assertTrue(self.processor.resolve_organizations)
+
+    def test_disabled_via_env_var_skips_query_but_still_sets_default_fields(self):
+        with patch.dict(os.environ, {"CLICKHOUSE_FLOW_STITCH_RESOLVE_ORGANIZATIONS": "false"}), \
+             patch("metranova.processors.clickhouse.flow_stitching.PMAcctFlowProcessor"):
+            processor = FlowStitchingProcessor(self.mock_pipeline)
+        client = MagicMock()
+        processor.set_clickhouse_client(client)
+        row = self._row()
+        processor._resolve_organizations([row])
+        client.query.assert_not_called()
+        self.assertEqual(row["src_organization"], "")
+        self.assertEqual(row["dst_organization"], "")
+        self.assertEqual(row["src_community"], "")
+        self.assertEqual(row["dst_community"], "")
+
+    def test_populates_fields_from_query_result(self):
+        client = MagicMock()
+        result = MagicMock()
+        result.result_rows = [
+            ("192.0.2.10", 100, "Example University", "lhcone"),
+            ("198.51.100.20", 200, "Example Lab", ""),
+        ]
+        client.query.return_value = result
+        self.processor.set_clickhouse_client(client)
+
+        row = self._row()
+        self.processor._resolve_organizations([row])
+
+        self.assertEqual(row["src_organization"], "Example University")
+        self.assertEqual(row["src_community"], "lhcone")
+        self.assertEqual(row["dst_organization"], "Example Lab")
+        self.assertEqual(row["dst_community"], "")
+        # scoped to just the (ip, as_id) pairs actually present in this batch
+        _, kwargs = client.query.call_args
+        self.assertEqual(
+            set(kwargs["parameters"]["pairs"]),
+            {("192.0.2.10", 100), ("198.51.100.20", 200)},
+        )
+
+    def test_query_failure_is_caught_and_leaves_default_fields(self):
+        client = MagicMock()
+        client.query.side_effect = RuntimeError("dictionary meta_ip_scireg_dict not loaded")
+        self.processor.set_clickhouse_client(client)
+
+        row = self._row()
+        self.processor._resolve_organizations([row])  # must not raise
+
+        self.assertEqual(row["src_organization"], "")
+        self.assertEqual(row["dst_organization"], "")
+        self.assertEqual(row["src_community"], "")
+        self.assertEqual(row["dst_community"], "")
+
+    def test_no_ips_in_batch_skips_query(self):
+        client = MagicMock()
+        self.processor.set_clickhouse_client(client)
+        row = self._row(src_ip=None, dst_ip=None)
+        self.processor._resolve_organizations([row])
+        client.query.assert_not_called()
+        self.assertEqual(row["src_organization"], "")
+
+    def test_write_rows_includes_new_columns_without_raising(self):
+        # Guards against message_to_columns() raising ValueError for a column_defs entry
+        # (src_organization/src_community/dst_organization/dst_community) missing from the
+        # row dict -- _resolve_organizations() must always set them, even when it can't
+        # actually resolve anything.
+        client = MagicMock()
+        client.query.side_effect = RuntimeError("boom")
+        self.processor.set_clickhouse_client(client)
+        row = self.processor._finalize({
+            "template": make_slice(),
+            "start_time": 1_700_000_000_000,
+            "end_time": 1_700_000_060_000,
+            "bit_count": 8000,
+            "packet_count": 10,
+            "stitched_flows": 1,
+        })
+        self.processor._write_rows([row])
+        self.assertTrue(client.insert.called)
+
+
 
 class TestFlowStitchingEnabledFlag(unittest.TestCase):
     """CLICKHOUSE_FLOW_STITCH_ENABLED is the single on/off switch, and it is off by
