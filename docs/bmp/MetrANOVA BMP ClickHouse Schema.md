@@ -353,3 +353,175 @@ Records **BMP Peer Down** (message type 2) events reported by pmacct/pbmpd.  Eac
 | `rd`               | `Nullable(String)`       | Route Distinguisher ([RFC 7854 §4.2](https://tools.ietf.org/html/rfc7854#section-4.2)).                                                  |
 | `reason_type`      | `Nullable(UInt8)`        | IANA peer-down reason code ([IANA](https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#peer-down-reason-codes)).         |
 | `reason_str`       | `Nullable(String)`       | Human-readable description of the peer-down reason.                                                                                      |
+
+---
+
+## Design Notes
+
+### Partitioning and TTL timestamp choice
+
+BMP messages carry two timestamps: `export_time` (when the router emitted the BMP message) and `observation_time` (when the event was originally observed on the router). For route monitoring messages, `observation_time` can be arbitrarily far in the past — a router may replay its full Adj-RIB-In when a BMP session is established, meaning freshly ingested rows can carry `observation_time` values days or weeks old.
+
+Using `observation_time` for partitioning or TTL on `data_bmp_route` would therefore cause two problems: rows with old observation times would be placed into partitions that have already been TTL-expired or compacted away, leading to data loss or unexpected behaviour; and range queries filtered on `observation_time` would fan out across many partitions rather than landing in the expected recent ones.
+
+`export_time` is used for both the partition key (`toYYYYMMDD(export_time)`) and the TTL expression on `data_bmp_route` and `data_bmp_route_latest` because it reflects when the data arrived, which is always recent and predictable.
+
+This concern does not apply to `data_bmp_stat`, `data_bmp_peer_up`, or `data_bmp_peer_down`. Statistics and peer-event messages are always generated in real time — a router does not replay historical stat reports or peer-up events when a BMP session is (re-)established — so `observation_time` is reliable for partitioning and TTL on those tables.
+
+### `data_bmp_route` — primary key and ordering
+
+The primary key for `data_bmp_route` is `(device_id, action, peer_ip, ip_prefix_range_start, ip_prefix_range_end, add_path_id, export_time)`. The ordering is chosen to make the most common access pattern — filtering by device, then peer, then prefix — index-assisted at each level:
+
+- `device_id` first narrows to a single router, eliminating the vast majority of granules immediately.
+- `peer_ip` second allows per-peer queries to skip all other peers' granules without scanning them.
+- `ip_prefix_range_start` / `ip_prefix_range_end` rather than a single CIDR string supports efficient range queries (e.g. "which routes cover this address?") via primary key comparisons without per-row parsing.
+
+`ip_prefix_length` is stored as a plain column alongside the range columns so that longest-prefix-match ordering (`ORDER BY ip_prefix_length DESC`) is cheap without recomputing it from the address pair.
+
+### IP prefix representation
+
+Prefixes are stored as four columns — `ip_prefix_address`, `ip_prefix_length`, `ip_prefix_range_start`, and `ip_prefix_range_end` — all pre-computed by the ingestion pipeline before insert. This redundancy is intentional:
+
+- `(ip_prefix_range_start, ip_prefix_range_end)` in the `ORDER BY` makes both exact-match and range-based lookups index-assisted without per-query computation.
+- `ip_prefix_address` and `ip_prefix_length` allow easy CIDR string reconstruction and cheap length-based sorting.
+- IPv4 prefixes are stored as IPv4-mapped IPv6 addresses so both address families share a single column type and index, avoiding schema branching.
+
+An `ip_trie` dictionary was considered for O(1) longest-prefix-match lookups. At scale — many routers each with a full internet routing table (~900 K IPv6 prefixes) — loading the entire RIB per dictionary instance is impractical: each instance consumes roughly 200–400 MB, and the total across all routers and replicas grows into tens of gigabytes. The range-column approach avoids this memory pressure entirely.
+
+### `data_bmp_route_latest` — `AggregatingMergeTree` engine choice
+
+`data_bmp_route_latest` uses `AggregatingMergeTree` rather than `ReplacingMergeTree`. Both engines maintain a deduplicated current-state view from an append-only log, but they have meaningfully different query-time behaviour:
+
+- **`ReplacingMergeTree`** stores plain column values. The MV is a simple `SELECT *`. During background merges the engine keeps only the row with the highest version column per key. The problem is that at any given moment, with continuous BMP ingestion, there will be multiple unmerged parts containing duplicate rows. Every query must add `FINAL` to force deduplication at read time — a sort-merge across unmerged parts that adds latency proportional to the number of parts.
+
+- **`AggregatingMergeTree`** stores `*State` binary blobs computed by the MV (e.g. `argMaxState(action, export_time)`). Background merges combine blobs using the matching `*Merge` combinator. Queries finalise values with `argMaxMerge(action_state)`. Crucially, **`*Merge` aggregates correctly across unmerged parts without `FINAL`**, so query correctness is guaranteed even when many parts exist.
+
+The primary driver for choosing `AggregatingMergeTree` is query correctness without `FINAL`. The known trade-offs are:
+
+- Attribute columns are stored as opaque binary blobs, so skip indexes (e.g. a bloom filter on `as_path_id`) and conditional TTL expressions (e.g. purging withdrawn routes by TTL) cannot be applied to them in `data_bmp_route_latest`.
+- The MV and both query views must stay in sync: every attribute column requires a matched `*State` / `*Merge` pair, so adding a column means updating the MV, the target table, and both views together.
+
+### Skip index for `as_path_id` queries
+
+Queries filtering on AS path membership — `has(as_path_id, 513)`, `hasAny(as_path_id, [513, 1234])` — benefit from a `bloom_filter` skip index on `as_path_id`, which allows ClickHouse to skip granules that provably do not contain the target AS.
+
+Because `data_bmp_route_latest` stores `as_path_id` as an `AggregateFunction` blob, a skip index cannot be applied there. 
+
+### `add_path_id` in the unique key
+
+BGP ADD-PATH (RFC 7911) allows a peer to advertise multiple paths for the same prefix simultaneously, each distinguished by an `add_path_id`. This field is included as a grouping key in `data_bmp_route_latest` so each path is tracked independently. Routers not using ADD-PATH have `add_path_id = 0` for all rows — RFC 7911 path IDs start at 1, making `0` a natural sentinel — so the schema is backwards-compatible with non-ADD-PATH deployments.
+
+---
+
+## Example Queries
+
+### Current routing table for a device
+
+```sql
+-- All active pre-policy Adj-RIB-In routes for a device
+SELECT peer_ip, ip_prefix_address, ip_prefix_length, bgp_nexthop, as_path_id
+FROM data_bmp_route_latest_adj_rib_in_pre_view
+WHERE device_id = 'my-router'
+ORDER BY peer_ip, ip_prefix_address, ip_prefix_length DESC;
+
+-- All active post-policy Adj-RIB-In routes for a device
+SELECT peer_ip, ip_prefix_address, ip_prefix_length, bgp_nexthop, as_path_id
+FROM data_bmp_route_latest_adj_rib_in_post_view
+WHERE device_id = 'my-router'
+ORDER BY peer_ip, ip_prefix_address, ip_prefix_length DESC;
+```
+
+### Accepted routes
+
+A route is accepted if it appears in the post-policy view — it was received pre-policy and survived inbound policy. The simplest query is therefore just the post-policy view itself:
+
+```sql
+-- Accepted routes
+SELECT peer_ip, ip_prefix_address, ip_prefix_length, bgp_nexthop, as_path_id
+FROM data_bmp_route_latest_adj_rib_in_post_view
+WHERE device_id = 'my-router';
+```
+
+To see accepted routes with their **pre-policy attributes** (e.g. communities or next-hops before policy transformed them), use a `LEFT SEMI JOIN`. This keeps only pre-policy rows that have a matching post-policy entry, without adding any post-policy columns:
+
+```sql
+-- Accepted routes with pre-policy attributes
+SELECT pre.peer_ip, pre.ip_prefix_address, pre.ip_prefix_length,
+       pre.bgp_nexthop, pre.as_path_id, pre.community
+FROM data_bmp_route_latest_adj_rib_in_pre_view AS pre
+LEFT SEMI JOIN data_bmp_route_latest_adj_rib_in_post_view AS post
+    USING (device_id, peer_ip, ip_prefix_range_start, ip_prefix_range_end, add_path_id)
+WHERE pre.device_id = 'my-router';
+```
+
+### Rejected routes
+
+A route is rejected if it exists pre-policy but has no corresponding post-policy entry. Use a `LEFT ANTI JOIN`:
+
+```sql
+-- Rejected routes (received pre-policy, dropped by inbound policy)
+SELECT peer_ip, ip_prefix_address, ip_prefix_length, bgp_nexthop, as_path_id, community
+FROM data_bmp_route_latest_adj_rib_in_pre_view AS pre
+LEFT ANTI JOIN data_bmp_route_latest_adj_rib_in_post_view AS post
+    USING (device_id, peer_ip, ip_prefix_range_start, ip_prefix_range_end, add_path_id)
+WHERE pre.device_id = 'my-router';
+```
+
+> `LEFT SEMI JOIN` and `LEFT ANTI JOIN` use the right table purely as a filter — no columns from it appear in the result — and short-circuit on the first match found, making them more efficient than a `LEFT JOIN … WHERE post.col IS NULL` pattern.
+
+### Accepted and rejected counts per peer
+
+```sql
+SELECT
+    peer_ip,
+    peer_hostname,
+    countIf(post.ip_prefix_range_start IS NOT NULL) AS accepted,
+    countIf(post.ip_prefix_range_start IS NULL)     AS rejected
+FROM data_bmp_route_latest_adj_rib_in_pre_view AS pre
+LEFT JOIN data_bmp_route_latest_adj_rib_in_post_view AS post
+    USING (device_id, peer_ip, ip_prefix_range_start, ip_prefix_range_end, add_path_id)
+WHERE pre.device_id = 'my-router'
+GROUP BY peer_ip, peer_hostname
+ORDER BY peer_ip;
+```
+
+### Routes containing a specific AS in the path
+
+```sql
+-- All active pre-policy routes that traverse AS 513
+SELECT peer_ip, ip_prefix_address, ip_prefix_length, as_path_id
+FROM data_bmp_route_latest_adj_rib_in_pre_view
+WHERE device_id = 'my-router'
+  AND has(as_path_id, 513);
+```
+
+### Recent peer up/down events
+
+```sql
+-- Last 24 hours of peer events for a device
+SELECT observation_time, peer_ip, peer_hostname, peer_as_id, 'up' AS event
+FROM data_bmp_peer_up
+WHERE device_id = 'my-router'
+  AND observation_time >= now() - INTERVAL 1 DAY
+
+UNION ALL
+
+SELECT observation_time, peer_ip, peer_hostname, peer_as_id, 'down' AS event
+FROM data_bmp_peer_down
+WHERE device_id = 'my-router'
+  AND observation_time >= now() - INTERVAL 1 DAY
+
+ORDER BY observation_time DESC;
+```
+
+### Route count statistics from BMP stats messages
+
+```sql
+-- Latest Adj-RIBs-In route count (metric type 7) per peer
+SELECT peer_ip, peer_hostname, argMax(metric_value, observation_time) AS routes_in_adj_rib_in
+FROM data_bmp_stat
+WHERE device_id = 'my-router'
+  AND metric_type = 7
+GROUP BY peer_ip, peer_hostname
+ORDER BY peer_ip;
+```
