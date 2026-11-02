@@ -488,7 +488,7 @@ class FlowStitchingProcessor(BaseDataProcessor):
                         ''
                     ) AS organization,
                     dictGetOrDefault('meta_ip_community_dict', 'community', toIPv6(pair.1), '') AS community
-                FROM (SELECT arrayJoin({pairs:Array(Tuple(String, Nullable(UInt32)))}) AS pair)
+                FROM (SELECT arrayJoin({pairs:Array(Tuple(String, Nullable(UInt32)))}) AS pair) AS pairs
                 LEFT JOIN as_org ON as_org.id = pair.2
                 """,
                 parameters={"pairs": list(pairs)},
