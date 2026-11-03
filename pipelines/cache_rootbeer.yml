@@ -4,4 +4,4 @@ consumers:
 writers:
   - type: metranova.writers.file.JSONFileWriter
     processors:
-      - metranova.processors.clickhouse.rootbeer.RootbeerProcessor
+      - metranova.processors.file.rootbeer.RootbeerProcessor

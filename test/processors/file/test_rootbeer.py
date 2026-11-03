@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from metranova.processors.clickhouse.rootbeer import RootbeerProcessor
+from metranova.processors.file.rootbeer import RootbeerProcessor
 
 
 def _make_pipeline():
