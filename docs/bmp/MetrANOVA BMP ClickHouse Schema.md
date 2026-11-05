@@ -411,6 +411,23 @@ Because `data_bmp_route_latest` stores `as_path_id` as an `AggregateFunction` bl
 
 BGP ADD-PATH (RFC 7911) allows a peer to advertise multiple paths for the same prefix simultaneously, each distinguished by an `add_path_id`. This field is included as a grouping key in `data_bmp_route_latest` so each path is tracked independently. Routers not using ADD-PATH have `add_path_id = 0` for all rows — RFC 7911 path IDs start at 1, making `0` a natural sentinel — so the schema is backwards-compatible with non-ADD-PATH deployments.
 
+### Post-policy withdraw behaviour and stale entries
+
+RFC 7854 does not prescribe consistent withdraw behaviour for the post-policy Adj-RIB-In, and router implementations vary significantly in practice. For the **pre-policy** RIB, BMP faithfully mirrors the raw BGP UPDATE stream: every peer withdrawal results in a corresponding BMP withdraw message, so the pre-policy view reliably tracks the full route lifecycle. For the **post-policy** RIB, the behaviour is implementation-defined:
+
+- Some routers send post-policy withdraws only when a route is removed by a *policy change* on the router itself, not when the peer withdraws it.
+- Some implementations never send post-policy withdraws at all, treating the pre-policy withdraw as sufficient.
+- During BMP session establishment, routers replay their Adj-RIB-In. The pre-policy replay typically completes before the post-policy replay, leaving a window where post-policy entries exist in `data_bmp_route_latest` with no corresponding pre-policy entry.
+
+The practical consequence is that **the post-policy view can contain stale entries that have no pre-policy counterpart** — routes that were withdrawn at the peer level but whose post-policy state was never explicitly cleared by the router. This has been observed in production.
+
+**The correct way to query accepted and rejected routes is therefore always to compare the two views**, not to query the post-policy view in isolation:
+
+- **Accepted routes** = routes present in both pre- and post-policy views (the pre-policy view is the authority on what the peer is currently advertising).
+- **Rejected routes** = routes present in the pre-policy view but absent from the post-policy view.
+
+Querying the post-policy view alone risks including stale routes that the peer has already withdrawn. The `LEFT SEMI JOIN` and `LEFT ANTI JOIN` patterns in the [example queries](#example-queries) below enforce this correctly.
+
 ---
 
 ## Example Queries
