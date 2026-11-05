@@ -66,6 +66,12 @@ class BaseBMPStatProcessor(BaseDataProcessor):
         self.column_defs.append(['is_loc', 'Bool', True])       # Loc-RIB data
         self.column_defs.append(['is_filtered', 'Bool', True])  # filtered Loc-RIB data
 
+        # afi/safi — not documented in the pmacct BMP metrics spec but are
+        # included in certain per-AFI/SAFI stat types (e.g. metric types 9, 10,
+        # 15) when the router provides them.
+        self.column_defs.append(['afi', 'Nullable(UInt8)', True])
+        self.column_defs.append(['safi', 'Nullable(UInt8)', True])
+
         # Statistics metric fields
         # metric_type: IANA BMP statistics type code
         #   https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#statistics-types

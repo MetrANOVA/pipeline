@@ -239,6 +239,8 @@ One row per (device, peer, IANA metric type, report timestamp).  The primary key
 | `rd` | Nullable(String) | BGP Route Distinguisher for the peer session |
 | `is_loc` | Bool | `true` if this metric is for Loc-RIB data |
 | `is_filtered` | Bool | `true` if this metric is for filtered Loc-RIB data (used together with `is_loc`) |
+| `afi` | Nullable(UInt8) | Address Family Identifier — only present for per-AFI/SAFI stat types (e.g. types 9, 10, 15); `NULL` for aggregate counters |
+| `safi` | Nullable(UInt8) | Subsequent Address Family Identifier — only present for per-AFI/SAFI stat types; `NULL` for aggregate counters |
 | `metric_type` | UInt16 | IANA BMP statistics type code (see [IANA BMP Parameters](https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#statistics-types) and RFC 7854 §4.8) |
 | `metric_type_str` | LowCardinality(String) | Human-readable description of the metric type (as reported by pmacct) |
 | `metric_value` | UInt64 | Raw metric value; accommodates both 32-bit counters and 64-bit gauges per RFC 7854 |

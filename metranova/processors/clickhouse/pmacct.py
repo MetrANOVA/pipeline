@@ -747,6 +747,17 @@ class PMAcctBMPStatProcessor(BaseBMPStatProcessor, PMAcctUtilMixin):
             metric_value = 0
         formatted_record["metric_value"] = metric_value
 
+        # afi/safi — not in the pmacct BMP metrics spec but present for
+        # per-AFI/SAFI stat types (e.g. types 9, 10, 15)
+        for field in ("afi", "safi"):
+            raw = value.get(field, None)
+            if raw is not None:
+                try:
+                    raw = int(raw)
+                except (ValueError, TypeError):
+                    raw = None
+            formatted_record[field] = raw
+
         # Standard policy / collector fields
         formatted_record.update({
             "collector_id": value.get("label", None),

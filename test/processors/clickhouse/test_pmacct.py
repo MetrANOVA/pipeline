@@ -1294,6 +1294,34 @@ class TestPMAcctBMPStatProcessor(unittest.TestCase):
         self.assertEqual(result[0]["metric_value"], 0)
 
     # ------------------------------------------------------------------
+    # afi / safi fields
+    # ------------------------------------------------------------------
+
+    def test_afi_none_when_absent(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertIsNone(result[0]["afi"])
+
+    def test_safi_none_when_absent(self):
+        result = self._make().build_message(self._msg(), {})
+        self.assertIsNone(result[0]["safi"])
+
+    def test_afi_parsed(self):
+        result = self._make().build_message(self._msg(afi=1), {})
+        self.assertEqual(result[0]["afi"], 1)
+
+    def test_safi_parsed(self):
+        result = self._make().build_message(self._msg(safi=1), {})
+        self.assertEqual(result[0]["safi"], 1)
+
+    def test_afi_none_on_invalid(self):
+        result = self._make().build_message(self._msg(afi="bad"), {})
+        self.assertIsNone(result[0]["afi"])
+
+    def test_safi_none_on_invalid(self):
+        result = self._make().build_message(self._msg(safi="bad"), {})
+        self.assertIsNone(result[0]["safi"])
+
+    # ------------------------------------------------------------------
     # Collector / policy fields
     # ------------------------------------------------------------------
 
