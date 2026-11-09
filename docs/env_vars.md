@@ -137,6 +137,28 @@ The `ANONYMIZED` materialized view masks source, destination, and peer IP addres
 | `CLICKHOUSE_FLOW_MV_ANONYMIZED_{WINDOW}_IPV6_PREFIX` | `48` | IPv6 prefix length (leading bits preserved) when masking IPv6 addresses, i.e. an IPv6 `/48` |
 
 
+## ClickHouse Flow Stitching
+
+`FlowStitchingProcessor` reconstructs full flow records from individual flow-cache export slices -- the netflow/sflow equivalent of Logstash's `aggregate` filter. Slices sharing the same fingerprint (device, source/destination IP and port, protocol, ingress/egress interface) are accumulated in memory and merged into a single record once the flow goes idle past `INACTIVITY_TIMEOUT` or exceeds `MAX_TIMEOUT`, rather than being written to ClickHouse as separate rows. A background sweep thread checks for idle/expired flows every `SWEEP_INTERVAL` seconds. The stitched record also carries `packets_per_second` and `bits_per_second` -- integer-truncated averages over the full flow (`packet_count`/`duration` and `bit_count`/`duration`, or `0` when duration is `0`), matching Logstash's aggregate filter. Every record also carries `flow_hash`, a stable 64-bit hash of its fingerprint tuple (device, source/destination IP and port, protocol, ingress/egress interface) -- the same fields used to stitch slices together -- so downstream queries can group or join rows belonging to the same flow without reconstructing that tuple themselves. Accumulator state is kept in memory only and any flow still accumulating at process restart is lost, not flushed.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLICKHOUSE_FLOW_STITCH_ENABLED` | `false` | Master on/off switch. Off by default: when `false`, this processor never matches a message, creates no table, and starts no background sweep thread |
+| `CLICKHOUSE_FLOW_STITCH_TABLE` | `data_flow_stitched` | Table for completed, stitched flow records |
+| `CLICKHOUSE_FLOW_STITCH_TTL` | `5 YEAR` | TTL for the stitched flow table |
+| `CLICKHOUSE_FLOW_STITCH_TTL_COLUMN` | `start_time` | Column to use for TTL calculation |
+| `CLICKHOUSE_FLOW_STITCH_PARTITION_BY` | `toYYYYMMDD(start_time)` | Partition expression for the stitched flow table |
+| `CLICKHOUSE_FLOW_STITCH_INACTIVITY_TIMEOUT` | `630` | Seconds of wall-clock inactivity before an in-progress flow is flushed as complete |
+| `CLICKHOUSE_FLOW_STITCH_MAX_TIMEOUT` | `86400` | Maximum flow duration in seconds (event-time span between first and last slice); flows exceeding this are flushed even while still active |
+| `CLICKHOUSE_FLOW_STITCH_SWEEP_INTERVAL` | `30` | Seconds between background sweeps that check for idle/expired flows |
+| `CLICKHOUSE_FLOW_STITCH_ANONYMIZE` | `yes` | Whether to anonymize `src_ip`/`dst_ip`/`peer_ip` in stitched records (masking host bits per the prefix lengths below). `yes` by default, matching this processor's original behavior; set to `no` to write full, unmasked addresses instead |
+| `CLICKHOUSE_FLOW_STITCH_IPV4_PREFIX` | `117` | IPv6 prefix length (leading bits preserved) when masking IPv4 addresses in stitched records, same scheme as the [anonymized materialized views](#anonymized-materialized-view-ip-masking). Has no effect when `CLICKHOUSE_FLOW_STITCH_ANONYMIZE=no` |
+| `CLICKHOUSE_FLOW_STITCH_IPV6_PREFIX` | `48` | IPv6 prefix length (leading bits preserved) when masking IPv6 addresses in stitched records. Has no effect when `CLICKHOUSE_FLOW_STITCH_ANONYMIZE=no` |
+| `CLICKHOUSE_FLOW_STITCH_MIN_BYTES` | `0` | Drop a completed flow instead of writing it if its total size is smaller than this many bytes. Accepts a bare byte count or a size with a binary-unit suffix (`K`/`KB`, `M`/`MB`, `G`/`GB`, `T`/`TB`, case-insensitive, 1024-based -- e.g. `10M`). `0` (default) keeps every flow, however small |
+| `CLICKHOUSE_FLOW_STITCH_MIN_DURATION` | `0.1` | Drop a completed flow instead of writing it if its duration (seconds) is less than or equal to this value. Filters out single-sample/near-instant flows. `0` (or negative) disables this filter entirely, including for a literal duration-0 flow |
+
+`FlowStitchingProcessor` is already wired into `pipelines/data_flow.yml`, alongside `PMAcctFlowProcessor`. It stays inert (no table, no thread, no matching) until `CLICKHOUSE_FLOW_STITCH_ENABLED=true` is set -- see `conf.example/envs/data_flow.env`, where these variables live alongside the rest of the flow pipeline's config. Compose only loads one pipeline-specific env file per pipeline (`PIPELINE_ENV_FILE`, alongside `base.env`), so these variables belong in that same file rather than a separate one that would never get loaded.
+
 ## ClickHouse Dictionary Settings
 
 Dictionaries provide fast lookup capabilities for metadata enrichment. Each metadata type can have its own dictionary configuration.
