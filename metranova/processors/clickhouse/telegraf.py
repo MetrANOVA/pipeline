@@ -9,6 +9,9 @@ from metranova.processors.clickhouse.base import BaseDataGenericMetricProcessor
 logger = logging.getLogger(__name__)
 
 class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
+    def load_resource_types(self) -> list:
+        return [os.getenv("TELEGRAF_RESOURCE_TYPE", "telegraf")]
+
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.logger = logger
@@ -17,8 +20,9 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
             ["fields"],
             ["tags"]
         ]
-        # Get the resource type from the environment variable, default to "telegraf" if not set
-        self.resource_type = os.getenv("TELEGRAF_RESOURCE_TYPE", "telegraf")
+        # Singular alias used in build_message; always matches the single entry in self.resource_types
+        self.resource_type = self.resource_types[0]
+        self.table_ttl = os.getenv("CLICKHOUSE_TELEGRAF_TTL", "7 DAY")
         # Optional regex applied to device_id to extract/transform it (e.g. strip a domain suffix).
         # Set TELEGRAF_DEVICE_ID_REGEX to a pattern with one capture group, e.g. "^([^.]+)\..*$"
         device_id_pattern = os.getenv("TELEGRAF_DEVICE_ID_REGEX", None)
@@ -70,9 +74,11 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
             # we may have to change this so create var local to loop
             tmp_ext_json = ext_json
             table_name = None
-            # If it is an int, make it a counter, if it is a float, make it a gauge, otherwise make it a counter by setting value to 1 and adding value to ext
-            if isinstance(field_value, float):
+            # If it is a float or negative int, make it a gauge; if it is a non-negative int, make it a counter;
+            # otherwise make it a counter by setting value to 1 and adding original value to ext
+            if isinstance(field_value, float) or (isinstance(field_value, int) and field_value < 0):
                 table_name = self.get_table_name(self.resource_type, 'gauge')
+                field_value = float(field_value)
             elif not isinstance(field_value, int):
                 # For non-numeric, set to 1 and add original value to ext
                 table_name = self.get_table_name(self.resource_type, 'counter')
