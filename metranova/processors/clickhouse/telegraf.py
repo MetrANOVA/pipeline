@@ -3,7 +3,6 @@ import os
 import re
 
 import orjson
-import yaml
 
 from metranova.processors.clickhouse.base import BaseDataGenericMetricProcessor
 
