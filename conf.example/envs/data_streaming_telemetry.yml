@@ -1,0 +1,4 @@
+PIPELINE_YAML=/app/pipelines/data_telegraf.yml
+KAFKA_TOPIC=metranova_streaming_telemetry
+TELEGRAF_RESOURCE_TYPE=streaming_telemetry
+CLICKHOUSE_CACHER_TABLES=${CLICKHOUSE_DEVICE_METADATA_TABLE}
