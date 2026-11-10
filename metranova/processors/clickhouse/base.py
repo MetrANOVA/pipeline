@@ -232,6 +232,22 @@ class BaseClickHouseMaterializedViewMixin(BaseClickHouseTableMixin):
         
         return policy_level_term, policy_scope_term 
 
+class BaseClickHouseViewMixin(BaseClickHouseTableMixin):
+    """Mixin class for regular ClickHouse view related functionality"""
+    def __init__(self):
+        super().__init__()
+        self.view_name = ""
+        self.view_query = ""
+
+    def create_view_command(self) -> str:
+        """Return the ClickHouse view creation command"""
+        create_view_cmd = f"CREATE VIEW IF NOT EXISTS {self.view_name} "
+        if self.cluster_name:
+            create_view_cmd += f"ON CLUSTER '{self.cluster_name}' "
+        create_view_cmd += f"AS {self.view_query}"
+        return create_view_cmd
+
+
 class BaseClickHouseDictionaryMixin:
     """Mixin class for ClickHouse dictionary related functionality"""
     def __init__(self, source_table_name: str = ""):
@@ -300,6 +316,8 @@ class BaseClickHouseProcessor(BaseProcessor, BaseClickHouseTableMixin):
         self.ch_dictionaries = []
         # List of materailized views to build (as BaseClickHouseMaterializedViewMixin objects)
         self.materialized_views = []
+        # List of regular views to build (as BaseClickHouseViewMixin objects)
+        self.views = []
     
     def set_clickhouse_client(self, client: HttpClient) -> None:
         """Set the ClickHouse client for this processor.
@@ -317,10 +335,19 @@ class BaseClickHouseProcessor(BaseProcessor, BaseClickHouseTableMixin):
         """Return list of ClickHouse materialized views used by this processor. Override in child classes if multiple views are used."""
         return self.materialized_views
 
-    def load_materialized_views(self, env_var_name: str, mv_class: type[BaseClickHouseMaterializedViewMixin]) -> None:
+    def get_views(self) -> list:
+        """Return regular views used by this processor."""
+        return self.views
+
+    def load_materialized_views(
+        self,
+        env_var_name: str,
+        mv_class: type[BaseClickHouseMaterializedViewMixin],
+        default: str = "",
+    ) -> None:
         """Load materialized views from environment variable into self.materialized_views"""
         # Accept a comma separated list of agg windows - e.g. 5m, 12h, 1d, 1w, 3mo, 10y, etc
-        mv_str = os.getenv(env_var_name, None)
+        mv_str = os.getenv(env_var_name, default)
         if not mv_str:
             return
         mv_str = mv_str.strip()
@@ -329,6 +356,22 @@ class BaseClickHouseProcessor(BaseProcessor, BaseClickHouseTableMixin):
             if not agg_window:
                 continue
             self.materialized_views.append(mv_class(source_table_name=self.table, agg_window=agg_window))
+
+    def load_views(
+        self,
+        env_var_name: str,
+        view_classes: dict[str, type[BaseClickHouseViewMixin]],
+        default: str = "",
+    ) -> None:
+        """Load named regular views from a comma-separated environment variable."""
+        configured_names = os.getenv(env_var_name, default)
+        for name in configured_names.split(','):
+            name = name.strip()
+            if not name:
+                continue
+            if name not in view_classes:
+                raise ValueError(f"Unknown view '{name}' in {env_var_name}")
+            self.views.append(view_classes[name]())
 
     def get_ip_ref_extensions(self, env_var_name: str) -> list:
         """Get list of extension names that should have IP reference fields from environment variable"""

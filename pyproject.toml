@@ -8,6 +8,7 @@ dependencies = [
     "cachetools==6.2.1",
     "clickhouse-connect==0.15.0",
     "confluent-kafka==2.14.0",
+    "dnspython>=2.7.0",
     "metranova-core",
     "orjson==3.11.3",
     "pycountry==24.6.1",

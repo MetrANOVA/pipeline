@@ -1,11 +1,140 @@
 import logging
+import os
 import orjson
+import ipaddress
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterator
 from metranova.processors.clickhouse.flow import BaseFlowProcessor
+from metranova.processors.clickhouse.bmp import (
+    BaseBMPPeerDownProcessor,
+    BaseBMPPeerUpProcessor,
+    BaseBMPRouteProcessor,
+    BaseBMPStatProcessor,
+)
 
 logger = logging.getLogger(__name__)
 
-class PMAcctFlowProcessor(BaseFlowProcessor):
+class PMAcctUtilMixin:
+    def __init__(self):
+        self.dns_lookup_enabled = os.getenv("BMP_PEER_DNS_LOOKUP", "true").strip().lower() not in ("false", "0", "no")
+
+    def lookup_device(self, device_ip: str, formatted_record: dict):
+        #initialize values
+        device_id = "unknown"
+        device_ref = None
+        if device_ip:
+            #if we have an ip, at a minimum device_id should be that
+            device_id = device_ip
+            device_details = self.pipeline.cacher("clickhouse").lookup("meta_device:@loopback_ip", device_ip)
+            if device_details:
+                #if we got this far, set to id of fallback to ip
+                device_id = device_details.get("id", device_id)
+                device_ref = device_details.get("ref", None)
+        formatted_record["device_id"] = device_id
+        formatted_record["device_ref"] = device_ref
+
+    def lookup_ip(self, ip_field: str, target_ip_field: str, value: dict, formatted_record: dict):
+        formatted_record[target_ip_field] = value.get(ip_field, None)
+        ip_cache_result = self.pipeline.cacher("ip").lookup("meta_ip", formatted_record[target_ip_field])
+        if ip_cache_result:
+            formatted_record[f"{target_ip_field}_ref"] = ip_cache_result[0]
+        else:
+            formatted_record[f"{target_ip_field}_ref"] = None
+
+    def lookup_peer_as(self, as_field: str, target_field: str, value: dict, formatted_record: dict):
+        """Populate peer AS id and ref when the ASN is present directly in the message.
+
+        Parses ``value[as_field]`` as an integer for ``target_field_id`` (0 on
+        parse failure) and resolves ``target_field_ref`` via the ``meta_as``
+        clickhouse cache (``None`` if not found).
+
+        Use for messages that carry ``peer_asn`` directly (stat, peer_up, peer_down).
+        """
+        peer_asn = self.parse_int(value.get(as_field), default=0)
+        formatted_record[f"{target_field}_id"] = peer_asn
+        formatted_record[f"{target_field}_ref"] = self.pipeline.cacher("clickhouse").lookup_dict_key(
+            "meta_as", peer_asn, "ref"
+        )
+
+    def lookup_peer_as_from_ip(self, ip_field: str, target_field: str, formatted_record: dict):
+        """Populate peer AS id and ref by resolving the peer IP through the IP cache.
+
+        Use for route_monitor messages which do not carry ``peer_asn`` directly.
+        Walks ``ip_to_as_lookup_order`` (same as ``lookup_ip_as_fields``) to
+        derive the ASN from the already-resolved IP address stored at
+        ``formatted_record[ip_field]``, then resolves ``target_field_ref`` via
+        the ``meta_as`` clickhouse cache (``None`` if not found).
+        The AS id falls back to 0 if the IP cache has no AS entry or the value
+        cannot be parsed as an integer.
+        """
+        peer_ip = formatted_record.get(ip_field)
+        as_id = 0
+        if peer_ip:
+            for table in self.ip_to_as_lookup_order:
+                result = self.pipeline.cacher("ip").lookup(table, peer_ip)
+                if result and len(result) > 1:
+                    as_id = self.parse_int(result[1], default=0)
+                    break
+        formatted_record[f"{target_field}_id"] = as_id
+        formatted_record[f"{target_field}_ref"] = self.pipeline.cacher("clickhouse").lookup_dict_key(
+            "meta_as", as_id, "ref"
+        )
+
+    @staticmethod
+    def parse_int(value, default=None):
+        """Cast *value* to int, returning *default* on failure."""
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return default
+
+    @staticmethod
+    def parse_ts_ms(ts_raw) -> int:
+        """Parse an ISO 8601 timestamp string (pbmpd format) to milliseconds.
+
+        Falls back to treating the value as a Unix float, then to 0.
+        """
+        try:
+            return int(datetime.fromisoformat(ts_raw).timestamp() * 1000)
+        except (ValueError, TypeError):
+            try:
+                return int(float(ts_raw) * 1000)
+            except (ValueError, TypeError):
+                return 0
+
+    def build_peer_base(self, value: dict) -> dict:
+        """Populate the common peer fields shared by peer_up and peer_down messages."""
+        record = {}
+
+        record["observation_time"] = self.parse_ts_ms(value.get("timestamp", ""))
+
+        self.lookup_device(value.get("bmp_router", ""), record)
+        self.lookup_ip("peer_ip", "peer_ip", value, record)
+        self.lookup_peer_as("peer_asn", "peer_as", value, record)
+
+        record["peer_type"] = self.parse_int(value.get("peer_type"))
+        record["rd"] = value.get("rd") or None
+
+        peer_ip_str = value.get("peer_ip", "") or ""
+        if self.dns_lookup_enabled:
+            hostname = self.pipeline.cacher("dns").lookup_hostname(peer_ip_str)
+            record["peer_hostname"] = hostname if hostname is not None else peer_ip_str
+        else:
+            record["peer_hostname"] = peer_ip_str
+
+        record.update({
+            "collector_id": value.get("label"),
+            "policy_originator": "unknown",
+            "policy_level": "unknown",
+            "policy_scope": ["unknown"],
+            "ext": orjson.dumps({}).decode("utf-8"),
+        })
+
+        return record
+
+class PMAcctFlowProcessor(BaseFlowProcessor, PMAcctUtilMixin):
     def __init__(self, pipeline):
         super().__init__(pipeline)
         self.flow_type_map = {
@@ -224,21 +353,6 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         formatted_record[f"{direction}_interface_ref"] = interface_ref
         formatted_record[f"{direction}_interface_edge"] = interface_edge
 
-    def lookup_device(self, device_ip: str, formatted_record: dict):
-        #initialize values
-        device_id = "unknown"
-        device_ref = None
-        if device_ip:
-            #if we have an ip, at a minimum device_id should be that
-            device_id = device_ip
-            device_details = self.pipeline.cacher("clickhouse").lookup("meta_device:@loopback_ip", device_ip)
-            if device_details:
-                #if we got this far, set to id of fallback to ip
-                device_id = device_details.get("id", device_id)
-                device_ref = device_details.get("ref", None)
-        formatted_record["device_id"] = device_id
-        formatted_record["device_ref"] = device_ref
-
     def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
         # check required fields
         if not self.has_required_fields(value):
@@ -368,3 +482,361 @@ class PMAcctFlowProcessor(BaseFlowProcessor):
         # expects a list returned (there are cases that aren;t this where you produce multiple records)
         # just wraps our one dict in an array
         return [formatted_record]
+
+class PMAcctBMPRouteProcessor(BaseBMPRouteProcessor, PMAcctUtilMixin):
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        PMAcctUtilMixin.__init__(self)
+        self.required_fields = [
+            ['bmp_router'], 
+            ['event_type'],
+            ['peer_ip'],
+            ['bmp_msg_type'],
+            ['log_type'],
+            ['timestamp'],
+            ['timestamp_arrival']
+
+        ]
+
+    def match_message(self, value):
+        if value.get("bmp_msg_type", "") != "route_monitor":
+            return False
+        return super().match_message(value)
+
+    def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
+        # check required fields
+        if not self.has_required_fields(value):
+            return None
+
+        #init
+        formatted_record = {}
+        ext = {}
+
+        #determine log type
+        formatted_record["action"] = value.get("log_type", None)
+        if formatted_record["action"] in ["update", "withdraw"]:
+            #updates and withdraws require an ip_prefix
+            if not value.get("ip_prefix", None):
+                return None
+        elif formatted_record["action"] == "delete":
+            # no prefix needed, set to ::/0
+            if not value.get("ip_prefix", None):
+                value["ip_prefix"] = "::/0"
+        else:
+            #unknown log_type
+            return None
+        
+        # lookup device
+        self.lookup_device(value.get("bmp_router", ""), formatted_record)
+
+        #lookup ip field
+        self.lookup_ip("ip_prefix", "ip_prefix", value, formatted_record)
+        self.lookup_ip("bgp_nexthop", "bgp_nexthop", value, formatted_record)
+        self.lookup_ip("peer_ip", "peer_ip", value, formatted_record)
+
+        peer_ip_str = value.get("peer_ip", "") or ""
+        if self.dns_lookup_enabled:
+            hostname = self.pipeline.cacher("dns").lookup_hostname(peer_ip_str)
+            formatted_record["peer_hostname"] = hostname if hostname is not None else peer_ip_str
+        else:
+            formatted_record["peer_hostname"] = peer_ip_str
+
+        self.lookup_peer_as_from_ip("peer_ip", "peer_as", formatted_record)
+
+        #Parse BGP fields
+        as_path_str = value.get("as_path", "").split(" ")
+        bgp_as_path_id = []
+        bgp_as_path_ref = []
+        for as_str in as_path_str:
+            #convert to int
+            try:
+                asn = int(as_str)
+            except ValueError:
+                continue
+            bgp_as_path_id.append(asn)
+            # lookup AS ref
+            as_info = self.pipeline.cacher("clickhouse").lookup("meta_as", asn)
+            if as_info:
+                bgp_as_path_ref.append(as_info.get("ref", None))
+            else:
+                bgp_as_path_ref.append(None)
+        formatted_record["as_path_id"] = bgp_as_path_id
+
+        # Other BGP fields
+        if value.get("comms", None):
+            formatted_record["community"] = value.get("comms", "").split(" ")
+        else:
+            formatted_record["community"] = []
+        if value.get("ecomms", None):
+            formatted_record["ext_community"] = value.get("ecomms", "").split(" ")
+        else:
+            formatted_record["ext_community"] = []
+        if value.get("local_pref", None) is not None:
+            try:
+                formatted_record["local_pref"] = int(value.get("local_pref"))
+            except ValueError:
+                pass
+        if value.get("med", None) is not None:
+            try:
+                formatted_record["med"] = int(value.get("med"))
+            except ValueError:
+                pass
+
+        # Parse IP prefix a tuple
+        ip_prefix_str = value.get("ip_prefix") #required so should always return
+        ip_prefix_tuple = tuple(ip_prefix_str.split("/"))
+        if len(ip_prefix_tuple) == 2:
+            formatted_record["ip_prefix_address"] = ip_prefix_tuple[0]
+            formatted_record["ip_prefix_length"] = int(ip_prefix_tuple[1])
+        elif ":" in ip_prefix_tuple[0]:
+            #ipv6 address without a prefix length, default to /128
+            formatted_record["ip_prefix_address"] = ip_prefix_tuple[0]
+            formatted_record["ip_prefix_length"] = 128
+        else:
+            #ipv4 address without a prefix length, default to /32
+            formatted_record["ip_prefix_address"] = ip_prefix_tuple[0]
+            formatted_record["ip_prefix_length"] = 32
+        #calculate range start and end based on address and length
+        try:
+            network = ipaddress.ip_network(f"{formatted_record['ip_prefix_address']}/{formatted_record['ip_prefix_length']}", strict=False)
+            formatted_record["ip_prefix_range_start"] = str(network.network_address)
+            formatted_record["ip_prefix_range_end"] = str(network.broadcast_address)
+        except ValueError:
+            # We need a valid IP address and prefix length to calculate the range. If the provided values are invalid, we cannot proceed with this record.
+            return None
+
+        #get add_path_id if present, otherwise default to 0
+        try:
+            formatted_record["add_path_id"] = int(value.get("add_path_id", 0))
+        except ValueError:
+            formatted_record["add_path_id"] = 0
+
+        # set IP version
+        afi = value.get("afi", None)
+        if afi == 1:
+            formatted_record["ip_version"] = 4
+        elif afi == 2:
+            formatted_record["ip_version"] = 6
+        else:
+            formatted_record["ip_version"] = None
+
+        # Update formatted_record with additional fields
+        formatted_record.update({
+            "observation_time": self.parse_ts_ms(value.get("timestamp", 0)),
+            "export_time": self.parse_ts_ms(value.get("timestamp_arrival", 0)),
+            "collector_id": value.get("label", None),
+            "policy_originator": "unknown",
+            "policy_level": "unknown",
+            "policy_scope": ["unknown"],
+            "ext": orjson.dumps(ext).decode('utf-8'),
+            "is_in": value.get("is_in", False),
+            "is_out": value.get("is_out", False),
+            "is_post": value.get("is_post", False),
+            "afi": afi,
+            "safi": value.get("safi", None),
+            "as_path_ref": [], #TODO: lookup
+            "origin": value.get("origin", ""),
+            "local_pref": value.get("local_pref", None),
+            "med": value.get("med", None),
+            "rd": value.get("rd", None),
+            "mpls_label": value.get("mpls_label", None),
+            "aigp": value.get("aigp", None),
+            "psid_li": value.get("psid_li", None),
+            "path_status": value.get("path_status", []),
+            "reason_code": value.get("reason_code", [])
+        })
+        return [formatted_record]
+
+
+class PMAcctBMPStatProcessor(BaseBMPStatProcessor, PMAcctUtilMixin):
+    """Parse BMP Statistics Report messages (bmp_msg_type: "stats") from pmacct/pbmpd.
+
+    Each JSON object from the source represents a single IANA statistics counter
+    observation for one BGP peer on one router.  The processor maps those fields
+    onto the ``data_bmp_stat`` table columns defined by ``BaseBMPStatProcessor``.
+    """
+
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        PMAcctUtilMixin.__init__(self)
+        self.required_fields = [
+            ['bmp_router'],
+            ['event_type'],
+            ['peer_ip'],
+            ['bmp_msg_type'],
+            ['timestamp'],
+            ['counter_type'],
+        ]
+
+    def match_message(self, value):
+        return value.get("bmp_msg_type", "") == "stats"
+
+    def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
+        if not self.has_required_fields(value):
+            return None
+
+        formatted_record = {}
+        ext = {}
+
+        # observation_time maps to pbmpd `timestamp` — when the BMP stats
+        # message was generated on the router. pbmpd sends this as an ISO 8601
+        # string; fall back to epoch 0 if missing or unparseable.
+        ts_raw = value.get("timestamp", "")
+        try:
+            ts_ms = int(datetime.fromisoformat(ts_raw).timestamp() * 1000)
+        except (ValueError, TypeError):
+            try:
+                ts_ms = int(float(ts_raw) * 1000)
+            except (ValueError, TypeError):
+                ts_ms = 0
+        formatted_record["observation_time"] = ts_ms
+
+        # Device / router identity
+        self.lookup_device(value.get("bmp_router", ""), formatted_record)
+
+        # BGP peer IP — sets peer_ip and peer_ip_ref
+        self.lookup_ip("peer_ip", "peer_ip", value, formatted_record)
+
+        # Reverse-DNS hostname for the peer IP; falls back to the IP string itself
+        _peer_ip_str = value.get("peer_ip", "") or ""
+        if self.dns_lookup_enabled:
+            _hostname = self.pipeline.cacher("dns").lookup_hostname(_peer_ip_str)
+            formatted_record["peer_hostname"] = _hostname if _hostname is not None else _peer_ip_str
+        else:
+            formatted_record["peer_hostname"] = _peer_ip_str
+
+        # BGP peer AS is provided directly in the stat message
+        self.lookup_peer_as("peer_asn", "peer_as", value, formatted_record)
+
+        # BGP peer type (IANA peer type code)
+        peer_type = value.get("peer_type", None)
+        if peer_type is not None:
+            try:
+                peer_type = int(peer_type)
+            except (ValueError, TypeError):
+                peer_type = None
+        formatted_record["peer_type"] = peer_type
+
+        # BGP router ID of the remote peer
+        formatted_record["bgp_id"] = value.get("bgp_id", None)
+
+        # Route Distinguisher
+        formatted_record["rd"] = value.get("rd", None)
+
+        # Loc-RIB / filtered scope flags
+        formatted_record["is_loc"] = bool(value.get("is_loc", False))
+        formatted_record["is_filtered"] = bool(value.get("is_filtered", False))
+
+        # Statistics metric fields — map pbmpd counter_type / counter_type_str /
+        # counter_value onto metric_type / metric_type_str / metric_value.
+        metric_type = value.get("counter_type", None)
+        if metric_type is not None:
+            try:
+                metric_type = int(metric_type)
+            except (ValueError, TypeError):
+                metric_type = None
+        if metric_type is None:
+            return None
+        formatted_record["metric_type"] = metric_type
+        formatted_record["metric_type_str"] = value.get("counter_type_str", "")
+
+        metric_value = value.get("counter_value", 0)
+        try:
+            metric_value = int(metric_value)
+        except (ValueError, TypeError):
+            metric_value = 0
+        formatted_record["metric_value"] = metric_value
+
+        # afi/safi — not in the pmacct BMP metrics spec but present for
+        # per-AFI/SAFI stat types (e.g. types 9, 10, 15)
+        for field in ("afi", "safi"):
+            raw = value.get(field, None)
+            if raw is not None:
+                try:
+                    raw = int(raw)
+                except (ValueError, TypeError):
+                    raw = None
+            formatted_record[field] = raw
+
+        # Standard policy / collector fields
+        formatted_record.update({
+            "collector_id": value.get("label", None),
+            "policy_originator": "unknown",
+            "policy_level": "unknown",
+            "policy_scope": ["unknown"],
+            "ext": orjson.dumps(ext).decode('utf-8'),
+        })
+
+        return [formatted_record]
+
+
+class PMAcctBMPPeerUpProcessor(BaseBMPPeerUpProcessor, PMAcctUtilMixin):
+    """Parse BMP Peer Up messages (bmp_msg_type: "peer_up") from pmacct/pbmpd.
+
+    Maps pbmpd JSON fields onto the ``data_bmp_peer_up`` table columns defined
+    by ``BaseBMPPeerUpProcessor``.
+    """
+
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        PMAcctUtilMixin.__init__(self)
+        self.required_fields = [
+            ['bmp_router'],
+            ['event_type'],
+            ['peer_ip'],
+            ['bmp_msg_type'],
+            ['timestamp'],
+        ]
+
+    def match_message(self, value: dict) -> bool:
+        return value.get("bmp_msg_type", "") == "peer_up"
+
+    def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
+        if not self.has_required_fields(value):
+            return None
+
+        record = self.build_peer_base(value)
+
+        # bgp_id is only present on peer_up
+        record["bgp_id"] = value.get("bgp_id") or None
+
+        # Local side of the BGP session (from the BMP peer-up TLV)
+        record["local_as"] = self.parse_int(value.get("local_as"))
+        record["local_port"] = self.parse_int(value.get("local_port"))
+        record["remote_port"] = self.parse_int(value.get("remote_port"))
+        record["local_ip"] = value.get("local_ip") or None
+
+        return [record]
+
+
+class PMAcctBMPPeerDownProcessor(BaseBMPPeerDownProcessor, PMAcctUtilMixin):
+    """Parse BMP Peer Down messages (bmp_msg_type: "peer_down") from pmacct/pbmpd.
+
+    Maps pbmpd JSON fields onto the ``data_bmp_peer_down`` table columns defined
+    by ``BaseBMPPeerDownProcessor``.
+    """
+
+    def __init__(self, pipeline):
+        super().__init__(pipeline)
+        PMAcctUtilMixin.__init__(self)
+        self.required_fields = [
+            ['bmp_router'],
+            ['event_type'],
+            ['peer_ip'],
+            ['bmp_msg_type'],
+            ['timestamp'],
+        ]
+
+    def match_message(self, value: dict) -> bool:
+        return value.get("bmp_msg_type", "") == "peer_down"
+
+    def build_message(self, value: dict, msg_metadata: dict) -> Iterator[Dict[str, Any]]:
+        if not self.has_required_fields(value):
+            return None
+
+        record = self.build_peer_base(value)
+
+        record["reason_type"] = self.parse_int(value.get("reason_type"))
+        record["reason_str"] = value.get("reason_str") or None
+
+        return [record]

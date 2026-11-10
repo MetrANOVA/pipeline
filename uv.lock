@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 
 [[package]]
@@ -553,6 +553,7 @@ dependencies = [
     { name = "cachetools" },
     { name = "clickhouse-connect" },
     { name = "confluent-kafka" },
+    { name = "dnspython" },
     { name = "metranova-core" },
     { name = "orjson" },
     { name = "pycountry" },
@@ -568,6 +569,7 @@ requires-dist = [
     { name = "cachetools", specifier = "==6.2.1" },
     { name = "clickhouse-connect", specifier = "==0.15.0" },
     { name = "confluent-kafka", specifier = "==2.14.0" },
+    { name = "dnspython", specifier = ">=2.7.0" },
     { name = "metranova-core", git = "https://github.com/MetrANOVA/api.git?subdirectory=packages%2Fmetranova&branch=main" },
     { name = "orjson", specifier = "==3.11.3" },
     { name = "pycountry", specifier = "==24.6.1" },

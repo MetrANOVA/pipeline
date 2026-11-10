@@ -167,6 +167,21 @@ Dictionaries provide fast lookup capabilities for metadata enrichment. Each meta
 | `CLICKHOUSE_AS_METADATA_EXTENSIONS` | (none) | Comma-separated list of AS metadata extensions (e.g., `peeringdb`) |
 | `CLICKHOUSE_IF_METADATA_EXTENSIONS` | (none) | Comma-separated list of interface metadata extensions (e.g., `sap,vrtr,vrtr_interface`) |
 
+## BMP Processor Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BMP_PEER_DNS_LOOKUP` | `true` | Enable reverse-DNS lookups for `peer_hostname` in all BMP processors. Set to `false`, `0`, or `no` to disable and store the peer IP string instead. |
+
+## BMP Route Views
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLICKHOUSE_BMP_ROUTE_MATERIALIZED_VIEWS` | `latest` | Comma-separated list of BMP route materialized views to create. Supported value: `latest`. Set empty to disable. |
+| `CLICKHOUSE_BMP_ROUTE_VIEWS` | `adj_rib_in_pre,adj_rib_in_post` | Comma-separated list of regular BMP route views to create. Supported values: `adj_rib_in_pre`, `adj_rib_in_post`. Set empty to disable or provide one value to install only that view. |
+| `CLICKHOUSE_BMP_ROUTE_TTL_COLUMN` | `export_time` | Timestamp column used as the basis for BMP route table TTL |
+| `CLICKHOUSE_BMP_ROUTE_PARTITION_BY` | `toYYYYMMDD(export_time)` | Partition expression for the BMP route table |
+
 ## ClickHouse Processor Policy Settings
 
 | Variable | Default | Description |
