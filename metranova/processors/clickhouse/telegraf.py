@@ -20,6 +20,10 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
         ]
         # Get the resource type from the environment variable, default to "telegraf" if not set
         self.resource_type = os.getenv("TELEGRAF_RESOURCE_TYPE", "telegraf")
+        # Optional regex applied to device_id to extract/transform it (e.g. strip a domain suffix).
+        # Set TELEGRAF_DEVICE_ID_REGEX to a pattern with one capture group, e.g. "^([^.]+)\..*$"
+        device_id_pattern = os.getenv("TELEGRAF_DEVICE_ID_REGEX", None)
+        self.device_id_regex = re.compile(device_id_pattern) if device_id_pattern else None
         #tags to always skip - these are added to skip_tags in rules
         skip_tags_list = ["date", "routing_tag", "collector", "device"]
         self.skip_tags = {tag: True for tag in skip_tags_list}
@@ -34,6 +38,9 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
         if device_id is None:
             self.logger.debug("Missing device id in tags")
             return []
+        if self.device_id_regex:
+            match = self.device_id_regex.search(device_id)
+            device_id = match.group(1) if match and match.lastindex else device_id
 
         #lookup device ref in cache
         device_details = self.pipeline.cacher("clickhouse").lookup("meta_device", device_id)
