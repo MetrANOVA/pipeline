@@ -79,7 +79,7 @@ class ClickHouseCacher(BaseCacher):
         except Exception as e:
             logger.info(f"Could not load existing data (table might be empty): {e}")
 
-    def lookup(self, table, key: str) -> Optional[str]:
+    def lookup(self, table, key: str) -> Optional[dict]:
         #lookup in local cache
         if key is None or table is None:
             return None
