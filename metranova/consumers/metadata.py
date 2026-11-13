@@ -193,12 +193,17 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
             self.logger.error("No CAIDA AS2Org data available to process")
             return
         
+        org_count = 0
+        asn_count = 0
+        asn_dropped = 0
+        asn_name_defaulted = 0
         try:
             for line in data_content.splitlines():
                 if not line.strip():
                     continue
                 line_json = orjson.loads(line)
                 if line_json.get('type') == 'Organization':
+                    org_count += 1
                     if line_json.get('organizationId', None) is None:
                         continue
                     org_id = f"caida:{line_json['organizationId']}"
@@ -216,18 +221,47 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
                         if continent_name:
                             org_objs[org_id]['continent_name'] = continent_name
                 elif line_json.get('type') == 'ASN':
-                    if line_json.get('asn', None) is None or line_json.get('organizationId', None) is None or line_json.get('name', None) is None:
+                    asn_count += 1
+                    if line_json.get('asn', None) is None or line_json.get('organizationId', None) is None:
+                        asn_dropped += 1
+                        self.logger.warning(
+                            f"CAIDA AS2Org: dropping ASN record missing asn or "
+                            f"organizationId: {line_json}"
+                        )
                         continue
                     try:
                         as_id = int(line_json['asn'])
                     except ValueError:
+                        asn_dropped += 1
+                        self.logger.warning(
+                            f"CAIDA AS2Org: dropping ASN record with non-numeric "
+                            f"asn: {line_json}"
+                        )
                         continue
+                    # Some CAIDA records (observed for a handful of legacy/RIPE-
+                    # region ASNs, e.g. AS1110) carry an organizationId but no
+                    # 'name' key at all. Don't drop the whole record over that --
+                    # the organization linkage is still good and resolves to a real
+                    # org name via organization_id/organization_ref. Default the
+                    # AS's own name instead, the same way the Organization branch
+                    # above defaults to "Delegated" rather than dropping.
+                    as_name = line_json.get('name', None)
+                    if not as_name:
+                        asn_name_defaulted += 1
+                        as_name = f"AS{as_id}"
                     as_objs[as_id] = {
                         'id': as_id,
                         'organization_id': f"caida:{line_json['organizationId']}",
-                        'name': line_json.get('name', None),
+                        'name': as_name,
                         'ext': {"data_source": ["CAIDA"]}
                     }
+            self.logger.info(
+                f"CAIDA AS2Org: parsed {org_count} organization record(s) and "
+                f"{asn_count} ASN record(s); {asn_dropped} ASN record(s) dropped "
+                f"(missing/invalid asn or organizationId), {asn_name_defaulted} "
+                f"ASN record(s) had no name in the source data and were given a "
+                f"default of 'AS<number>'"
+            )
         except Exception as e:
             self.logger.error(f"Error processing CAIDA AS2Org data: {e}")
 

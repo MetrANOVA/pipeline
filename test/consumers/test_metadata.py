@@ -353,6 +353,50 @@ class TestCAIDAOrgASConsumer(unittest.TestCase):
         self.assertEqual(as1['ext']['data_source'], ['CAIDA'])
 
     @patch('builtins.open', new_callable=mock_open)
+    def test_load_caida_data_asn_missing_name_defaults_instead_of_dropping(self, mock_file):
+        """A CAIDA ASN record with a valid asn + organizationId but no 'name' key
+        (observed for some legacy/RIPE-region ASNs, e.g. AS1110) must still be
+        kept -- with its name defaulted to 'AS<number>' -- rather than dropped,
+        since the organization linkage is still good."""
+        self.consumer.use_url = False
+
+        caida_data = '{"asn": "1110", "organizationId": "ORG-UIBK1-RIPE", "source": "RIPE", "type": "ASN"}'
+        mock_file.return_value.read.return_value = caida_data
+
+        as_objs = defaultdict(dict)
+        org_objs = defaultdict(dict)
+
+        self.consumer._load_caida_data(as_objs, org_objs)
+
+        self.assertIn(1110, as_objs)
+        as1110 = as_objs[1110]
+        self.assertEqual(as1110['id'], 1110)
+        self.assertEqual(as1110['organization_id'], 'caida:ORG-UIBK1-RIPE')
+        self.assertEqual(as1110['name'], 'AS1110')
+
+    @patch('builtins.open', new_callable=mock_open)
+    def test_load_caida_data_asn_missing_required_fields_is_dropped_and_logged(self, mock_file):
+        """Unlike a missing name, a genuinely missing asn or organizationId still
+        drops the record -- but now logs a warning instead of failing silently."""
+        self.consumer.use_url = False
+
+        caida_data = (
+            '{"type": "ASN", "organizationId": "org1", "name": "No ASN"}\n'
+            '{"type": "ASN", "asn": "65003", "name": "No org"}\n'
+            '{"type": "ASN", "asn": "not-a-number", "organizationId": "org1", "name": "Bad ASN"}'
+        )
+        mock_file.return_value.read.return_value = caida_data
+
+        as_objs = defaultdict(dict)
+        org_objs = defaultdict(dict)
+
+        with patch.object(self.consumer.logger, 'warning') as mock_warning:
+            self.consumer._load_caida_data(as_objs, org_objs)
+            self.assertEqual(mock_warning.call_count, 3)
+
+        self.assertEqual(len(as_objs), 0)
+
+    @patch('builtins.open', new_callable=mock_open)
     def test_load_caida_data_file_not_found(self, mock_file):
         """Test _load_caida_data with file not found error."""
         # Disable URL fetching for this test
