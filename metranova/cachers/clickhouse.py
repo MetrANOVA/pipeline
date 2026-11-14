@@ -75,8 +75,6 @@ class ClickHouseCacher(BaseCacher):
                     'max_insert_time': max_insert_time
                 }
             self.local_cache[table] = tmp_cache
-            for tk, tv in tmp_cache.items():
-                logger.info(f"   - {tk} -> {tv}")
         except Exception as e:
             logger.info(f"Could not load existing data (table might be empty): {e}")
 
