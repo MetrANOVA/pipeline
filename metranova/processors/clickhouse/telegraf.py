@@ -48,6 +48,9 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
         #lookup device ref in cache
         device_details = self.pipeline.cacher("clickhouse").lookup("meta_device", device_id)
         device_ref = device_details.get("ref", None) if device_details else None
+        # Make sure we are using the true id from the database in case we had to do our lookup on an alternative field like hostname
+        if device_details.get("id", None):
+            device_id = device_details.get("id")
 
         #grab the timestamp
         try:
