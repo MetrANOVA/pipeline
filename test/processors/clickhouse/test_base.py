@@ -1298,6 +1298,35 @@ class TestBaseMetadataProcessorBuildMessage(unittest.TestCase):
         record = result[0]
         self.assertEqual(record['ref'], 'test_id__v2')
 
+    @patch.dict(os.environ, {'CLICKHOUSE_METADATA_FORCE_UPDATE': 'true'})
+    def test_build_message_force_update_no_cached_record(self):
+        """Test build_message with force_update enabled but no cached record at
+        all (e.g. right after the table was truncated). Must not crash on
+        cached_record.get(...) -- force_update only means "re-version even if
+        the hash matches", which requires a cached_record to re-version in the
+        first place. A genuinely new record should just get the default v1 ref."""
+
+        force_processor = BaseMetadataProcessor(self.mock_pipeline)
+        force_processor.table = "test_table"
+        force_processor.val_id_field = ['id']
+        force_processor.required_fields = [['id'], ['name']]
+
+        input_data = {
+            'data': [{
+                'id': 'test_id',
+                'name': 'test_name'
+            }]
+        }
+
+        # No existing cached record at all
+        self.mock_pipeline.cacher.return_value.lookup.return_value = None
+
+        result = force_processor.build_message(input_data, {})
+
+        self.assertIsInstance(result, list)
+        record = result[0]
+        self.assertEqual(record['ref'], 'test_id__v1')
+
     def test_match_message(self):
         """Test match_message method."""
         
