@@ -23,7 +23,7 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
         # Singular alias used in build_message; always matches the single entry in self.resource_types
         self.resource_type = self.resource_types[0]
         self.table_ttl = os.getenv("CLICKHOUSE_TELEGRAF_TTL", "7 DAY")
-        self.device_cacher_table = os.getenv("DEVICE_CACHER_TABLE", "meta_device").split(':')[0]
+        self.device_cacher_table = os.getenv("DEVICE_CACHER_TABLE", "meta_device")
         # Optional regex applied to device_id to extract/transform it (e.g. strip a domain suffix).
         # Set TELEGRAF_DEVICE_ID_REGEX to a pattern with one capture group, e.g. "^([^.]+)\..*$"
         device_id_pattern = os.getenv("TELEGRAF_DEVICE_ID_REGEX", None)
@@ -47,9 +47,7 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
             device_id = match.group(1) if match and match.lastindex else device_id
 
         #lookup device ref in cache
-        logger.info(f"Looking up {device_id} in table {self.device_cacher_table}")
         device_details = self.pipeline.cacher("clickhouse").lookup(self.device_cacher_table, device_id)
-        logger.info(f"device_details={device_details}")
         device_ref = device_details.get("ref", None) if device_details else None
         # Make sure we are using the true id from the database in case we had to do our lookup on an alternative field like hostname
         if device_details and device_details.get("id", None):
