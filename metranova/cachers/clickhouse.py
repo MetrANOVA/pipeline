@@ -76,6 +76,9 @@ class ClickHouseCacher(BaseCacher):
                 }
             self.local_cache[table] = tmp_cache
             logger.info(f"Loaded {len(tmp_cache)} existing records from {table}")
+            logger.info(f"Dumping cache {table}:")
+            for tk, tv in tmp_cache.items():
+                logger.info(f"   - {tk} -> {tv}")
         except Exception as e:
             logger.info(f"Could not load existing data (table might be empty): {e}")
 
