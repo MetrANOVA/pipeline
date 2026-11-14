@@ -47,7 +47,9 @@ class DataGenericMetricProcessor(BaseDataGenericMetricProcessor):
             device_id = match.group(1) if match and match.lastindex else device_id
 
         #lookup device ref in cache
+        logger.info(f"Looking up {device_id} in table {self.device_cacher_table}")
         device_details = self.pipeline.cacher("clickhouse").lookup(self.device_cacher_table, device_id)
+        logger.info(f"device_details={device_details}")
         device_ref = device_details.get("ref", None) if device_details else None
         # Make sure we are using the true id from the database in case we had to do our lookup on an alternative field like hostname
         if device_details and device_details.get("id", None):
