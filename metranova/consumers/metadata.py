@@ -196,7 +196,9 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
         org_count = 0
         asn_count = 0
         asn_dropped = 0
-        asn_name_defaulted = 0
+        # ASNs whose record has no name, as as_id -> organization id. Resolved once the
+        # whole file has been read, since an ASN's organization record can come after it.
+        asns_without_name = {}
         try:
             for line in data_content.splitlines():
                 if not line.strip():
@@ -238,28 +240,41 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
                             f"asn: {line_json}"
                         )
                         continue
-                    # Some CAIDA records (observed for a handful of legacy/RIPE-
-                    # region ASNs, e.g. AS1110) carry an organizationId but no
-                    # 'name' key at all. Don't drop the whole record over that --
-                    # the organization linkage is still good and resolves to a real
-                    # org name via organization_id/organization_ref. Default the
-                    # AS's own name instead, the same way the Organization branch
-                    # above defaults to "Delegated" rather than dropping.
+                    # Some CAIDA records (about 12% of them, mostly RIPE-region ASNs
+                    # such as AS1110) carry an organizationId but no 'name' key at
+                    # all. Don't drop the whole record over that -- the organization
+                    # linkage is still good. Give it a placeholder name here; it is
+                    # replaced by the organization's name after the loop when CAIDA
+                    # has one.
+                    as_org_id = f"caida:{line_json['organizationId']}"
                     as_name = line_json.get('name', None)
-                    if not as_name:
-                        asn_name_defaulted += 1
+                    if as_name:
+                        asns_without_name.pop(as_id, None)
+                    else:
+                        asns_without_name[as_id] = as_org_id
                         as_name = f"AS{as_id}"
                     as_objs[as_id] = {
                         'id': as_id,
-                        'organization_id': f"caida:{line_json['organizationId']}",
+                        'organization_id': as_org_id,
                         'name': as_name,
                         'ext': {"data_source": ["CAIDA"]}
                     }
+            # Name each ASN that had no name of its own after its organization, unless
+            # CAIDA has no name for that either ("Delegated" is the placeholder the
+            # Organization branch above gives an unnamed organization)
+            asn_named_after_org = 0
+            for as_id, as_org_id in asns_without_name.items():
+                org_name = (org_objs.get(as_org_id, None) or {}).get('name', None)
+                if org_name and org_name != "Delegated":
+                    as_objs[as_id]['name'] = org_name
+                    asn_named_after_org += 1
             self.logger.info(
                 f"CAIDA AS2Org: parsed {org_count} organization record(s) and "
                 f"{asn_count} ASN record(s); {asn_dropped} ASN record(s) dropped "
-                f"(missing/invalid asn or organizationId), {asn_name_defaulted} "
-                f"ASN record(s) had no name in the source data and were given a "
+                f"(missing/invalid asn or organizationId), {len(asns_without_name)} "
+                f"ASN record(s) had no name in the source data: {asn_named_after_org} "
+                f"were named after their organization, "
+                f"{len(asns_without_name) - asn_named_after_org} were given a "
                 f"default of 'AS<number>'"
             )
         except Exception as e:

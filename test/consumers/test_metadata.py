@@ -356,8 +356,9 @@ class TestCAIDAOrgASConsumer(unittest.TestCase):
     def test_load_caida_data_asn_missing_name_defaults_instead_of_dropping(self, mock_file):
         """A CAIDA ASN record with a valid asn + organizationId but no 'name' key
         (observed for some legacy/RIPE-region ASNs, e.g. AS1110) must still be
-        kept -- with its name defaulted to 'AS<number>' -- rather than dropped,
-        since the organization linkage is still good."""
+        kept rather than dropped, since the organization linkage is still good.
+        With no organization record to take a name from, its name defaults to
+        'AS<number>'."""
         self.consumer.use_url = False
 
         caida_data = '{"asn": "1110", "organizationId": "ORG-UIBK1-RIPE", "source": "RIPE", "type": "ASN"}'
@@ -373,6 +374,70 @@ class TestCAIDAOrgASConsumer(unittest.TestCase):
         self.assertEqual(as1110['id'], 1110)
         self.assertEqual(as1110['organization_id'], 'caida:ORG-UIBK1-RIPE')
         self.assertEqual(as1110['name'], 'AS1110')
+
+    @patch('builtins.open', new_callable=mock_open)
+    def test_load_caida_data_asn_missing_name_takes_organization_name(self, mock_file):
+        """An ASN record with no name is named after its CAIDA organization when
+        that organization has a name -- whether the organization record comes
+        before or after the ASN record in the file. It falls back to
+        'AS<number>' when the organization has no name either ("Delegated") or
+        is not in the file, and an ASN's own name is never replaced."""
+        self.consumer.use_url = False
+
+        caida_data = (
+            '{"organizationId": "ORG-UIBK1-RIPE", "name": "University of Innsbruck", "country": "AT", "type": "Organization"}\n'
+            '{"asn": "1110", "organizationId": "ORG-UIBK1-RIPE", "source": "RIPE", "type": "ASN"}\n'
+            '{"asn": "1776", "organizationId": "ORG-WU7-RIPE", "source": "RIPE", "type": "ASN"}\n'
+            '{"organizationId": "ORG-WU7-RIPE", "name": "Later Org Record", "type": "Organization"}\n'
+            '{"organizationId": "@del-123", "type": "Organization"}\n'
+            '{"asn": "64500", "organizationId": "@del-123", "type": "ASN"}\n'
+            '{"asn": "64501", "organizationId": "ORG-NOT-IN-FILE", "type": "ASN"}\n'
+            '{"asn": "64502", "organizationId": "ORG-UIBK1-RIPE", "name": "OWN-NAME", "type": "ASN"}\n'
+            '{"asn": "64503", "organizationId": "ORG-UIBK1-RIPE", "name": "", "type": "ASN"}'
+        )
+        mock_file.return_value.read.return_value = caida_data
+
+        as_objs = defaultdict(dict)
+        org_objs = defaultdict(dict)
+
+        with patch.object(self.consumer.logger, 'info') as mock_info:
+            self.consumer._load_caida_data(as_objs, org_objs)
+
+        self.assertEqual(as_objs[1110]['name'], 'University of Innsbruck')
+        self.assertEqual(as_objs[1110]['organization_id'], 'caida:ORG-UIBK1-RIPE')
+        self.assertEqual(as_objs[1776]['name'], 'Later Org Record')
+        self.assertEqual(as_objs[64500]['name'], 'AS64500')
+        self.assertEqual(as_objs[64501]['name'], 'AS64501')
+        self.assertEqual(as_objs[64502]['name'], 'OWN-NAME')
+        self.assertEqual(as_objs[64503]['name'], 'University of Innsbruck')
+        # looking up a missing organization must not create an empty one
+        self.assertNotIn('caida:ORG-NOT-IN-FILE', org_objs)
+        self.assertEqual(org_objs['caida:@del-123']['name'], 'Delegated')
+
+        summary = mock_info.call_args[0][0]
+        self.assertIn('5 ASN record(s) had no name in the source data', summary)
+        self.assertIn('3 were named after their organization', summary)
+        self.assertIn("2 were given a default of 'AS<number>'", summary)
+
+    @patch('builtins.open', new_callable=mock_open)
+    def test_load_caida_data_asn_named_record_wins_over_earlier_nameless_duplicate(self, mock_file):
+        """If the same ASN appears twice and the later record has a name, that
+        name stands; it is not replaced by the organization's name."""
+        self.consumer.use_url = False
+
+        caida_data = (
+            '{"organizationId": "org1", "name": "Org One", "type": "Organization"}\n'
+            '{"asn": "65010", "organizationId": "org1", "type": "ASN"}\n'
+            '{"asn": "65010", "organizationId": "org1", "name": "Real AS Name", "type": "ASN"}'
+        )
+        mock_file.return_value.read.return_value = caida_data
+
+        as_objs = defaultdict(dict)
+        org_objs = defaultdict(dict)
+
+        self.consumer._load_caida_data(as_objs, org_objs)
+
+        self.assertEqual(as_objs[65010]['name'], 'Real AS Name')
 
     @patch('builtins.open', new_callable=mock_open)
     def test_load_caida_data_asn_missing_required_fields_is_dropped_and_logged(self, mock_file):
