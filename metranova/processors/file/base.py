@@ -1,8 +1,8 @@
 import logging
 import os
-import pytricia
 from typing import Any, Dict, Iterator
 from metranova.processors.base import BaseProcessor
+from metranova.utils.ip_trie import IPTrie
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,10 @@ class IPTriePickleFileProcessor(BaseFileProcessor):
         if not self.has_required_fields(value):
             return []
 
-        #initialize ip trie
-        ip_trie = pytricia.PyTricia(128)
+        #initialize ip trie. IPTrie rather than one pytricia.PyTricia(128) for both
+        #families: in a shared trie an IPv4 address matches IPv6 prefixes that start
+        #with the same bytes and vice versa (38.0.31.24 matches 2600:1f18::/32)
+        ip_trie = IPTrie()
         # Got through rows and add to trie
         for row in value.get('rows', []):
             id, ref, ip_subnet, *fields = row

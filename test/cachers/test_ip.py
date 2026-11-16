@@ -295,6 +295,29 @@ class TestIPCacher(unittest.TestCase):
         except ImportError:
             self.skipTest("pytricia not available")
 
+    def test_prime_with_ip_trie(self):
+        """Test prime works with the family-safe IPTrie that
+        IPTriePickleFileProcessor writes, and that lookups stay within the
+        address family of the key."""
+        from metranova.utils.ip_trie import IPTrie
+
+        test_trie = IPTrie()
+        test_trie['38.0.0.0/8'] = ('v4-ref', 174)
+        test_trie['2600:1f18::/32'] = ('v6-ref', 16509)
+        test_trie.freeze()
+
+        pickle_path = os.path.join(self.temp_dir, 'ip_trie_meta_ip.pickle')
+        with open(pickle_path, 'wb') as f:
+            pickle.dump(test_trie, f)
+
+        self.cacher.prime()
+
+        self.assertIsInstance(self.cacher.local_cache['meta_ip'], IPTrie)
+        self.assertEqual(self.cacher.lookup('meta_ip', '38.0.31.24'), ('v4-ref', 174))
+        self.assertEqual(self.cacher.lookup('meta_ip', '2600:1f18::1'), ('v6-ref', 16509))
+        self.assertIsNone(self.cacher.lookup('meta_ip', '2600:1f19::1'))
+        self.assertIsNone(self.cacher.lookup('meta_ip', '8.8.8.8'))
+
     def test_load_from_url_success(self):
         """Test load_from_url successfully loads from remote URL."""
         test_trie = {'192.168.1.1': {'id': 'ip1', 'ref': 'IP 1'}}

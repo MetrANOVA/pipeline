@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
+import pickle
 import unittest
-import pytricia
 from ipaddress import IPv6Address
 from unittest.mock import patch, MagicMock
 from typing import Any, Dict, Iterator
@@ -12,6 +12,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
 from metranova.processors.file.base import BaseFileProcessor, IPTriePickleFileProcessor
+from metranova.utils.ip_trie import IPTrie
 
 
 class TestBaseFileProcessor(unittest.TestCase):
@@ -99,8 +100,8 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         # Check file name
         self.assertEqual(output['name'], 'ip_trie_meta_ip.pickle')
         
-        # Check that data is a PyTricia object
-        self.assertIsInstance(output['data'], pytricia.PyTricia)
+        # Check that data is a family-safe IP trie
+        self.assertIsInstance(output['data'], IPTrie)
         
         # Verify trie contents
         trie = output['data']
@@ -172,7 +173,7 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         
         # Should still create trie with correct name
         self.assertEqual(output['name'], 'ip_trie_meta_empty.pickle')
-        self.assertIsInstance(output['data'], pytricia.PyTricia)
+        self.assertIsInstance(output['data'], IPTrie)
         
         # Trie should be empty
         trie = output['data']
@@ -407,6 +408,33 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
 
         mock_warning.assert_called_once()
         self.assertEqual(list(trie.keys()), ['172.16.0.0/12'])
+
+    def test_build_message_keeps_ipv4_and_ipv6_apart(self):
+        """An IPv4 address must never resolve to an IPv6 block that starts with
+        the same bytes, or the reverse (38.0.31.24 is 0x26 0x00 0x1f 0x18, the
+        leading bytes of 2600:1f18::/32), including after the pickle round trip
+        the trie goes through on its way to the flow processors."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
+
+        input_data = {
+            'table': 'meta_ip:as_id',
+            'column_names': ['id', 'ref', 'ip_subnet', 'as_id'],
+            'rows': [
+                ['38.0.0.0/8', 'v4-ref', [(IPv6Address('::ffff:38.0.0.0'), 104)], 174],
+                ['2600:1f18::/32', 'v6-ref', [(IPv6Address('2600:1f18::'), 32)], 16509],
+                ['32.1.0.0/18', 'att-ref', [(IPv6Address('::ffff:32.1.0.0'), 114)], 7018],
+            ]
+        }
+
+        trie = list(processor.build_message(input_data, {}))[0]['data']
+        trie = pickle.loads(pickle.dumps(trie))
+
+        self.assertEqual(len(trie), 3)
+        self.assertEqual(trie.get('38.0.31.24'), ('v4-ref', 174))
+        self.assertEqual(trie.get('2600:1f18::1'), ('v6-ref', 16509))
+        self.assertIsNone(trie.get('2600:1f19::1'))    # not 38.0.0.0/8
+        self.assertIsNone(trie.get('2001:208::1'))     # not 32.1.0.0/18
+        self.assertEqual(trie.get('32.1.2.8'), ('att-ref', 7018))
 
     def test_build_message_trie_is_frozen(self):
         """Test that the returned trie is frozen (read-only)."""
