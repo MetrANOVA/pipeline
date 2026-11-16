@@ -2,6 +2,7 @@
 
 import unittest
 import pytricia
+from ipaddress import IPv6Address
 from unittest.mock import patch, MagicMock
 from typing import Any, Dict, Iterator
 
@@ -339,6 +340,73 @@ class TestIPTriePickleFileProcessor(unittest.TestCase):
         # Verify invalid entries were not added
         with self.assertRaises(KeyError):
             _ = trie['203.0.113.0/24']  # Should not exist due to null id
+
+    def test_build_message_ipv4_prefix_offset_by_96_is_undone(self):
+        """A table that backs an IP_TRIE() dictionary stores IPv4 subnets the way
+        the dictionary needs them: IPv4-mapped address, prefix length offset by 96
+        (128.182.64.0/18 is stored as ::ffff:128.182.64.0 with 114), and ClickHouse
+        returns the address as an IPv6Address. The trie must hold the real
+        128.182.64.0/18 so every address in the block matches, not a /32."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
+
+        input_data = {
+            'table': 'meta_ip:as_id',
+            'column_names': ['id', 'ref', 'ip_subnet', 'as_id'],
+            'rows': [
+                ['128.182.64.0/18', '128.182.64.0/18__v1', [(IPv6Address('::ffff:128.182.64.0'), 114)], 1207],
+                ['192.0.2.7/32', '192.0.2.7/32__v1', [(IPv6Address('::ffff:192.0.2.7'), 128)], 64500],
+                ['2001:db8::/32', '2001:db8::/32__v1', [(IPv6Address('2001:db8::'), 32)], 64501],
+            ]
+        }
+
+        trie = list(processor.build_message(input_data, {}))[0]['data']
+
+        self.assertEqual(sorted(trie.keys()), ['128.182.64.0/18', '192.0.2.7/32', '2001:db8::/32'])
+        self.assertEqual(trie.get('128.182.64.1'), ('128.182.64.0/18__v1', 1207))
+        self.assertEqual(trie.get('128.182.127.255'), ('128.182.64.0/18__v1', 1207))
+        self.assertIsNone(trie.get('128.182.128.1'))
+        self.assertEqual(trie.get('192.0.2.7'), ('192.0.2.7/32__v1', 64500))
+        self.assertIsNone(trie.get('192.0.2.8'))
+        self.assertEqual(trie.get('2001:db8::1'), ('2001:db8::/32__v1', 64501))
+
+    def test_build_message_ipv4_mapped_address_with_real_prefix(self):
+        """Tables that store an IPv4-mapped address with its real prefix length
+        (no offset) keep working."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
+
+        input_data = {
+            'table': 'meta_ip',
+            'column_names': ['id', 'ref', 'ip_subnet'],
+            'rows': [
+                ['block-1', 'ref-1', [(IPv6Address('::ffff:10.20.0.0'), 16), ['::ffff:192.168.1.0', 24]]],
+            ]
+        }
+
+        trie = list(processor.build_message(input_data, {}))[0]['data']
+
+        self.assertEqual(sorted(trie.keys()), ['10.20.0.0/16', '192.168.1.0/24'])
+        self.assertEqual(trie.get('10.20.30.40'), ('ref-1',))
+        self.assertEqual(trie.get('192.168.1.200'), ('ref-1',))
+
+    def test_build_message_ipv4_mapped_address_with_impossible_prefix_is_skipped(self):
+        """An IPv4-mapped address with a prefix length between 33 and 95 is
+        neither a real IPv4 prefix nor an offset one."""
+        processor = IPTriePickleFileProcessor(self.mock_pipeline)
+
+        input_data = {
+            'table': 'meta_ip',
+            'column_names': ['id', 'ref', 'ip_subnet'],
+            'rows': [
+                ['bad', 'bad-ref', [(IPv6Address('::ffff:10.0.0.0'), 40)]],
+                ['good', 'good-ref', [(IPv6Address('::ffff:172.16.0.0'), 108)]],
+            ]
+        }
+
+        with patch.object(processor.logger, 'warning') as mock_warning:
+            trie = list(processor.build_message(input_data, {}))[0]['data']
+
+        mock_warning.assert_called_once()
+        self.assertEqual(list(trie.keys()), ['172.16.0.0/12'])
 
     def test_build_message_trie_is_frozen(self):
         """Test that the returned trie is frozen (read-only)."""
