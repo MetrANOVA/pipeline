@@ -159,6 +159,18 @@ Dictionaries provide fast lookup capabilities for metadata enrichment. Each meta
 | `CLICKHOUSE_AS_DICTIONARY_LIFETIME_MIN` | `600` | Minimum cache lifetime in seconds (10 minutes) |
 | `CLICKHOUSE_AS_DICTIONARY_LIFETIME_MAX` | `3600` | Maximum cache lifetime in seconds (1 hour) |
 
+### IP Geo Dictionary
+
+An `IP_TRIE()` dictionary (`meta_ip_geo_dict`) for looking up MaxMind GeoLite2 geolocation and AS data by IP: `meta_ip`'s `ip_subnet` array is flattened one prefix per row into `meta_ip_geo_prefix` by a materialized view, and the dictionary is loaded from that flattened table.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLICKHOUSE_IP_GEO_DICTIONARY_ENABLED` | `true` | Enable the IP geolocation dictionary (and its backing `meta_ip_geo_prefix` materialized view) |
+| `CLICKHOUSE_IP_GEO_PREFIX_TABLE` | `meta_ip_geo_prefix` | Flattened (one prefix per row) table the dictionary is sourced from |
+| `CLICKHOUSE_IP_GEO_DICTIONARY_NAME` | `meta_ip_geo_dict` | Dictionary name for IP geolocation/AS lookups |
+| `CLICKHOUSE_IP_GEO_DICTIONARY_LIFETIME_MIN` | `600` | Minimum cache lifetime in seconds (10 minutes) |
+| `CLICKHOUSE_IP_GEO_DICTIONARY_LIFETIME_MAX` | `3600` | Maximum cache lifetime in seconds (1 hour) |
+
 ## ClickHouse Metadata Processing
 
 | Variable | Default | Description |

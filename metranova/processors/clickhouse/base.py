@@ -1,4 +1,5 @@
 from collections import defaultdict
+import ipaddress
 import logging
 import os
 import re
@@ -8,6 +9,25 @@ from metranova.processors.base import BaseProcessor
 from clickhouse_connect.driver.httpclient import HttpClient
 
 logger = logging.getLogger(__name__)
+
+
+def trie_prefix_length(ip_str: str, prefix_length: int) -> int:
+    """For processors that feed an IP_TRIE() dictionary: the ip_subnet column backing
+    such a dictionary is stored as Array(Tuple(IPv6, UInt8)) -- ClickHouse maps an IPv4
+    address into that 128-bit space as ::ffff:a.b.c.d, a fixed 96-bit prefix, so an
+    IPv4 CIDR's real-world prefix length has to be offset by 96 to stay correct once
+    embedded there (e.g. 129.114.63.128/27 -> /123). Without this, the IP_TRIE()
+    dictionary built from this data only ever compares the leading 96 always-zero/
+    ::ffff: bits shared by every IPv4-mapped address, so every IPv4 lookup spuriously
+    "matches" every stored prefix. Native IPv6 addresses need no adjustment.
+    """
+    try:
+        if ipaddress.ip_address(ip_str).version == 4:
+            return prefix_length + 96
+    except ValueError:
+        pass
+    return prefix_length
+
 
 class BaseClickHouseTableMixin:
     """Mixin class for ClickHouse table related functionality"""
