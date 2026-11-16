@@ -1876,6 +1876,34 @@ class TestCAIDAOrgASConsumerURLFunctionality(unittest.TestCase):
         expected_url = 'https://publicdata.caida.org/datasets/peeringdb/2025/12/peeringdb_2_dump_2025_12_15.json'
         self.assertEqual(url, expected_url)
 
+    def test_get_caida_as2org_latest_url(self):
+        """Test _get_caida_as2org_latest_url returns CAIDA's stable 'latest'
+        alias URL, derived from the configured template's directory."""
+        self.assertEqual(
+            self.consumer._get_caida_as2org_latest_url(),
+            'https://publicdata.caida.org/datasets/as-organizations/latest.as-org2info.jsonl.gz'
+        )
+
+    @patch('requests.get')
+    @patch('gzip.decompress')
+    def test_fetch_caida_data_from_url_prefers_latest_alias(self, mock_decompress, mock_get):
+        """Test _fetch_caida_data_from_url tries CAIDA's 'latest' alias first
+        and returns immediately on success, without ever trying a
+        guessed-date URL."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.content = b'compressed data'
+        mock_get.return_value = mock_response
+        mock_decompress.return_value = b'{"type": "Organization", "organizationId": "org1"}'
+
+        result = self.consumer._fetch_caida_data_from_url()
+
+        self.assertEqual(result, '{"type": "Organization", "organizationId": "org1"}')
+        mock_get.assert_called_once_with(
+            'https://publicdata.caida.org/datasets/as-organizations/latest.as-org2info.jsonl.gz',
+            timeout=30
+        )
+
     @patch('requests.get')
     def test_download_file_with_fallback_success(self, mock_get):
         """Test _download_file_with_fallback with successful download."""
@@ -1949,8 +1977,10 @@ class TestCAIDAOrgASConsumerURLFunctionality(unittest.TestCase):
 
     @patch('requests.get')
     def test_fetch_caida_data_from_url_fallback_to_previous_month(self, mock_get):
-        """Test _fetch_caida_data_from_url falls back to previous month."""
-        # First call returns 404, second call succeeds
+        """Test _fetch_caida_data_from_url falls through the latest alias to
+        a guessed-date URL when the alias fails."""
+        # First call (the 'latest' alias) returns 404, second call (first
+        # guessed date) succeeds
         mock_response_404 = Mock()
         mock_response_404.status_code = 404
         
@@ -1965,7 +1995,7 @@ class TestCAIDAOrgASConsumerURLFunctionality(unittest.TestCase):
             
             self.assertIsNotNone(result)
             self.assertEqual(result, 'test data')
-            # Should try twice (current month and previous month)
+            # Should try twice (the 'latest' alias, then the first guessed date)
             self.assertEqual(mock_get.call_count, 2)
 
     @patch('requests.get')

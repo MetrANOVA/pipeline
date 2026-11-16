@@ -116,7 +116,18 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
         """Generate CAIDA AS2Org URL for a given date"""
         date_str = date.strftime('%Y%m%d')
         return self.as2org_url_template.format(date=date_str)
-    
+
+    def _get_caida_as2org_latest_url(self):
+        """CAIDA publishes a stable 'latest.as-org2info.jsonl.gz' alias
+        alongside each dated snapshot, always pointing at whichever file is
+        currently newest. Preferred over guessing a date
+        (_fetch_caida_data_from_url()'s fallback below): it doesn't depend
+        on CAIDA publishing on the 1st of the month, or on this pipeline's
+        clock agreeing with when CAIDA actually published. Not documented on
+        CAIDA's own catalog page, but confirmed reachable in practice."""
+        index_url = self.as2org_url_template.split('{date}')[0]
+        return index_url + 'latest.as-org2info.jsonl.gz'
+
     def _get_peeringdb_url(self, date):
         """Generate PeeringDB URL for a given date"""
         return self.peeringdb_url_template.format(
@@ -126,14 +137,23 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
         )
     
     def _fetch_caida_data_from_url(self):
-        """Fetch CAIDA AS2Org data from URL with monthly fallback"""
+        """Fetch CAIDA AS2Org data from URL. Prefers CAIDA's stable
+        'latest.as-org2info.jsonl.gz' alias; falls back to guessing the
+        current/previous month's 1st-of-month filename only if that alias
+        is ever unreachable or goes away."""
+        urls_to_try = [self._get_caida_as2org_latest_url()]
+
+        # Guessed current/previous month filenames, as a last-resort
+        # fallback -- skip any that happen to already match the alias URL.
         now = datetime.now()
-        # Try current month (1st day) first, then previous month
         for months_back in range(2):
             target_date = (now.replace(day=1) - timedelta(days=months_back * 30)).replace(day=1)
-            url = self._get_caida_as2org_url(target_date)
+            guessed_url = self._get_caida_as2org_url(target_date)
+            if guessed_url not in urls_to_try:
+                urls_to_try.append(guessed_url)
+
+        for url in urls_to_try:
             self.logger.info(f"Attempting to download CAIDA AS2Org data from {url}")
-            
             content = self._download_file_with_fallback(url)
             if content:
                 try:
@@ -142,8 +162,8 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
                     return decompressed.decode('utf-8')
                 except Exception as e:
                     self.logger.error(f"Error decompressing CAIDA data from {url}: {e}")
-        
-        self.logger.error("Failed to fetch CAIDA AS2Org data from URL after trying current and previous month")
+
+        self.logger.error("Failed to fetch CAIDA AS2Org data from URL after trying the latest alias and guessed filenames")
         return None
     
     def _fetch_peeringdb_data_from_url(self):
