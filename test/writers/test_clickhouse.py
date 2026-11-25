@@ -95,6 +95,7 @@ class TestClickHouseBatcher(unittest.TestCase):
         self.mock_processor.get_table_names.return_value = ['test_table']
         self.mock_processor.get_ch_dictionaries.return_value = []
         self.mock_processor.get_materialized_views.return_value = []
+        self.mock_processor.get_views.return_value = []
         self.mock_processor.create_table_command.return_value = 'CREATE TABLE test_table'
         self.mock_processor.column_names.return_value = ['col1', 'col2']
         
@@ -556,6 +557,34 @@ class TestClickHouseBatcher(unittest.TestCase):
         
         # Should log error
         mock_logger.error.assert_called()
+
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_create_view(self, mock_connector):
+        """Test create_view method."""
+        mock_connector.return_value.client = self.mock_client
+        batcher = ClickHouseBatcher(self.mock_processor)
+        view = Mock()
+        view.view_name = 'test_view'
+        view.create_view_command.return_value = 'CREATE VIEW test_view'
+        self.mock_client.command.reset_mock()
+
+        batcher.create_view(view)
+
+        self.mock_client.command.assert_called_once_with('CREATE VIEW test_view')
+
+    @patch('metranova.writers.clickhouse.ClickHouseConnector')
+    def test_initialization_with_views(self, mock_connector):
+        """Test ClickHouseBatcher initialization creates regular views."""
+        mock_connector.return_value.client = self.mock_client
+        view = Mock()
+        view.view_name = 'test_view'
+        view.create_view_command.return_value = 'CREATE VIEW test_view'
+        self.mock_processor.get_views.return_value = [view]
+
+        ClickHouseBatcher(self.mock_processor)
+
+        self.mock_processor.get_views.assert_called_once()
+        self.mock_client.command.assert_any_call('CREATE VIEW test_view')
     
     @patch('metranova.writers.clickhouse.ClickHouseConnector')
     def test_initialization_with_materialized_views(self, mock_connector):

@@ -116,3 +116,4 @@ class IPMetadataClickHouseConsumer(MetadataClickHouseConsumer):
     def __init__(self, pipeline: BasePipeline):
         super().__init__(pipeline)
         self.primary_columns.append('ip_subnet')
+        self.pipeline.process_message(msg)
