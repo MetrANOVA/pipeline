@@ -75,11 +75,10 @@ class ClickHouseCacher(BaseCacher):
                     'max_insert_time': max_insert_time
                 }
             self.local_cache[table] = tmp_cache
-            logger.info(f"Loaded {len(tmp_cache)} existing records from {table}")
         except Exception as e:
             logger.info(f"Could not load existing data (table might be empty): {e}")
 
-    def lookup(self, table, key: str) -> Optional[str]:
+    def lookup(self, table, key: str) -> Optional[dict]:
         #lookup in local cache
         if key is None or table is None:
             return None
