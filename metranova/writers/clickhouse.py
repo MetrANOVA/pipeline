@@ -97,6 +97,27 @@ class ClickHouseBatcher:
         except Exception as e:
             logger.error(f"Failed to create table {table_name}: {e}")
             raise
+        # Create a Distributed companion table if enabled (cluster only)
+        self.create_distributed_table(self.processor, table_name)
+
+    def create_distributed_table(self, table_obj, table_name):
+        """Create a Distributed companion table for table_name if enabled and a cluster is configured.
+
+        table_obj is the processor or materialized view that owns the local table - it provides
+        the distributed_enabled() check and create_distributed_table_command() builder.
+        """
+        if not getattr(table_obj, "distributed_enabled", None) or not table_obj.distributed_enabled():
+            return
+        create_dist_cmd = table_obj.create_distributed_table_command(table_name=table_name)
+        if create_dist_cmd is None:
+            return
+        try:
+            self.logger.debug(f"Creating distributed table with command: {create_dist_cmd}")
+            self.client.command(create_dist_cmd)
+            logger.info(f"Distributed table for {table_name} is ready")
+        except Exception as e:
+            logger.error(f"Failed to create distributed table for {table_name}: {e}")
+            raise
 
     def create_dictionary(self, ch_dictionary):
         """Create the target dictionary if it doesn't exist"""
@@ -140,6 +161,8 @@ class ClickHouseBatcher:
                 f"Failed to create materialized view target table {materialized_view.table}: {e}"
             )
             raise
+        # Create a Distributed companion for the MV target table if enabled (cluster only)
+        self.create_distributed_table(materialized_view, materialized_view.table)
         # Create materialized view
         try:
             self.logger.debug(

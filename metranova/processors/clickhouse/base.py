@@ -16,10 +16,31 @@ class BaseClickHouseTableMixin:
         self.logger = logger
 
         # ClickHouse configuration from environment
+        self.database = os.getenv('CLICKHOUSE_DATABASE', 'default')
         self.cluster_name = os.getenv('CLICKHOUSE_CLUSTER_NAME', None)
         self.replication = os.getenv('CLICKHOUSE_REPLICATION', 'false').lower() in ['1', 'true', 'yes']
         self.replica_path = os.getenv('CLICKHOUSE_REPLICA_PATH', '/clickhouse/tables/{shard}/{database}/{table}')
         self.replica_name = os.getenv('CLICKHOUSE_REPLICA_NAME', '{replica}')
+
+        # Distributed table settings - only used when a cluster is configured.
+        # A Distributed table is a query router that fans out to the local tables on
+        # every shard/replica in the cluster. It lets tools like Grafana query a single
+        # table (e.g. data_flow_distributed) instead of wrapping reads in
+        # clusterAllReplicas()/remote(). Data is still inserted into the local table;
+        # the Distributed companion is read-only here.
+        # CLICKHOUSE_DISTRIBUTED is the global default. self.distributed is this table's
+        # resolved on/off state and defaults to off - a processor opts in by setting it.
+        # Flow and MV tables resolve a per-table flag that falls back to the global default
+        # via get_distributed_setting(). Metadata tables are intentionally NOT distributed:
+        # they are reference tables present on every shard (so dictionary/JOIN enrichment
+        # resolves locally), and a Distributed union over them would return one copy per
+        # shard - query the local meta_* table directly instead.
+        self.distributed_global = os.getenv('CLICKHOUSE_DISTRIBUTED', 'false').lower() in ['1', 'true', 'yes']
+        self.distributed = False
+        self.distributed_suffix = os.getenv('CLICKHOUSE_DISTRIBUTED_SUFFIX', '_distributed')
+        self.distributed_sharding_key = os.getenv('CLICKHOUSE_DISTRIBUTED_SHARDING_KEY', 'rand()')
+        # optional explicit distributed table name override (per-table); defaults to <table><suffix>
+        self.distributed_table = ""
         self.table_engine = "MergeTree"
         self.table_engine_opts = ""
         self.table_granularity = 8192  # default ClickHouse index granularity
@@ -125,6 +146,41 @@ class BaseClickHouseTableMixin:
             table_settings["ttl_only_drop_parts"] = "1"
         create_table_cmd += "SETTINGS {} \n".format(",".join(["{} = {}".format(k, v) for k, v in sorted(table_settings.items())]))
         return create_table_cmd
+
+    def distributed_enabled(self) -> bool:
+        """Distributed tables only make sense on a cluster and when explicitly enabled."""
+        return bool(self.distributed and self.cluster_name)
+
+    def get_distributed_setting(self, env_var_name: str) -> bool:
+        """Resolve a per-table distributed flag, falling back to the global CLICKHOUSE_DISTRIBUTED default."""
+        val = os.getenv(env_var_name, None)
+        if val is None:
+            return self.distributed_global
+        return val.lower() in ['1', 'true', 'yes']
+
+    def create_distributed_table_command(self, table_name=None) -> str | None:
+        """Return a CREATE TABLE command for a Distributed companion of the given local table.
+
+        The Distributed table routes queries across all shards/replicas in the cluster so
+        that tools like Grafana can query a single table instead of using
+        clusterAllReplicas()/remote(). Data continues to be inserted into the local table;
+        the Distributed companion is read-only here. Returns None when no cluster is configured.
+        """
+        if not self.cluster_name:
+            return None
+        if not table_name:
+            table_name = self.table
+        if not table_name:
+            raise ValueError("Table name is not set")
+        distributed_table_name = self.distributed_table or f"{table_name}{self.distributed_suffix}"
+        # `AS <local_table>` copies the column structure; ENGINE = Distributed overrides the engine.
+        create_cmd = "CREATE TABLE IF NOT EXISTS {} ".format(distributed_table_name)
+        create_cmd += f"ON CLUSTER '{self.cluster_name}' "
+        create_cmd += "AS {} \n".format(table_name)
+        create_cmd += "ENGINE = Distributed('{}', '{}', '{}', {}) \n".format(
+            self.cluster_name, self.database, table_name, self.distributed_sharding_key
+        )
+        return create_cmd
 
     def get_extension_defs(self, env_var_name: str, extension_options: dict, json_column_name: str = "ext") -> list:
         """Get extension column definitions from environment variable and applies only those in extension_options which takes form {extension_name: [[col_name, col_definition], ...]}"""
