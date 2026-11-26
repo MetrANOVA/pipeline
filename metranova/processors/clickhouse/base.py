@@ -633,7 +633,14 @@ class BaseMetadataProcessor(BaseClickHouseProcessor):
         if not self.force_update and cached_record and cached_record['hash'] == record_md5 and not self.self_ref_fields:
             self.logger.debug(f"Record {id} unchanged, skipping")
             return None
-        elif (cached_record and cached_record['hash'] != record_md5) or self.force_update:
+        # NOTE: cached_record must be truthy here, not just "or self.force_update" --
+        # force_update means "re-version even if the hash matches", which only makes
+        # sense when there's an existing cached_record to re-version. Without the
+        # cached_record guard, force_update on a record with no cache entry yet (e.g.
+        # right after the table was truncated) would enter this branch and crash on
+        # cached_record.get(...) below since cached_record is None. A genuinely new
+        # record just falls through to the default ref ("{id}__v1") set above.
+        elif cached_record and (cached_record['hash'] != record_md5 or self.force_update):
             #change so update
             self.logger.debug(f"Record {id} changed, updating")
             #get latest version number from end of existing ref suffix ov __v{version_num} which may be multiple digits
