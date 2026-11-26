@@ -7,7 +7,6 @@ import time
 import orjson
 import pycountry
 import pycountry_convert
-import pytricia
 import os
 import requests
 from datetime import datetime, timedelta
@@ -19,6 +18,7 @@ import glob
 import yaml
 from metranova.consumers.base import TimedIntervalConsumer
 from metranova.consumers.file import YAMLFileConsumer
+from metranova.utils.ip_trie import IPTrie
 
 logger = logging.getLogger(__name__)
 
@@ -427,6 +427,14 @@ class CAIDAOrgASConsumer(TimedIntervalConsumer):
 
 class IPGeolocationCSVConsumer(TimedIntervalConsumer):
     """Consumer to load geolocation data from a series of CSV files and store in ClickHouse meta_ip table"""
+
+    # Fields an ASN block takes from the City block that contains it (see
+    # _process_remaining_asn_ranges)
+    INHERITED_GEO_FIELDS = (
+        'city_name', 'continent_name', 'country_name', 'country_code',
+        'country_sub_name', 'country_sub_code', 'latitude', 'longitude',
+    )
+
     def __init__(self, pipeline):
         super().__init__(pipeline)
         # Initial values
@@ -608,8 +616,15 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
         return (parts[0], int(parts[1]))
 
     def _load_asn_data(self):
-        """Load ASN data from CSV files into a PyTricia trie"""
-        ip_to_asn_trie = pytricia.PyTricia(128)
+        """Load ASN data from CSV files into a longest-prefix-match trie.
+
+        IPTrie rather than one shared pytricia.PyTricia(128): the IPv4 and IPv6
+        ASN files are loaded together, and in a single mixed trie an IPv4 prefix
+        matches any IPv6 network that starts with the same bytes (32.1.0.0/18,
+        AS7018, would be returned for every IPv6 City block under 2001:0000::/18
+        that has no IPv6 ASN entry of its own).
+        """
+        ip_to_asn_trie = IPTrie()
         for asn_file in self.asn_files:
             try:
                 with open(asn_file, 'r') as f:
@@ -706,11 +721,19 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
 
     def _process_ip_block_files(self, ip_to_asn_trie, location_code_map, custom_ip_data):
         """Process IP block files and emit IP objects to pipeline.
-        Returns tuple of (custom_ip_data, processed_networks_set)
+        Returns tuple of (custom_ip_data, city_blocks).
+
+        city_blocks is an IPTrie keyed by every City-block network, holding that
+        block's geo fields (INHERITED_GEO_FIELDS, in that order).
+        _process_remaining_asn_ranges() uses it to find the City block that
+        contains an ASN block and copy its geo fields.
         """
         # CSV Column names: network,geoname_id,registered_country_geoname_id,represented_country_geoname_id,is_anonymous_proxy,is_satellite_provider,postal_code,latitude,longitude,accuracy_radius,is_anycast
-        processed_networks = set()  # Track networks processed from City blocks
-        
+        city_blocks = IPTrie()
+        # Most blocks share their geo fields with many others, so keep one tuple per
+        # distinct combination instead of one per block
+        geo_values = {}
+
         for ip_block_file in self.ip_block_files:
             try:
                 with open(ip_block_file, 'r') as f:
@@ -718,7 +741,12 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
                     for row in reader:
                         ip_obj, custom_ip_data = self._build_ip_object(row, ip_to_asn_trie, location_code_map, custom_ip_data)
                         if ip_obj:
-                            processed_networks.add(ip_obj['id'])  # Track this network
+                            geo = tuple(ip_obj.get(field, None) for field in self.INHERITED_GEO_FIELDS)
+                            try:
+                                geo = geo_values.setdefault(geo, geo)
+                            except TypeError:
+                                pass  # unhashable value from custom data, keep this block's own tuple
+                            city_blocks[ip_obj['id']] = geo
                             # Process the record - do this here to avoid memory issues with large files
                             # TODO: Possibly speed up imports by batching records instead of one at a time
                             self.pipeline.process_message({'table': self.table, 'data': [ip_obj]})
@@ -726,16 +754,34 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
                 self.logger.error(f"IP Block file not found: {ip_block_file}. Error: {e}")
             except Exception as e:
                 self.logger.error(f"Error processing IP Block file {ip_block_file}: {e}")
-        
-        return custom_ip_data, processed_networks
 
-    def _process_remaining_asn_ranges(self, processed_networks, location_code_map, custom_ip_data):
-        """Process ASN ranges that don't have corresponding City blocks.
-        Only adds ASN ranges whose network ID is not already in processed_networks.
-        This ensures ASN-only ranges don't overwrite City blocks with better data.
+        return custom_ip_data, city_blocks
+
+    def _process_remaining_asn_ranges(self, city_blocks, location_code_map, custom_ip_data):
+        """Emit the ASN blocks that the City-block rows don't already account for.
+
+        MaxMind's ASN file and City file don't divide address space along the same
+        boundaries, and lookups against meta_ip are longest-prefix matches that
+        return one whole row, so every address needs a single most-specific row
+        carrying both its geo fields and its ASN:
+
+        - ASN block identical to a City block: skipped. That City row already
+          carries this ASN (_build_ip_object looked it up).
+        - ASN block broader than the City blocks inside it: emitted with the ASN
+          only. Those City rows already carry this ASN and, being more specific,
+          win lookups; this row covers the parts of the ASN block with no City data.
+        - ASN block narrower than the City block containing it (128.182.64.0/18,
+          AS1207, inside City block 128.182.0.0/16): emitted with the ASN plus the
+          geo fields of that City block. It is the most specific row for its
+          addresses, so it has to carry both. Emitting it without geo fields left
+          country and city blank for those addresses; not emitting it left the
+          ASN blank, because the City row has none (_build_ip_object only finds
+          an ASN block that is the same size or broader than the City block).
         """
         asn_only_count = 0
-        
+        inherited_count = 0
+        identical_count = 0
+
         for asn_file in self.asn_files:
             try:
                 with open(asn_file, 'r') as f:
@@ -743,39 +789,49 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
                     for row in reader:
                         network = row.get('network', None)
                         asn = row.get('autonomous_system_number', None)
-                        
+
                         if not network or asn is None:
                             continue
-                        
-                        # Skip if this network was already processed from City blocks
-                        if network in processed_networks:
+
+                        # Identical to a City block: that row already has this ASN
+                        if city_blocks.has_key(network):
+                            identical_count += 1
                             continue
-                        
-                        # Build IP object with ASN data only
+
                         ip_obj = {'id': network}
                         ip_subnet_tuple = self.ip_subnet_to_tuple(network)
                         ip_obj['ip_subnet'] = [ip_subnet_tuple]
                         ip_obj['as_id'] = int(asn)
-                        
-                        # Try to lookup location data (most ASN-only ranges won't have this)
-                        # Note: ASN files don't have geoname_id, so this will typically be empty
-                        # but included for consistency with the data model
-                        
+
+                        # Narrower than the City block that contains it: take that
+                        # block's geo fields. No containing City block: ASN only.
+                        covering_geo = city_blocks.get(network)
+                        if covering_geo is not None:
+                            for field, field_value in zip(self.INHERITED_GEO_FIELDS, covering_geo):
+                                if field_value is not None:
+                                    ip_obj[field] = field_value
+                            inherited_count += 1
+                        else:
+                            asn_only_count += 1
+
                         # Merge with any custom data
                         if custom_ip_data.get(network, None):
                             ip_obj.update(custom_ip_data[network])
                             del custom_ip_data[network]
-                        
+
                         # Process the record
                         self.pipeline.process_message({'table': self.table, 'data': [ip_obj]})
-                        asn_only_count += 1
-                        
+
             except FileNotFoundError as e:
                 self.logger.error(f"ASN Block file not found: {asn_file}. Error: {e}")
             except Exception as e:
                 self.logger.error(f"Error processing ASN Block file {asn_file}: {e}")
-        
-        self.logger.info(f"Added {asn_only_count} ASN-only IP ranges not present in City blocks")
+
+        self.logger.info(
+            f"ASN blocks: added {asn_only_count} with no City block (ASN only), "
+            f"added {inherited_count} narrower than their City block (geo fields taken from it), "
+            f"skipped {identical_count} identical to a City block"
+        )
         return custom_ip_data
 
     def consume_messages(self):
@@ -795,12 +851,12 @@ class IPGeolocationCSVConsumer(TimedIntervalConsumer):
         custom_ip_data = self._load_custom_ip_data()
         
         # Process IP block files (City blocks with geo data, enriched with ASN)
-        remaining_custom_data, processed_networks = self._process_ip_block_files(ip_to_asn_trie, location_code_map, custom_ip_data)
+        remaining_custom_data, city_blocks = self._process_ip_block_files(ip_to_asn_trie, location_code_map, custom_ip_data)
         
-        # Process ASN ranges not covered by City blocks
-        # This adds ranges like 169.228.0.0/17 and AS 8517 IPv6 ranges that don't have geo data
-        # but don't overwrite or duplicate City block entries
-        remaining_custom_data = self._process_remaining_asn_ranges(processed_networks, location_code_map, remaining_custom_data)
+        # Process ASN blocks the City-block rows don't already account for: ASN blocks
+        # with no City data (e.g. 169.228.0.0/17), and ASN blocks narrower than their
+        # City block, which get that City block's geo fields
+        remaining_custom_data = self._process_remaining_asn_ranges(city_blocks, location_code_map, remaining_custom_data)
         
         # Process any remaining custom IP records that were not in either file
         if remaining_custom_data:

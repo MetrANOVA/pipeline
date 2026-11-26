@@ -1,8 +1,8 @@
 import logging
 import os
-import pytricia
 from typing import Any, Dict, Iterator
 from metranova.processors.base import BaseProcessor
+from metranova.utils.ip_trie import IPTrie
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,10 @@ class IPTriePickleFileProcessor(BaseFileProcessor):
         if not self.has_required_fields(value):
             return []
 
-        #initialize ip trie
-        ip_trie = pytricia.PyTricia(128)
+        #initialize ip trie. IPTrie rather than one pytricia.PyTricia(128) for both
+        #families: in a shared trie an IPv4 address matches IPv6 prefixes that start
+        #with the same bytes and vice versa (38.0.31.24 matches 2600:1f18::/32)
+        ip_trie = IPTrie()
         # Got through rows and add to trie
         for row in value.get('rows', []):
             id, ref, ip_subnet, *fields = row
@@ -59,6 +61,17 @@ class IPTriePickleFileProcessor(BaseFileProcessor):
                 if address.startswith('::ffff:'):
                     # Convert IPv4-mapped IPv6 address to IPv4
                     address = address.split('::ffff:')[1]
+                    # An ip_subnet column that backs an IP_TRIE() dictionary stores an
+                    # IPv4 prefix length offset by 96, because the dictionary compares
+                    # the IPv4-mapped (::ffff:a.b.c.d) form of the address. Undo that
+                    # along with the address: pytricia does not reject an IPv4 prefix
+                    # longer than 32, it stores it as a /32, which would turn every IPv4
+                    # block into a single-host entry that matches nothing else inside it.
+                    if isinstance(prefix, int) and prefix >= 96:
+                        prefix -= 96
+                    elif isinstance(prefix, int) and prefix > 32:
+                        self.logger.warning(f"Invalid prefix length for IPv4 subnet: {ip_subnet_tuple}")
+                        continue
                 #Clickhouse makes IPv4 addresses look like IPv6 so convert back
                 ip_trie["{}/{}".format(address, prefix)] = lookup_value
 
