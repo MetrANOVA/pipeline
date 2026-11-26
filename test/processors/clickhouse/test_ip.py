@@ -11,7 +11,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
-from metranova.processors.clickhouse.ip import IPMetadataProcessor
+from metranova.processors.clickhouse.ip import IPMetadataProcessor, IPGeoPrefixMaterializedView, IPGeoDictionary
 
 
 class TestIPMetadataProcessor(unittest.TestCase):
@@ -167,8 +167,9 @@ class TestIPMetadataProcessor(unittest.TestCase):
         
         result = processor.build_metadata_fields(value)
         
-        # Check basic field mapping
-        self.assertEqual(result['ip_subnet'], [('164.67.0.0', 16), ('128.97.0.0', 16)])
+        # Check basic field mapping. IPv4 CIDR lengths are offset by 96 for
+        # IP_TRIE storage (see trie_prefix_length() in base.py): 16 -> 112.
+        self.assertEqual(result['ip_subnet'], [('164.67.0.0', 112), ('128.97.0.0', 112)])
         self.assertEqual(result['city_name'], 'Los Angeles')
         self.assertEqual(result['continent_name'], 'North America')
         self.assertEqual(result['country_name'], 'United States')
@@ -214,8 +215,10 @@ class TestIPMetadataProcessor(unittest.TestCase):
         
         result = processor.build_metadata_fields(value)
         
-        # Check that mixed IP versions are properly handled
-        expected_subnets = [('164.67.0.0', 16), ('2607:f010::', 32), ('10.0.0.0', 8)]
+        # Check that mixed IP versions are properly handled. IPv4 lengths are
+        # offset by 96 for IP_TRIE storage (16 -> 112, 8 -> 104); native IPv6
+        # lengths (32) are untouched.
+        expected_subnets = [('164.67.0.0', 112), ('2607:f010::', 32), ('10.0.0.0', 104)]
         self.assertEqual(result['ip_subnet'], expected_subnets)
 
     def test_build_metadata_fields_invalid_ip_subnet_items(self):
@@ -237,8 +240,9 @@ class TestIPMetadataProcessor(unittest.TestCase):
         with patch.object(processor.logger, 'warning') as mock_warning:
             result = processor.build_metadata_fields(value)
             
-            # Should only contain valid items
-            expected_subnets = [('164.67.0.0', 16), ('10.0.0.0', 24)]
+            # Should only contain valid items. IPv4 lengths offset by 96 for
+            # IP_TRIE storage: 16 -> 112, 24 -> 120.
+            expected_subnets = [('164.67.0.0', 112), ('10.0.0.0', 120)]
             self.assertEqual(result['ip_subnet'], expected_subnets)
             
             # Should have logged warnings for invalid items
@@ -272,8 +276,9 @@ class TestIPMetadataProcessor(unittest.TestCase):
         
         result = processor.build_metadata_fields(value)
         
-        # Check required fields are set
-        self.assertEqual(result['ip_subnet'], [('192.168.1.0', 24)])
+        # Check required fields are set. IPv4 /24 offset by 96 for IP_TRIE
+        # storage -> /120.
+        self.assertEqual(result['ip_subnet'], [('192.168.1.0', 120)])
         
         # Check that optional fields are None or default values
         self.assertIsNone(result.get('city_name'))
@@ -375,7 +380,8 @@ class TestIPMetadataProcessor(unittest.TestCase):
         
         record = result[0]
         self.assertEqual(record['id'], 'ucla-ipv4-block-1')
-        self.assertEqual(record['ip_subnet'], [('164.67.0.0', 16), ('128.97.0.0', 16)])
+        # IPv4 /16 offset by 96 for IP_TRIE storage -> /112.
+        self.assertEqual(record['ip_subnet'], [('164.67.0.0', 112), ('128.97.0.0', 112)])
         self.assertEqual(record['city_name'], 'Los Angeles')
         self.assertEqual(record['continent_name'], 'North America')
         self.assertEqual(record['country_name'], 'United States')
@@ -410,7 +416,8 @@ class TestIPMetadataProcessor(unittest.TestCase):
         
         record = result[0]
         self.assertEqual(record['id'], 'minimal-ip-block')
-        self.assertEqual(record['ip_subnet'], [('10.0.0.0', 8)])
+        # IPv4 /8 offset by 96 for IP_TRIE storage -> /104.
+        self.assertEqual(record['ip_subnet'], [('10.0.0.0', 104)])
         
         # Other fields should be None or default values
         self.assertIsNone(record['city_name'])
@@ -483,7 +490,8 @@ class TestIPMetadataProcessor(unittest.TestCase):
         
         record = result[0]
         self.assertEqual(record['id'], 'test-ip-block')
-        self.assertEqual(record['ip_subnet'], [('192.168.1.0', 24), ('10.0.0.0', 8)])
+        # IPv4 lengths offset by 96 for IP_TRIE storage: 24 -> 120, 8 -> 104.
+        self.assertEqual(record['ip_subnet'], [('192.168.1.0', 120), ('10.0.0.0', 104)])
         self.assertEqual(record['city_name'], 'San Francisco')
         self.assertEqual(record['ref'], 'test-ip-block__v2')  # Should increment version
 
@@ -516,9 +524,10 @@ class TestIPMetadataProcessor(unittest.TestCase):
         
         record = result[0]
         
-        # Verify all fields are properly processed
+        # Verify all fields are properly processed. IPv4 /16 offset by 96 for
+        # IP_TRIE storage -> /112; native IPv6 /32 is untouched.
         self.assertEqual(record['id'], 'ucla-mixed-blocks')
-        self.assertEqual(record['ip_subnet'], [('164.67.0.0', 16), ('2607:f010::', 32)])
+        self.assertEqual(record['ip_subnet'], [('164.67.0.0', 112), ('2607:f010::', 32)])
         self.assertEqual(record['city_name'], 'Los Angeles')
         self.assertEqual(record['continent_name'], 'North America')
         self.assertEqual(record['country_name'], 'United States')
@@ -568,11 +577,14 @@ class TestIPMetadataProcessor(unittest.TestCase):
         """Test that IP subnet conversion handles various formats correctly."""
         processor = IPMetadataProcessor(self.mock_pipeline)
         
+        # IPv4 lengths are offset by 96 for IP_TRIE storage (see
+        # trie_prefix_length() in base.py: 24 -> 120, 8 -> 104); native IPv6
+        # lengths are untouched.
         test_cases = [
             # IPv4 subnets
             {
                 'input': [['192.168.1.0', 24], ['10.0.0.0', 8]],
-                'expected': [('192.168.1.0', 24), ('10.0.0.0', 8)]
+                'expected': [('192.168.1.0', 120), ('10.0.0.0', 104)]
             },
             # IPv6 subnets
             {
@@ -582,17 +594,17 @@ class TestIPMetadataProcessor(unittest.TestCase):
             # Mixed IPv4 and IPv6
             {
                 'input': [['192.168.1.0', 24], ['2001:db8::', 48]],
-                'expected': [('192.168.1.0', 24), ('2001:db8::', 48)]
+                'expected': [('192.168.1.0', 120), ('2001:db8::', 48)]
             },
             # String prefix lengths
             {
                 'input': [['192.168.1.0', '24'], ['10.0.0.0', '8']],
-                'expected': [('192.168.1.0', 24), ('10.0.0.0', 8)]
+                'expected': [('192.168.1.0', 120), ('10.0.0.0', 104)]
             },
             # Tuple input (instead of list)
             {
                 'input': [('192.168.1.0', 24), ('10.0.0.0', 8)],
-                'expected': [('192.168.1.0', 24), ('10.0.0.0', 8)]
+                'expected': [('192.168.1.0', 120), ('10.0.0.0', 104)]
             }
         ]
         
@@ -615,6 +627,142 @@ class TestIPMetadataProcessor(unittest.TestCase):
                 
                 record = result[0]
                 self.assertEqual(record['ip_subnet'], case['expected'])
+
+    def test_dictionary_enabled_by_default(self):
+        """Test that the ip geo dictionary (and its backing prefix MV) is enabled by default."""
+        processor = IPMetadataProcessor(self.mock_pipeline)
+
+        self.assertTrue(processor.dictionary_enabled)
+        self.assertEqual(len(processor.ch_dictionaries), 1)
+        self.assertIsInstance(processor.ch_dictionaries[0], IPGeoDictionary)
+        self.assertEqual(len(processor.materialized_views), 1)
+        self.assertIsInstance(processor.materialized_views[0], IPGeoPrefixMaterializedView)
+
+    @patch.dict(os.environ, {'CLICKHOUSE_IP_GEO_DICTIONARY_ENABLED': 'false'})
+    def test_dictionary_disabled_by_env(self):
+        """Test that the dictionary/MV can be disabled via environment variable."""
+        processor = IPMetadataProcessor(self.mock_pipeline)
+
+        self.assertFalse(processor.dictionary_enabled)
+        self.assertEqual(len(processor.ch_dictionaries), 0)
+        self.assertEqual(len(processor.materialized_views), 0)
+
+    def test_dictionary_sourced_from_prefix_mv_table(self):
+        """Test that IPGeoDictionary is sourced from the flattened prefix table, not the raw ip table."""
+        with patch.dict(os.environ, {'CLICKHOUSE_IP_METADATA_TABLE': 'custom_ip'}):
+            processor = IPMetadataProcessor(self.mock_pipeline)
+
+            mv = processor.materialized_views[0]
+            self.assertEqual(mv.source_table_name, 'custom_ip')
+            self.assertEqual(mv.table, 'meta_ip_geo_prefix')
+
+            dictionary = processor.ch_dictionaries[0]
+            self.assertEqual(dictionary.source_table_name, 'meta_ip_geo_prefix')
+
+
+class TestIPGeoPrefixMaterializedView(unittest.TestCase):
+    """Unit tests for IPGeoPrefixMaterializedView class."""
+
+    def test_init_default_values(self):
+        mv = IPGeoPrefixMaterializedView(source_table_name='meta_ip')
+
+        self.assertEqual(mv.source_table_name, 'meta_ip')
+        self.assertEqual(mv.table, 'meta_ip_geo_prefix')
+        self.assertEqual(mv.mv_name, 'meta_ip_geo_prefix_mv')
+        self.assertEqual(mv.primary_keys, ['prefix'])
+        self.assertEqual(mv.order_by, ['prefix', 'id'])
+        self.assertEqual(mv.table_engine, 'ReplacingMergeTree')
+
+    @patch.dict(os.environ, {'CLICKHOUSE_IP_GEO_PREFIX_TABLE': 'custom_prefix_table'})
+    def test_init_custom_table_name(self):
+        mv = IPGeoPrefixMaterializedView(source_table_name='meta_ip')
+        self.assertEqual(mv.table, 'custom_prefix_table')
+        self.assertEqual(mv.mv_name, 'custom_prefix_table_mv')
+
+    def test_mv_select_query_flattens_ip_subnet(self):
+        mv = IPGeoPrefixMaterializedView(source_table_name='meta_ip')
+
+        self.assertIn('ARRAY JOIN ip_subnet AS ip_subnet_entry', mv.mv_select_query)
+        self.assertIn('FROM meta_ip', mv.mv_select_query)
+        self.assertIn('AS prefix', mv.mv_select_query)
+
+    def test_create_table_command(self):
+        mv = IPGeoPrefixMaterializedView(source_table_name='meta_ip')
+        result = mv.create_table_command()
+
+        self.assertIn('CREATE TABLE IF NOT EXISTS meta_ip_geo_prefix', result)
+        self.assertIn('`prefix` String', result)
+        self.assertIn('`city_name` String', result)
+        self.assertIn('`country_name` String', result)
+        self.assertIn('`country_code` String', result)
+        self.assertIn('`latitude` Float64', result)
+        self.assertIn('`longitude` Float64', result)
+        self.assertIn('`as_id` UInt32', result)
+        self.assertIn('`as_ref` String', result)
+        self.assertIn('ENGINE = ReplacingMergeTree(insert_time)', result)
+
+    def test_mv_select_query_coalesces_nulls(self):
+        """IP_TRIE dictionaries don't support Nullable attributes, so NULLs from the
+        raw ip table must be coalesced before they reach the flattened prefix table --
+        lat/long coalesce to NaN rather than 0, since (0, 0) is a real point."""
+        mv = IPGeoPrefixMaterializedView(source_table_name='meta_ip')
+
+        self.assertIn("coalesce(city_name, '') AS city_name", mv.mv_select_query)
+        self.assertIn("coalesce(country_name, '') AS country_name", mv.mv_select_query)
+        self.assertIn("coalesce(latitude, nan) AS latitude", mv.mv_select_query)
+        self.assertIn("coalesce(longitude, nan) AS longitude", mv.mv_select_query)
+        self.assertIn("coalesce(as_id, 0) AS as_id", mv.mv_select_query)
+        self.assertIn("coalesce(as_ref, '') AS as_ref", mv.mv_select_query)
+
+    def test_create_mv_command(self):
+        mv = IPGeoPrefixMaterializedView(source_table_name='meta_ip')
+        result = mv.create_mv_command()
+
+        self.assertIn('CREATE MATERIALIZED VIEW IF NOT EXISTS meta_ip_geo_prefix_mv', result)
+        self.assertIn('TO meta_ip_geo_prefix', result)
+
+
+class TestIPGeoDictionary(unittest.TestCase):
+    """Unit tests for IPGeoDictionary class."""
+
+    def test_init_default_values(self):
+        dictionary = IPGeoDictionary('meta_ip_geo_prefix')
+
+        self.assertEqual(dictionary.source_table_name, 'meta_ip_geo_prefix')
+        self.assertEqual(dictionary.dictionary_name, 'meta_ip_geo_dict')
+        expected_columns = [
+            ['prefix', 'String'],
+            ['city_name', "String DEFAULT ''"],
+            ['continent_name', "String DEFAULT ''"],
+            ['country_name', "String DEFAULT ''"],
+            ['country_code', "String DEFAULT ''"],
+            ['country_sub_name', "String DEFAULT ''"],
+            ['country_sub_code', "String DEFAULT ''"],
+            ['latitude', "Float64 DEFAULT nan"],
+            ['longitude', "Float64 DEFAULT nan"],
+            ['as_id', "UInt32 DEFAULT 0"],
+            ['as_ref', "String DEFAULT ''"],
+        ]
+        self.assertEqual(dictionary.column_defs, expected_columns)
+        self.assertEqual(dictionary.primary_keys, ['prefix'])
+        self.assertEqual(dictionary.lifetime_min, '600')
+        self.assertEqual(dictionary.lifetime_max, '3600')
+        self.assertEqual(dictionary.layout, "IP_TRIE()")
+
+    @patch.dict(os.environ, {'CLICKHOUSE_IP_GEO_DICTIONARY_NAME': 'custom_ip_geo_dict'})
+    def test_init_with_custom_dictionary_name(self):
+        dictionary = IPGeoDictionary('meta_ip_geo_prefix')
+        self.assertEqual(dictionary.dictionary_name, 'custom_ip_geo_dict')
+
+    def test_create_dictionary_command(self):
+        dictionary = IPGeoDictionary('meta_ip_geo_prefix')
+        command = dictionary.create_dictionary_command()
+
+        self.assertIn("CREATE DICTIONARY IF NOT EXISTS meta_ip_geo_dict", command)
+        self.assertIn("`prefix` String", command)
+        self.assertIn("PRIMARY KEY (`prefix`)", command)
+        self.assertIn("SOURCE(CLICKHOUSE(TABLE 'meta_ip_geo_prefix'", command)
+        self.assertIn("LAYOUT(IP_TRIE())", command)
 
 
 if __name__ == '__main__':
